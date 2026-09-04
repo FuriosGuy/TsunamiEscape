@@ -223,16 +223,38 @@ function Invoke-RobloxEventRequest {
                 -Body $bodyJson `
                 -ErrorAction Stop
         } catch {
-            $response = $_.Exception.Response
+            # PowerShell 7 may omit Exception.Response on Linux runners.
+            $exception = $_.Exception
+            $response = Get-PropertyValue $exception "Response"
             $statusCode = 0
             if ($null -ne $response) {
-                $statusCode = [int]$response.StatusCode
+                $statusValue = Get-PropertyValue $response "StatusCode"
+                if ($null -ne $statusValue) {
+                    try {
+                        $statusCode = [int]$statusValue
+                    } catch {
+                        $statusCode = 0
+                    }
+                }
+            }
+            if ($statusCode -eq 0 -and $exception.Message -match "(?<!\d)([45]\d{2})(?!\d)") {
+                $statusCode = [int]$Matches[1]
             }
 
             $isRetryable = $statusCode -eq 429 -or $statusCode -ge 500
             if ($isRetryable -and $attempt -lt 4) {
                 $delaySeconds = [int][Math]::Pow(2, $attempt - 1)
-                $retryAfter = if ($null -ne $response) { $response.Headers["Retry-After"] } else { $null }
+                $retryAfter = $null
+                if ($null -ne $response) {
+                    $responseHeaders = Get-PropertyValue $response "Headers"
+                    if ($null -ne $responseHeaders) {
+                        try {
+                            $retryAfter = $responseHeaders["Retry-After"]
+                        } catch {
+                            $retryAfter = $null
+                        }
+                    }
+                }
                 if ($null -ne $retryAfter) {
                     $parsedRetryAfter = 0
                     if ([int]::TryParse([string]$retryAfter, [ref]$parsedRetryAfter)) {
@@ -245,9 +267,15 @@ function Invoke-RobloxEventRequest {
                 continue
             }
 
-            $errorDetail = $_.Exception.Message
-            if ($null -ne $_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
-                $errorDetail = "$errorDetail | response=$($_.ErrorDetails.Message)"
+            $errorDetail = $exception.Message
+            $errorDetails = Get-PropertyValue $_ "ErrorDetails"
+            $errorDetailsMessage = if ($null -ne $errorDetails) {
+                Get-PropertyValue $errorDetails "Message"
+            } else {
+                $null
+            }
+            if ($null -ne $errorDetailsMessage -and -not [string]::IsNullOrWhiteSpace([string]$errorDetailsMessage)) {
+                $errorDetail = "$errorDetail | response=$errorDetailsMessage"
             }
             if ($null -ne $response) {
                 try {
