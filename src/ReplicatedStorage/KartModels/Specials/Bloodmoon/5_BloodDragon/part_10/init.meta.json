@@ -1,0 +1,11 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-12.8607, 8.3498, -2.3585, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [196, 40, 28],
+    "Massless": true,
+    "Material": "CrackedLava",
+    "Size": [0.3798, 0.3798, 7.5962]
+  }
+}

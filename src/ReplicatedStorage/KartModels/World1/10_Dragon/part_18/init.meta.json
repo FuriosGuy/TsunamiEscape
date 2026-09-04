@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-31.3413, 8.76, 1.4199, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "Color": [17, 17, 17],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Universal",
+    "Shape": "Cylinder",
+    "Size": [1.5192, 0.4558, 0.4558]
+  }
+}

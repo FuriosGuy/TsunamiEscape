@@ -1,0 +1,14 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CFrame": [-175.0, 44, -87.0138, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "Color": [151, 0, 0],
+    "Locked": true,
+    "MaterialVariant": "Studs",
+    "Shape": "Wedge",
+    "Size": [120, 8, 26],
+    "TopSurface": "Smooth"
+  }
+}

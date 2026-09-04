@@ -1,0 +1,36 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/lil_quant",
+  "properties": {
+    "Attributes": {
+      "EmitDelay": 0
+    },
+    "Color": [{
+        "color": [1.0, 0.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.4157, 0.0],
+        "time": 0.5
+      }, {
+        "color": [1.0, 0.0, 0.0],
+        "time": 1.0
+      }],
+    "FlipbookMode": "OneShot",
+    "Lifetime": [3, 5],
+    "LightEmission": 1,
+    "Rate": 25,
+    "Rotation": [-360, 360],
+    "RotSpeed": [90, 90],
+    "Size": [{
+        "envelope": 1.0,
+        "time": 0.0,
+        "value": 4.0
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 2.0
+      }],
+    "Speed": [50, 50],
+    "Texture": "rbxassetid://129180698399787"
+  }
+}

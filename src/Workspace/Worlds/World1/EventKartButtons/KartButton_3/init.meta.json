@@ -1,0 +1,11 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "EventName": "Bloodmoon",
+      "KartName": "3_Moonfang",
+      "WinsRequired": 100
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

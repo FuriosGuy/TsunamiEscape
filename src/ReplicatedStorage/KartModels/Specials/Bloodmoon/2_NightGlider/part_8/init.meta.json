@@ -1,0 +1,12 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-30.8056, 8.3798, 12.6615, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [196, 40, 28],
+    "Massless": true,
+    "Material": "CrackedLava",
+    "MaterialVariant": "2022 Inlet",
+    "Size": [4.1779, 0.4406, 0.3798]
+  }
+}

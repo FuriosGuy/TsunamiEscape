@@ -1,0 +1,25 @@
+{
+  "className": "TextLabel",
+  "properties": {
+    "BackgroundColor3": [1, 1, 1],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "FontFace": {
+      "family": "rbxasset://fonts/families/FredokaOne.json",
+      "weight": "Regular",
+      "style": "Normal",
+      "cachedFaceId": null
+    },
+    "Interactable": false,
+    "Position": [[0.0181, 0.0], [0.0489, 0.0]],
+    "Size": [[0.9459, 0.0], [0.206, 0.0]],
+    "Text": "Gamepass Name",
+    "TextColor3": [1, 1, 1],
+    "TextScaled": true,
+    "TextSize": 14,
+    "TextWrapped": true,
+    "TextXAlignment": "Left",
+    "ZIndex": 5
+  }
+}

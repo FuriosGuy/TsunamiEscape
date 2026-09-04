@@ -1,0 +1,15 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CFrame": [-29.43, 10.5127, -3.9776, -0.6862, -0.726, 0.046, 0.7157, -0.6851, -0.1359, 0.1302, -0.0603, 0.9897],
+    "Color": [255, 175, 0],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Stud",
+    "Shape": "Wedge",
+    "Size": [0.2, 3.4561, 3.2329],
+    "TopSurface": "Smooth"
+  }
+}

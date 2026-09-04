@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CFrame": [-31.4349, 9.626, 7.4016, -0.9855, -0.1373, 0.0995, -0.138, 0.9904, 0.0, -0.0986, -0.0137, -0.995],
+    "Color": [17, 17, 17],
+    "Massless": true,
+    "MaterialVariant": "Studs",
+    "Size": [2.7616, 0.1483, 0.2966],
+    "TopSurface": "Smooth"
+  }
+}

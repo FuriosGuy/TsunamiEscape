@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-25.3242, 10.0295, 7.2211, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [17, 17, 17],
+    "Massless": true,
+    "Material": "DiamondPlate",
+    "MaterialVariant": "2022 Inlet",
+    "Reflectance": 1,
+    "Size": [8.4848, 0.311, 1.0692]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "className": "ImageLabel",
+  "properties": {
+    "BackgroundColor3": [1, 1, 1],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "ClipsDescendants": true,
+    "ImageContent": "rbxassetid://94133858585426",
+    "Interactable": false,
+    "Position": [[0.0395, 0.0], [0.2176, 0.0]],
+    "ScaleType": "Fit",
+    "Size": [[0.2694, 0.0], [0.2775, 0.0]],
+    "TileSize": [[0.0, 100.0], [0.0, 100.0]],
+    "ZIndex": 2
+  }
+}

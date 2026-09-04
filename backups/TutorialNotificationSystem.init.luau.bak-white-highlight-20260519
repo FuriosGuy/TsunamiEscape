@@ -1,0 +1,869 @@
+--!strict
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
+local FramerateManager = require(Modules:WaitForChild("FramerateManager"))
+
+local TutorialNotificationSystem = {}
+TutorialNotificationSystem.__index = TutorialNotificationSystem
+
+local TUTORIAL_LEVEL_TARGET = 5
+local TUTORIAL_BEAM_UPDATE_INTERVAL = 0.1
+local TUTORIAL_BEAM_TEMPLATE = script:FindFirstChild("Beam")
+local TUTORIAL_SEEN_ATTRIBUTE = "TutorialSeen"
+local TUTORIAL_COMPLETED_ATTRIBUTE = "TutorialCompleted"
+local TUTORIAL_PROGRESS_SEEN = "Seen"
+local TUTORIAL_PROGRESS_COMPLETED = "Completed"
+local TUTORIAL_MESSAGE_STEP_1 = "Hop on a treadmill and reach Level 5!"
+local TUTORIAL_MESSAGE_STEP_2 = "Floor it to the finish and grab your first win!"
+local TUTORIAL_FINAL_MESSAGE =
+	"Congratulations! You completed the tutorial! You can also buy trails, join the group and claim rewards, or buy boosts to progress faster!"
+local TUTORIAL_HIGHLIGHT_FILL_TRANSPARENCY = 0.85
+local TUTORIAL_HIGHLIGHT_OUTLINE_TRANSPARENCY = 0
+local TUTORIAL_HIGHLIGHT_COLORS = table.freeze({
+	Color3.fromRGB(88, 216, 255),
+	Color3.fromRGB(255, 230, 0),
+	Color3.fromRGB(0, 255, 80),
+})
+
+type ControllerOptions = {
+	player: Player,
+	sessionMaid: any,
+	visualFunctions: any,
+	soundService: any,
+	debugModule: any,
+	tweenGuiFadeIn: (GuiObject, number) -> (),
+	tweenGuiFadeOut: (GuiObject, number) -> (),
+	spawnSessionTask: (() -> ()) -> thread,
+	isCleanedUp: () -> boolean,
+	getNumericAttribute: (Instance?, string) -> number?,
+	playRewardCelebration: () -> (),
+}
+
+function TutorialNotificationSystem.new(options: ControllerOptions)
+	local self = setmetatable({}, TutorialNotificationSystem)
+
+	self.player = options.player
+	self.sessionMaid = options.sessionMaid
+	self.visualFunctions = options.visualFunctions
+	self.soundService = options.soundService
+	self.debugModule = options.debugModule
+	self.tweenGuiFadeIn = options.tweenGuiFadeIn
+	self.tweenGuiFadeOut = options.tweenGuiFadeOut
+	self.spawnSessionTask = options.spawnSessionTask
+	self.isCleanedUp = options.isCleanedUp
+	self.getNumericAttribute = options.getNumericAttribute
+	self.playRewardCelebration = options.playRewardCelebration
+
+	local tutorialCompleted = self.player:GetAttribute(TUTORIAL_COMPLETED_ATTRIBUTE) == true
+	local tutorialSeen = self.player:GetAttribute(TUTORIAL_SEEN_ATTRIBUTE) == true
+	self.tutorialStep = 1
+	-- Resume tutorial across rejoins until fully completed.
+	self.tutorialActive = not tutorialCompleted
+	self.tutorialHasUsedTreadmill = self.player:GetAttribute("Treadmill_Active") == true
+	self.tutorialLastMessageKey = nil
+	self.tutorialFinalizing = false
+	self.tutorialNotificationLock = self.tutorialActive
+	self.tutorialCompletionThread = nil
+	self.tutorialSeenSent = tutorialSeen
+	self.tutorialCompletedSent = tutorialCompleted
+
+	self.notificationFrame = nil :: Frame?
+	self.notificationLabel = nil :: TextLabel?
+	self.tutorialLabel = nil :: TextLabel?
+	self.skipButtonFrame = nil :: GuiObject?
+	self.skipButton = nil :: GuiButton?
+	self.boundSkipButton = nil :: GuiButton?
+
+	self.tutorialBeam = nil :: Beam?
+	self.tutorialBeamAttachment0 = nil :: Attachment?
+	self.tutorialBeamAttachment1 = nil :: Attachment?
+	self.tutorialCurrentTargetPart = nil :: BasePart?
+	self.tutorialHighlight = nil :: Highlight?
+	self.tutorialHighlightAdornee = nil :: Instance?
+	self.tutorialBeamUpdateAccumulator = 0
+	self.tutorialShowKartBeamUntil = 0
+	self.notificationTransparencyDefaults = {} :: { [Instance]: { [string]: number } }
+	self.notificationDefaultsFrame = nil :: Instance?
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	local tutorialProgressRemote = if remotesFolder then remotesFolder:FindFirstChild("TutorialProgress") else nil
+	self.tutorialProgressRemote = if tutorialProgressRemote and tutorialProgressRemote:IsA("RemoteEvent")
+		then tutorialProgressRemote
+		else nil
+
+	return self
+end
+
+function TutorialNotificationSystem:SetSkipButtonVisible(isVisible: boolean)
+	if self.skipButtonFrame then
+		self.skipButtonFrame.Visible = isVisible
+	end
+
+	if self.skipButton then
+		self.skipButton.Active = isVisible
+		self.skipButton.Selectable = isVisible
+		self.skipButton.AutoButtonColor = isVisible
+	end
+end
+
+function TutorialNotificationSystem:ClearTutorialOnlyControls()
+	if self.tutorialLabel then
+		self.tutorialLabel.Text = ""
+		self.tutorialLabel.Visible = false
+	end
+
+	self:SetSkipButtonVisible(false)
+end
+
+function TutorialNotificationSystem:RefreshNotificationReferences()
+	local frame = self.visualFunctions.HUD.NotificationFrame
+	local label = self.visualFunctions.Labels.NotificationTextLabel
+	local tutorialLabelInstance = if frame then frame:FindFirstChild("TutorialLabel", true) else nil
+	local skipFrame = if frame then frame:FindFirstChild("SkipButtonFrame", true) else nil
+	local skipButton = if skipFrame and skipFrame:IsA("GuiObject")
+		then skipFrame:FindFirstChildWhichIsA("GuiButton", true)
+		else nil
+
+	self.notificationFrame = if frame and frame:IsA("Frame") then frame else nil
+	self.notificationLabel = if label and label:IsA("TextLabel") then label else nil
+	self.tutorialLabel = if tutorialLabelInstance and tutorialLabelInstance:IsA("TextLabel")
+		then tutorialLabelInstance
+		else nil
+	self.skipButtonFrame = if skipFrame and skipFrame:IsA("GuiObject") then skipFrame else nil
+	self.skipButton = if skipButton and skipButton:IsA("GuiButton") then skipButton else nil
+	self:ClearTutorialOnlyControls()
+	self:CaptureNotificationTransparencyDefaults()
+	self:BindSkipButton()
+end
+
+function TutorialNotificationSystem:CaptureNotificationTransparencyDefaults()
+	local frame = self.notificationFrame
+	if not frame then
+		return
+	end
+
+	if self.notificationDefaultsFrame == frame then
+		return
+	end
+
+	self.notificationDefaultsFrame = frame
+	self.notificationTransparencyDefaults = {}
+
+	local function captureForInstance(instance: Instance)
+		local defaults = {} :: { [string]: number }
+		if instance:IsA("Frame") or instance:IsA("ScrollingFrame") then
+			defaults.BackgroundTransparency = instance.BackgroundTransparency
+		elseif instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+			defaults.TextTransparency = instance.TextTransparency
+		elseif instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+			defaults.BackgroundTransparency = instance.BackgroundTransparency
+			defaults.ImageTransparency = instance.ImageTransparency
+		elseif instance:IsA("UIStroke") then
+			defaults.Transparency = instance.Transparency
+		end
+
+		if next(defaults) ~= nil then
+			self.notificationTransparencyDefaults[instance] = defaults
+		end
+	end
+
+	captureForInstance(frame)
+	for _, descendant in ipairs(frame:GetDescendants()) do
+		captureForInstance(descendant)
+	end
+end
+
+function TutorialNotificationSystem:RestoreNotificationTransparencyDefaults()
+	for instance, defaults in pairs(self.notificationTransparencyDefaults) do
+		if not instance.Parent then
+			continue
+		end
+
+		for propertyName, value in pairs(defaults) do
+			pcall(function()
+				(instance :: any)[propertyName] = value
+			end)
+		end
+	end
+end
+
+function TutorialNotificationSystem:NotifyTutorialProgress(state: string)
+	if state ~= TUTORIAL_PROGRESS_SEEN and state ~= TUTORIAL_PROGRESS_COMPLETED then
+		return
+	end
+
+	if state == TUTORIAL_PROGRESS_SEEN then
+		if self.tutorialSeenSent then
+			return
+		end
+		self.tutorialSeenSent = true
+		self.player:SetAttribute(TUTORIAL_SEEN_ATTRIBUTE, true)
+	else
+		if self.tutorialCompletedSent then
+			return
+		end
+		self.tutorialCompletedSent = true
+		self.tutorialSeenSent = true
+		self.player:SetAttribute(TUTORIAL_SEEN_ATTRIBUTE, true)
+		self.player:SetAttribute(TUTORIAL_COMPLETED_ATTRIBUTE, true)
+	end
+
+	local remote = self.tutorialProgressRemote
+	if not remote then
+		return
+	end
+
+	local ok, err = pcall(function()
+		remote:FireServer(state)
+	end)
+	if not ok then
+		self.debugModule.debugWarn(
+			string.format("Failed to send tutorial progress '%s': %s", state, tostring(err)),
+			"TutorialNotificationSystem"
+		)
+	end
+end
+
+function TutorialNotificationSystem:BindSkipButton()
+	if not self.skipButton or self.boundSkipButton == self.skipButton then
+		return
+	end
+
+	self.boundSkipButton = self.skipButton
+	self.sessionMaid:GiveTask(self.skipButton.MouseButton1Click:Connect(function()
+		if not self.tutorialActive or self.tutorialFinalizing then
+			return
+		end
+
+		self.soundService.PlayGuiSound("Click")
+		self:StartTutorialFinalStep("skipButton")
+	end))
+end
+
+function TutorialNotificationSystem:ShowNonTutorialNotification(
+	message: string,
+	textColor: Color3?,
+	gradientBottomColor: Color3?,
+	notificationStyle: string?
+)
+	if self.tutorialNotificationLock then
+		return
+	end
+
+	local function setGradientsEnabledRecursive(root: Instance?, isEnabled: boolean)
+		if not root then
+			return
+		end
+
+		local gradient = if root:IsA("UIGradient") then root else root:FindFirstChildWhichIsA("UIGradient", true)
+		if gradient then
+			gradient.Enabled = isEnabled
+		end
+
+		for _, descendant in ipairs(root:GetDescendants()) do
+			if descendant:IsA("UIGradient") then
+				descendant.Enabled = isEnabled
+			end
+		end
+	end
+
+	setGradientsEnabledRecursive(self.notificationLabel, true)
+	setGradientsEnabledRecursive(self.tutorialLabel, true)
+	setGradientsEnabledRecursive(self.skipButton, true)
+
+	self:ClearTutorialOnlyControls()
+	if notificationStyle == "QuickFade" then
+		self.visualFunctions.ShowQuickFadeNotification(message, textColor, gradientBottomColor)
+	else
+		self.visualFunctions.ShowNotification(message, textColor, gradientBottomColor)
+	end
+
+	-- Generic notification tweens may touch descendants, so re-hide tutorial-only labels after handoff.
+	self:ClearTutorialOnlyControls()
+end
+
+function TutorialNotificationSystem:GetCurrentWorldInstance(): Instance?
+	local currentWorld = self.player:GetAttribute("Current_World")
+	if typeof(currentWorld) ~= "string" or currentWorld == "" then
+		return nil
+	end
+
+	local worldsFolder = Workspace:FindFirstChild("Worlds")
+	if not worldsFolder then
+		return nil
+	end
+
+	return worldsFolder:FindFirstChild(currentWorld)
+end
+
+function TutorialNotificationSystem:GetPlayerRootPart(): BasePart?
+	local character = self.player.Character
+	if not character then
+		return nil
+	end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart
+	end
+
+	return nil
+end
+
+function TutorialNotificationSystem:GetTutorialKartTwoButtonData(): (number, BasePart?)
+	local defaultWinsRequired = 15
+	local world = self:GetCurrentWorldInstance()
+	if not world then
+		return defaultWinsRequired, nil
+	end
+
+	local kartButtonsFolder = world:FindFirstChild("KartButtons")
+	if not kartButtonsFolder then
+		return defaultWinsRequired, nil
+	end
+
+	local kartButtonTwo: Model? = nil
+	for _, descendant in ipairs(kartButtonsFolder:GetDescendants()) do
+		if not descendant:IsA("Model") then
+			continue
+		end
+
+		local kartNumber = self.getNumericAttribute(descendant, "KartNumber")
+		if kartNumber == 2 then
+			kartButtonTwo = descendant
+			break
+		end
+
+		if descendant.Name == "KartButton_2" then
+			kartButtonTwo = descendant
+		end
+	end
+
+	if not kartButtonTwo then
+		return defaultWinsRequired, nil
+	end
+
+	local winsRequired = self.getNumericAttribute(kartButtonTwo, "WinsRequired") or defaultWinsRequired
+	local buttonPart = kartButtonTwo:FindFirstChild("Button", true)
+	local typedButtonPart = if buttonPart and buttonPart:IsA("BasePart") then buttonPart else nil
+	return math.max(1, math.floor(winsRequired)), typedButtonPart
+end
+
+function TutorialNotificationSystem:GetTutorialKartTwoName(): string?
+	local world = self:GetCurrentWorldInstance()
+	if not world then
+		return nil
+	end
+
+	local kartModelsFolder = ReplicatedStorage:FindFirstChild("KartModels")
+	if not kartModelsFolder then
+		return nil
+	end
+
+	local worldKartFolder = kartModelsFolder:FindFirstChild(world.Name)
+	if not worldKartFolder then
+		return nil
+	end
+
+	for _, child in ipairs(worldKartFolder:GetChildren()) do
+		if child:IsA("Model") and string.match(child.Name, "^2_") then
+			return child.Name
+		end
+	end
+
+	return nil
+end
+
+function TutorialNotificationSystem:OwnsTutorialKartTwo(): boolean
+	local ownedKarts = PlayerHandler.GetOwnedKarts(self.player)
+	local kartTwoName = self:GetTutorialKartTwoName()
+	if typeof(kartTwoName) == "string" and kartTwoName ~= "" and ownedKarts[kartTwoName] == true then
+		return true
+	end
+
+	for kartName, isOwned in pairs(ownedKarts) do
+		if isOwned and string.match(kartName, "^2_") then
+			return true
+		end
+	end
+
+	return false
+end
+
+function TutorialNotificationSystem:FindNearestTreadmillPart(world: Instance?, rootPart: BasePart): BasePart?
+	if not world then
+		return nil
+	end
+
+	local treadmillsFolder = world:FindFirstChild("Treadmills")
+	if not treadmillsFolder then
+		return nil
+	end
+
+	local nearestPart: BasePart? = nil
+	local shortestDistance = math.huge
+	for _, treadmill in ipairs(treadmillsFolder:GetChildren()) do
+		if not treadmill:IsA("Model") then
+			continue
+		end
+
+		local xpMultiplier = self.getNumericAttribute(treadmill, "XP_Multiplier")
+		if xpMultiplier ~= 1 then
+			continue
+		end
+
+		local hasGainInterval = self.getNumericAttribute(treadmill, "XPGainInterval") ~= nil
+		if not hasGainInterval then
+			continue
+		end
+
+		local touchPart = treadmill:FindFirstChild("TouchPart", true)
+		local targetPart = if touchPart and touchPart:IsA("BasePart")
+			then touchPart
+			else treadmill:FindFirstChildWhichIsA("BasePart", true)
+		if not targetPart or not targetPart:IsA("BasePart") then
+			continue
+		end
+
+		local distance = (targetPart.Position - rootPart.Position).Magnitude
+		if distance < shortestDistance then
+			shortestDistance = distance
+			nearestPart = targetPart
+		end
+	end
+
+	return nearestPart
+end
+
+function TutorialNotificationSystem:FindNearestWinButtonPart(world: Instance?, rootPart: BasePart): BasePart?
+	if not world then
+		return nil
+	end
+
+	local winButtonsFolder = world:FindFirstChild("WinButtons")
+	if not winButtonsFolder then
+		return nil
+	end
+
+	local currentStage = self.player:GetAttribute("CurrentStage")
+	local targetStage = if typeof(currentStage) == "number" then math.max(1, math.floor(currentStage)) else 1
+	local exactButton = winButtonsFolder:FindFirstChild(string.format("WinButton_%d", targetStage))
+	if exactButton and exactButton:IsA("Model") then
+		local exactButtonPart = exactButton:FindFirstChild("Button", true)
+		if exactButtonPart and exactButtonPart:IsA("BasePart") then
+			return exactButtonPart
+		end
+	end
+
+	local nearestPart: BasePart? = nil
+	local shortestDistance = math.huge
+	for _, descendant in ipairs(winButtonsFolder:GetDescendants()) do
+		if not descendant:IsA("BasePart") or descendant.Name ~= "Button" then
+			continue
+		end
+
+		local buttonModel = descendant:FindFirstAncestorWhichIsA("Model")
+		if not buttonModel or not string.match(buttonModel.Name, "^WinButton_%d+$") then
+			continue
+		end
+
+		local distance = (descendant.Position - rootPart.Position).Magnitude
+		if distance < shortestDistance then
+			shortestDistance = distance
+			nearestPart = descendant
+		end
+	end
+
+	return nearestPart
+end
+
+function TutorialNotificationSystem:ShowTutorialNotification(message: string, showSkipButton: boolean, tutorialHeader: string?)
+	local frame = self.notificationFrame
+	local label = self.notificationLabel
+	if not frame or not label then
+		return
+	end
+	self:RestoreNotificationTransparencyDefaults()
+
+	local function setTextControlTutorialStyle(root: Instance?)
+		if not root then
+			return
+		end
+
+		local function applyToInstance(instance: Instance)
+			if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+				instance.BackgroundTransparency = 1
+				instance.TextColor3 = Color3.fromRGB(255, 255, 255)
+			elseif instance:IsA("UIGradient") then
+				instance.Enabled = false
+			end
+		end
+
+		applyToInstance(root)
+		for _, descendant in ipairs(root:GetDescendants()) do
+			applyToInstance(descendant)
+		end
+	end
+
+	label.Text = message
+	setTextControlTutorialStyle(label)
+
+	if self.tutorialLabel then
+		self.tutorialLabel.Text = tutorialHeader or ""
+		self.tutorialLabel.Visible = tutorialHeader ~= nil and tutorialHeader ~= ""
+		setTextControlTutorialStyle(self.tutorialLabel)
+	end
+
+	if self.skipButton then
+		setTextControlTutorialStyle(self.skipButton)
+	end
+
+	frame.Position = UDim2.new(0.214, 0, 0.107, 0)
+	frame.Visible = true
+
+	-- Re-assert after tween start to avoid stale visual state from previous notifications.
+	setTextControlTutorialStyle(label)
+	if self.tutorialLabel then
+		setTextControlTutorialStyle(self.tutorialLabel)
+	end
+	if self.skipButton then
+		setTextControlTutorialStyle(self.skipButton)
+	end
+
+	self:SetSkipButtonVisible(showSkipButton)
+end
+
+function TutorialNotificationSystem:ShowTutorialStepMessage(
+	message: string,
+	showSkipButton: boolean,
+	stepNumber: number
+)
+	local tutorialHeader = string.format("Tutorial %d/3", math.clamp(stepNumber, 1, 3))
+	local messageKey = string.format("%s|%s|%s", message, tostring(showSkipButton), tutorialHeader)
+	if self.tutorialLastMessageKey == messageKey then
+		return
+	end
+
+	self.tutorialLastMessageKey = messageKey
+	self:ShowTutorialNotification(message, showSkipButton, tutorialHeader)
+end
+
+function TutorialNotificationSystem:CleanupBeamAttachments()
+	if self.tutorialBeamAttachment0 then
+		self.tutorialBeamAttachment0:Destroy()
+		self.tutorialBeamAttachment0 = nil
+	end
+
+	if self.tutorialBeamAttachment1 then
+		self.tutorialBeamAttachment1:Destroy()
+		self.tutorialBeamAttachment1 = nil
+	end
+
+	self.tutorialCurrentTargetPart = nil
+end
+
+function TutorialNotificationSystem:CleanupHighlight()
+	if self.tutorialHighlight then
+		self.tutorialHighlight:Destroy()
+		self.tutorialHighlight = nil
+	end
+
+	self.tutorialHighlightAdornee = nil
+end
+
+function TutorialNotificationSystem:CleanupBeam()
+	self:CleanupBeamAttachments()
+	self:CleanupHighlight()
+	if self.tutorialBeam then
+		self.tutorialBeam:Destroy()
+		self.tutorialBeam = nil
+	end
+end
+
+function TutorialNotificationSystem:GetHighlightAdornee(targetPart: BasePart): Instance
+	local model = targetPart:FindFirstAncestorWhichIsA("Model")
+	if model and model ~= self.player.Character then
+		return model
+	end
+
+	return targetPart
+end
+
+function TutorialNotificationSystem:UpdateTutorialHighlight(targetPart: BasePart?)
+	if not targetPart or not targetPart.Parent then
+		self:CleanupHighlight()
+		return
+	end
+
+	local adornee = self:GetHighlightAdornee(targetPart)
+	if not self.tutorialHighlight then
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "TutorialTargetHighlight"
+		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+		highlight.FillTransparency = TUTORIAL_HIGHLIGHT_FILL_TRANSPARENCY
+		highlight.OutlineTransparency = TUTORIAL_HIGHLIGHT_OUTLINE_TRANSPARENCY
+		highlight.Parent = Workspace
+		self.tutorialHighlight = highlight
+	end
+
+	if self.tutorialHighlightAdornee ~= adornee then
+		self.tutorialHighlight.Adornee = adornee
+		self.tutorialHighlightAdornee = adornee
+	end
+
+	local color = TUTORIAL_HIGHLIGHT_COLORS[math.clamp(self.tutorialStep, 1, #TUTORIAL_HIGHLIGHT_COLORS)]
+	self.tutorialHighlight.FillColor = color
+	self.tutorialHighlight.OutlineColor = color
+	self.tutorialHighlight.Enabled = true
+end
+
+function TutorialNotificationSystem:UpdateBeamTarget(targetPart: BasePart?)
+	local rootPart = self:GetPlayerRootPart()
+	if not rootPart or not targetPart or not targetPart.Parent then
+		self:CleanupBeamAttachments()
+		self:CleanupHighlight()
+		if self.tutorialBeam then
+			self.tutorialBeam.Enabled = false
+		end
+		return
+	end
+
+	if not self.tutorialBeam then
+		if TUTORIAL_BEAM_TEMPLATE and TUTORIAL_BEAM_TEMPLATE:IsA("Beam") then
+			self.tutorialBeam = TUTORIAL_BEAM_TEMPLATE:Clone()
+		else
+			self.tutorialBeam = Instance.new("Beam")
+			self.tutorialBeam.Name = "TutorialGuideBeam"
+		end
+	end
+
+	if self.tutorialCurrentTargetPart ~= targetPart then
+		if self.tutorialBeamAttachment1 then
+			self.tutorialBeamAttachment1:Destroy()
+			self.tutorialBeamAttachment1 = nil
+		end
+		self.tutorialCurrentTargetPart = targetPart
+	end
+
+	if not self.tutorialBeamAttachment0 or self.tutorialBeamAttachment0.Parent ~= rootPart then
+		if self.tutorialBeamAttachment0 then
+			self.tutorialBeamAttachment0:Destroy()
+		end
+		self.tutorialBeamAttachment0 = Instance.new("Attachment")
+		self.tutorialBeamAttachment0.Name = "TutorialGuideBeamAttachment0"
+		self.tutorialBeamAttachment0.Position = Vector3.new(0, 0, -0.5)
+		self.tutorialBeamAttachment0.Parent = rootPart
+	end
+
+	if not self.tutorialBeamAttachment1 or self.tutorialBeamAttachment1.Parent ~= targetPart then
+		if self.tutorialBeamAttachment1 then
+			self.tutorialBeamAttachment1:Destroy()
+		end
+		self.tutorialBeamAttachment1 = Instance.new("Attachment")
+		self.tutorialBeamAttachment1.Name = "TutorialGuideBeamAttachment1"
+		self.tutorialBeamAttachment1.Parent = targetPart
+	end
+
+	self.tutorialBeam.Attachment0 = self.tutorialBeamAttachment0
+	self.tutorialBeam.Attachment1 = self.tutorialBeamAttachment1
+	self.tutorialBeam.Parent = rootPart
+	self.tutorialBeam.Enabled = true
+	self:UpdateTutorialHighlight(targetPart)
+end
+
+function TutorialNotificationSystem:ResolveBeamTarget(): BasePart?
+	if not self.tutorialActive then
+		return nil
+	end
+
+	local rootPart = self:GetPlayerRootPart()
+	if not rootPart then
+		return nil
+	end
+
+	local world = self:GetCurrentWorldInstance()
+	if self.tutorialFinalizing then
+		return nil
+	end
+
+	if self.tutorialStep == 1 then
+		if self.player:GetAttribute("Treadmill_Active") == true then
+			return nil
+		end
+		return self:FindNearestTreadmillPart(world, rootPart)
+	end
+
+	if self.tutorialStep == 2 then
+		return self:FindNearestWinButtonPart(world, rootPart)
+	end
+
+	if self.tutorialStep == 3 then
+		local currentWins = self.player:GetAttribute("WinCount") or 0
+		local winsRequired, kartButtonPart = self:GetTutorialKartTwoButtonData()
+		if currentWins >= winsRequired or self:OwnsTutorialKartTwo() then
+			return kartButtonPart
+		end
+	end
+
+	return nil
+end
+
+function TutorialNotificationSystem:StartTutorialFinalStep(reason: string)
+	if not self.tutorialActive or self.tutorialFinalizing then
+		return
+	end
+
+	self.tutorialFinalizing = true
+	self.tutorialStep = 4
+	self.tutorialNotificationLock = true
+	self.tutorialShowKartBeamUntil = 0
+	self.tutorialLastMessageKey = nil
+	self:NotifyTutorialProgress(TUTORIAL_PROGRESS_COMPLETED)
+	self:ShowTutorialNotification(TUTORIAL_FINAL_MESSAGE, false, "Tutorial Completed")
+	self.playRewardCelebration()
+
+	self.debugModule.debugInfo("Tutorial final step started | reason=" .. reason, "TutorialNotificationSystem")
+
+	if self.tutorialCompletionThread then
+		task.cancel(self.tutorialCompletionThread)
+		self.tutorialCompletionThread = nil
+	end
+
+	self.tutorialCompletionThread = self.spawnSessionTask(function()
+		task.wait(3)
+		if self.isCleanedUp() then
+			return
+		end
+
+		local frame = self.notificationFrame
+		if frame then
+			self.tweenGuiFadeOut(frame, 0.35)
+			task.wait(0.35)
+			if frame.Parent then
+				frame.Visible = false
+			end
+		end
+		self:RestoreNotificationTransparencyDefaults()
+
+		self:ClearTutorialOnlyControls()
+		self.tutorialActive = false
+		self.tutorialFinalizing = false
+		self.tutorialNotificationLock = false
+		self.tutorialShowKartBeamUntil = 0
+		self:CleanupBeam()
+		self.player:SetAttribute(TUTORIAL_COMPLETED_ATTRIBUTE, true)
+	end)
+end
+
+function TutorialNotificationSystem:EvaluateTutorialStep(): (number, number, boolean)
+	local currentLevel = self.player:GetAttribute("CurrentLevel") or 1
+	local currentWins = self.player:GetAttribute("WinCount") or 0
+	local winsRequired, _ = self:GetTutorialKartTwoButtonData()
+	local hasLevelTarget = currentLevel >= TUTORIAL_LEVEL_TARGET
+	local hasFirstWin = currentWins >= 1
+	local ownsKartTwo = self:OwnsTutorialKartTwo()
+
+	if hasLevelTarget and hasFirstWin and ownsKartTwo then
+		return 4, winsRequired, true
+	end
+
+	if not hasLevelTarget then
+		return 1, winsRequired, false
+	end
+
+	if not hasFirstWin then
+		return 2, winsRequired, false
+	end
+
+	return 3, winsRequired, false
+end
+
+function TutorialNotificationSystem:OnProgressChanged()
+	if not self.tutorialActive then
+		self.tutorialNotificationLock = false
+		self:SetSkipButtonVisible(false)
+		return
+	end
+
+	self.tutorialNotificationLock = true
+	self:BindSkipButton()
+
+	if self.tutorialFinalizing then
+		return
+	end
+
+	if self.player:GetAttribute("Treadmill_Active") == true then
+		self.tutorialHasUsedTreadmill = true
+	end
+
+	local targetStep, winsRequired, shouldComplete = self:EvaluateTutorialStep()
+	if shouldComplete then
+		self:StartTutorialFinalStep("progressRequirementsSatisfied")
+		return
+	end
+
+	if self.tutorialStep ~= targetStep then
+		self.tutorialStep = targetStep
+		self.tutorialLastMessageKey = nil
+	end
+
+	if self.tutorialStep == 1 then
+		self:ShowTutorialStepMessage(TUTORIAL_MESSAGE_STEP_1, true, 1)
+		return
+	end
+
+	if self.tutorialStep == 2 then
+		self:ShowTutorialStepMessage(TUTORIAL_MESSAGE_STEP_2, true, 2)
+		return
+	end
+
+	if self.tutorialStep == 3 then
+		local currentWins = self.player:GetAttribute("WinCount") or 0
+		local stepMessage = if currentWins < winsRequired
+			then string.format("Collect %d total wins to unlock Kart #2!", winsRequired)
+			else "You have enough wins! Buy Kart #2 to finish!"
+		self:ShowTutorialStepMessage(stepMessage, true, 3)
+	end
+end
+
+function TutorialNotificationSystem:OnHeartbeat(dt: number)
+	if not self.tutorialActive then
+		return
+	end
+
+	self.tutorialBeamUpdateAccumulator += dt
+	if self.tutorialBeamUpdateAccumulator < TUTORIAL_BEAM_UPDATE_INTERVAL then
+		return
+	end
+	self.tutorialBeamUpdateAccumulator = 0
+	self:UpdateBeamTarget(self:ResolveBeamTarget())
+end
+
+function TutorialNotificationSystem:Start()
+	self:RefreshNotificationReferences()
+	if not self.tutorialActive then
+		self.tutorialNotificationLock = false
+		self:SetSkipButtonVisible(false)
+		return
+	end
+
+	self:NotifyTutorialProgress(TUTORIAL_PROGRESS_SEEN)
+	self.sessionMaid:GiveTask(function()
+		self:CleanupBeam()
+	end)
+	if not FramerateManager:IsRunning() then
+		FramerateManager:Start()
+	end
+	local tutorialUpdateCallback = function(dt: number)
+		self:OnHeartbeat(dt)
+	end
+	FramerateManager:BindToUpdate(tutorialUpdateCallback)
+	self.sessionMaid:GiveTask(function()
+		FramerateManager:UnbindFromUpdate(tutorialUpdateCallback)
+	end)
+	self:OnProgressChanged()
+end
+
+return TutorialNotificationSystem

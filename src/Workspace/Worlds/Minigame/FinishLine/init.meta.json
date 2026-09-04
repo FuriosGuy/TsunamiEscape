@@ -1,0 +1,15 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CanCollide": false,
+    "CanQuery": false,
+    "CastShadow": false,
+    "CFrame": [-4091.0098, 59.5, -11358.5, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Material": "SmoothPlastic",
+    "Size": [185.9805, 104, 2.9991],
+    "TopSurface": "Smooth",
+    "Transparency": 1
+  }
+}

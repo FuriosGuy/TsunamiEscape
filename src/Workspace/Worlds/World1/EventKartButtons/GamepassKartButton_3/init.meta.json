@@ -1,0 +1,11 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "EventName": "Bloodmoon",
+      "KartName": "6_SiegeTank",
+      "ProductKey": "SiegeTank"
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

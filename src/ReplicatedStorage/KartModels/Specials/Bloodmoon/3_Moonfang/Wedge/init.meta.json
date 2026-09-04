@@ -1,0 +1,10 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "BottomSurface": "Smooth",
+    "CFrame": [-30.8361, 10.254, 3.6296, 1.0, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [196, 40, 28],
+    "Material": "CrackedLava",
+    "Size": [0.9, 1.0417, 0.7065]
+  }
+}

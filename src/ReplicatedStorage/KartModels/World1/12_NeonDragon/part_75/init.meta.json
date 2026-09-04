@@ -1,0 +1,14 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-14.664, 11.5089, -2.2439, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "Color": [17, 17, 17],
+    "InitialSize": [16.2064, 5.5487, 6.9534],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "MeshContent": "rbxassetid://116947047135463",
+    "Size": [16.2064, 5.5487, 6.9534]
+  }
+}

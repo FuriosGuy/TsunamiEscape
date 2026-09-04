@@ -1,0 +1,42 @@
+{
+  "className": "Folder",
+  "properties": {
+    "Attributes": {
+      "Ambient": {
+        "Color3": [
+          1,
+          0.6745,
+          0.6745
+        ]
+      },
+      "Brightness": 2,
+      "ClockTime": 0,
+      "ColorShift_Bottom": {
+        "Color3": [
+          0,
+          0,
+          0
+        ]
+      },
+      "ColorShift_Top": {
+        "Color3": [
+          1,
+          0.8863,
+          0.8863
+        ]
+      },
+      "EnvironmentDiffuseScale": 1,
+      "EnvironmentSpecularScale": 1,
+      "GlobalShadows": true,
+      "GeographicLatitude": 0,
+      "OutdoorAmbient": {
+        "Color3": [
+          1,
+          0.8706,
+          0.8706
+        ]
+      }
+    }
+  },
+  "keepUnknowns": true
+}

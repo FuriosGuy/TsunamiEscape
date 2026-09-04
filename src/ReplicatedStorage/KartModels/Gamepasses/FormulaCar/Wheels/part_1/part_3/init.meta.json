@@ -1,0 +1,12 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-33.6902, 9.6639, 7.215, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "Color": [117, 0, 0],
+    "Massless": true,
+    "MaterialVariant": "Studs",
+    "Size": [1.6281, 3.0213, 3.0213],
+    "UsePartColor": true
+  }
+}

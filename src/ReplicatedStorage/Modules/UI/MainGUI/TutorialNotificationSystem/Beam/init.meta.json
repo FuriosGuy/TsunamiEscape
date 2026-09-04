@@ -1,0 +1,23 @@
+{
+  "className": "Beam",
+  "properties": {
+    "FaceCamera": true,
+    "Segments": 100,
+    "Texture": "rbxassetid://92134549832328",
+    "TextureLength": 2,
+    "TextureMode": "Static",
+    "TextureSpeed": 4,
+    "Transparency": [{
+        "time": 0.0,
+        "value": 0.0,
+        "envelope": 0.0
+      }, {
+        "time": 1.0,
+        "value": 0.0,
+        "envelope": 0.0
+      }],
+    "Width0": 2,
+    "Width1": 2,
+    "ZOffset": 1
+  }
+}

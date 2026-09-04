@@ -1,0 +1,11 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-26.8705, 11.8941, 31.733, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [248, 248, 248],
+    "Massless": true,
+    "Material": "Neon",
+    "Size": [0.4144, 0.4144, 0.0691]
+  }
+}

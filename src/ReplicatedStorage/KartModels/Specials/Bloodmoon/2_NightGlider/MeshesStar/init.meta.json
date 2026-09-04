@@ -1,0 +1,13 @@
+{
+  "className": "MeshPart",
+  "originalName": "Meshes/Star",
+  "properties": {
+    "CFrame": [-27.4698, 9.3722, 9.1645, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "Color": [163, 75, 75],
+    "InitialSize": [12.2228, 12.2228, 2],
+    "Material": "Neon",
+    "MeshContent": "rbxassetid://16418006315",
+    "RenderFidelity": "Precise",
+    "Size": [0.4326, 0.4326, 0.1121]
+  }
+}

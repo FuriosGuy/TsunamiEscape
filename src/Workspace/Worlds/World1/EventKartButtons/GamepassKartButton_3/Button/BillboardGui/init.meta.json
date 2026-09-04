@@ -1,0 +1,10 @@
+{
+  "className": "BillboardGui",
+  "properties": {
+    "Active": true,
+    "DistanceUpperLimit": -1.4324,
+    "ExtentsOffsetWorldSpace": [0, 90, 0],
+    "Size": [[15.0, 0.0], [6.0, 0.0]],
+    "ZIndexBehavior": "Sibling"
+  }
+}

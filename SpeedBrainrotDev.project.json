@@ -1,0 +1,57 @@
+{
+  "ignoreGlobs": ["**\\*.spec.lua", "**\\*.spec.luau", "**\\__tests__\\**"],
+  "name": "SpeedBrainrotDev",
+  "tree": {
+    "$className": "DataModel",
+    "Chat": {
+      "$path": "src/Chat"
+    },
+    "Lighting": {
+      "$path": "src/Lighting"
+    },
+    "Players": {
+      "$path": "src/Players"
+    },
+    "ReplicatedFirst": {
+      "$path": "src/ReplicatedFirst"
+    },
+    "ReplicatedStorage": {
+      "$path": "src/ReplicatedStorage"
+    },
+    "ServerScriptService": {
+      "$path": "src/ServerScriptService"
+    },
+    "ServerStorage": {
+      "$path": "src/ServerStorage"
+    },
+    "SoundService": {
+      "$path": "src/SoundService"
+    },
+    "StarterGui": {
+      "$path": "src/StarterGui"
+    },
+    "StarterPack": {
+      "$path": "src/StarterPack"
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$properties": {
+        "CameraMaxZoomDistance": 64,
+        "CharacterJumpHeight": 8.6,
+        "CharacterUseJumpPower": false
+      },
+      "StarterCharacterScripts": {
+        "$path": "src/StarterPlayer/StarterCharacterScripts"
+      },
+      "StarterPlayerScripts": {
+        "$path": "src/StarterPlayer/StarterPlayerScripts"
+      }
+    },
+    "Teams": {
+      "$path": "src/Teams"
+    },
+    "Workspace": {
+      "$path": "src/Workspace"
+    }
+  }
+}

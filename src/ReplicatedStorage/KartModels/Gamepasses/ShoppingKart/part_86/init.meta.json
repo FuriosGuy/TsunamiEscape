@@ -1,0 +1,12 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CFrame": [-20.6065, 12.0376, 30.2488, 1.0, 0, 0, 0, 0.9848, -0.1736, 0, 0.1736, 0.9848],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "Size": [0.1298, 0.1444, 0.0993]
+  }
+}

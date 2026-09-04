@@ -1,0 +1,15 @@
+{
+  "className": "Frame",
+  "properties": {
+    "Attributes": {
+      "isShine": false,
+      "isHover": false
+    },
+    "BackgroundColor3": [0.9961, 0.7804, 0.1608],
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "ClipsDescendants": true,
+    "Position": [[0.0, 0.0], [0.0178, 0.0]],
+    "Size": [[1.0, 0.0], [0.6819, 0.0]]
+  }
+}

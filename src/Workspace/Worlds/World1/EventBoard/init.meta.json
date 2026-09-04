@@ -1,0 +1,7 @@
+{
+  "className": "Model",
+  "properties": {
+    "LevelOfDetail": "Disabled",
+    "ModelStreamingMode": "Persistent"
+  }
+}

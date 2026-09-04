@@ -1,0 +1,7 @@
+{
+  "className": "UIStroke",
+  "properties": {
+    "StrokeSizingMode": "ScaledSize",
+    "Thickness": 0.03
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-22.7708, 12.029, 30.8727, -1, 0, 0, 0, 0, 1, 0, 1, 0],
+    "Color": [196, 40, 28],
+    "Massless": true,
+    "Material": "CrackedLava",
+    "Size": [3.9873, 0.1228, 0.1422]
+  }
+}

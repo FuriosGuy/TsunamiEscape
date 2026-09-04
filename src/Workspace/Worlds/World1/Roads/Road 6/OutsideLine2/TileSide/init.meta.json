@@ -1,0 +1,13 @@
+{
+  "className": "Texture",
+  "properties": {
+    "Color3": [0.7686, 0.1569, 0.1098],
+    "Face": "Right",
+    "OffsetStudsU": 4,
+    "StudsPerTileU": 8,
+    "StudsPerTileV": 1,
+    "TextureContent": "rbxassetid://99535719389819",
+    "Transparency": 0.3,
+    "ZIndex": 0
+  }
+}

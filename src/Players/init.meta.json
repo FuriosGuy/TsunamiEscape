@@ -1,0 +1,7 @@
+{
+  "className": "Players",
+  "properties": {
+    "RespawnTime": 1
+  },
+  "keepUnknowns": true
+}

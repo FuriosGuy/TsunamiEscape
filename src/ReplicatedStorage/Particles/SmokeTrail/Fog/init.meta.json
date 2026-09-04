@@ -1,0 +1,30 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "EmissionDirection": "Back",
+    "Lifetime": [0.25, 1],
+    "LightEmission": 1,
+    "Rate": 30,
+    "Rotation": [-90, 90],
+    "Size": [{
+        "time": 0.0,
+        "value": 3.63,
+        "envelope": 3.63
+      }, {
+        "time": 1.0,
+        "value": 1.0,
+        "envelope": 1.0
+      }],
+    "Speed": [50, 50],
+    "Texture": "rbxassetid://2671910894",
+    "Transparency": [{
+        "time": 0.0,
+        "value": 0.9,
+        "envelope": 0.0
+      }, {
+        "time": 1.0,
+        "value": 1.0,
+        "envelope": 0.0
+      }]
+  }
+}

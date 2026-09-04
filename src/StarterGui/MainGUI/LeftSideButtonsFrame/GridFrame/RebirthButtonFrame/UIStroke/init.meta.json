@@ -1,0 +1,7 @@
+{
+  "className": "UIStroke",
+  "properties": {
+    "Thickness": 3,
+    "ZIndex": 6
+  }
+}

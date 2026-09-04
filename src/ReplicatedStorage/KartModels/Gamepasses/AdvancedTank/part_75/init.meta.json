@@ -1,0 +1,14 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-30.0235, 9.4301, -2.0853, 1, 0, 0, 0, -1, 0, 0, 0, -1],
+    "Color": [17, 17, 17],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "Reflectance": 1,
+    "Size": [8.2329, 0.6298, 1.25],
+    "TopSurface": "Studs"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "className": "Frame",
+  "properties": {
+    "AnchorPoint": [0.5, 0.5],
+    "Attributes": {
+      "isShine": false,
+      "isHover": false
+    },
+    "BackgroundColor3": [0.8941, 0.2941, 1],
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "ClipsDescendants": true,
+    "Position": [[0.667, 0.0], [0.9063, 0.0]],
+    "Size": [[0.2982, 0.0], [0.1054, 0.0]],
+    "ZIndex": 3
+  }
+}

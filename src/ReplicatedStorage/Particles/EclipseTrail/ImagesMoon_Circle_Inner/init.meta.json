@@ -1,0 +1,28 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/Moon_Circle_Inner",
+  "properties": {
+    "Color": [{
+        "color": [1.0, 0.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.0, 0.0],
+        "time": 1.0
+      }],
+    "EmissionDirection": "Back",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.5, 2],
+    "Rotation": [-360, 360],
+    "Size": [{
+        "envelope": 0.8125,
+        "time": 0.0,
+        "value": 0.8125
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Speed": [20, 20],
+    "Texture": "rbxassetid://16878169825"
+  }
+}

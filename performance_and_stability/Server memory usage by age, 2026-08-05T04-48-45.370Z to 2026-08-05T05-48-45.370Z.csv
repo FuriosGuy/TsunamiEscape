@@ -1,0 +1,12 @@
+Experience ID,9824719186
+
+Breakdown,,Server memory usage by age
+Total,720,3.2435546875
+Total,1080,4.989429950714111
+Total,1440,6.771710586547852
+PlaceMemory:PhysicsCollision,720,3.2434326171875
+PlaceMemory:PhysicsCollision,1080,4.989307880401611
+PlaceMemory:PhysicsCollision,1440,6.771588516235352
+PlaceMemory:TerrainPhysics,720,0.0001220703125
+PlaceMemory:TerrainPhysics,1080,0.0001220703125
+PlaceMemory:TerrainPhysics,1440,0.0001220703125

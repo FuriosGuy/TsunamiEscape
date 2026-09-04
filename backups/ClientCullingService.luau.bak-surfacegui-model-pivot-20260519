@@ -1,0 +1,401 @@
+--!strict
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
+local Maid = require(ReplicatedStorage.Modules.Maid)
+
+type SupportedCullInstance = Instance
+
+type CullState = {
+	wasCulled: boolean,
+	previousEnabled: boolean?,
+}
+
+type CullConfig = {
+	enabled: boolean,
+	updateInterval: number,
+	mobileDistanceMultiplier: number,
+	autoTagBillboards: boolean,
+	billboardDistance: number,
+	particleDistance: number,
+	lightDistance: number,
+	beamDistance: number,
+	trailDistance: number,
+}
+
+local ClientCullingService = {}
+
+ClientCullingService.Tags = table.freeze({
+	Billboard = "ClientCullableBillboard",
+	Particle = "ClientCullableParticle",
+	Light = "ClientCullableLight",
+	Beam = "ClientCullableBeam",
+	Trail = "ClientCullableTrail",
+})
+
+local DEFAULT_CONFIG: CullConfig = {
+	enabled = true,
+	updateInterval = 0.25,
+	mobileDistanceMultiplier = 0.65,
+	autoTagBillboards = true,
+	billboardDistance = 300,
+	particleDistance = 180,
+	lightDistance = 220,
+	beamDistance = 250,
+	trailDistance = 200,
+}
+
+local serviceMaid = Maid.new()
+local instanceStates: { [Instance]: CullState } = {}
+local heartbeatConnection: RBXScriptConnection? = nil
+local updateAccumulator = 0
+local isRunning = false
+
+local function readNumber(value: any, fallback: number): number
+	if typeof(value) ~= "number" then
+		return fallback
+	end
+
+	return math.max(0, value)
+end
+
+local function readBoolean(value: any, fallback: boolean): boolean
+	if typeof(value) ~= "boolean" then
+		return fallback
+	end
+
+	return value
+end
+
+local function getConfig(): CullConfig
+	local rawConfig = CoreConfig.clientCulling
+	if typeof(rawConfig) ~= "table" then
+		return table.clone(DEFAULT_CONFIG)
+	end
+
+	return {
+		enabled = readBoolean(rawConfig.enabled, DEFAULT_CONFIG.enabled),
+		updateInterval = math.max(0.05, readNumber(rawConfig.updateInterval, DEFAULT_CONFIG.updateInterval)),
+		mobileDistanceMultiplier = math.clamp(
+			readNumber(rawConfig.mobileDistanceMultiplier, DEFAULT_CONFIG.mobileDistanceMultiplier),
+			0.1,
+			1
+		),
+		autoTagBillboards = readBoolean(rawConfig.autoTagBillboards, DEFAULT_CONFIG.autoTagBillboards),
+		billboardDistance = readNumber(rawConfig.billboardDistance, DEFAULT_CONFIG.billboardDistance),
+		particleDistance = readNumber(rawConfig.particleDistance, DEFAULT_CONFIG.particleDistance),
+		lightDistance = readNumber(rawConfig.lightDistance, DEFAULT_CONFIG.lightDistance),
+		beamDistance = readNumber(rawConfig.beamDistance, DEFAULT_CONFIG.beamDistance),
+		trailDistance = readNumber(rawConfig.trailDistance, DEFAULT_CONFIG.trailDistance),
+	}
+end
+
+local function isMobileClient(): boolean
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
+end
+
+local function getDistanceMultiplier(config: CullConfig): number
+	return if isMobileClient() then config.mobileDistanceMultiplier else 1
+end
+
+local function getBasePartPosition(instance: Instance): Vector3?
+	if instance:IsA("BasePart") then
+		return instance.Position
+	end
+
+	if instance:IsA("Attachment") then
+		return instance.WorldPosition
+	end
+
+	local ancestorPart = instance:FindFirstAncestorWhichIsA("BasePart")
+	if ancestorPart and ancestorPart:IsA("BasePart") then
+		return ancestorPart.Position
+	end
+
+	return nil
+end
+
+local function getBillboardPosition(billboardGui: BillboardGui): Vector3?
+	local adornee = billboardGui.Adornee
+	if adornee then
+		return getBasePartPosition(adornee)
+	end
+
+	local parent = billboardGui.Parent
+	if parent then
+		return getBasePartPosition(parent)
+	end
+
+	return nil
+end
+
+local function getBeamPosition(beam: Beam): Vector3?
+	local attachment0 = beam.Attachment0
+	local attachment1 = beam.Attachment1
+	if attachment0 and attachment1 then
+		return (attachment0.WorldPosition + attachment1.WorldPosition) * 0.5
+	end
+	if attachment0 then
+		return attachment0.WorldPosition
+	end
+	if attachment1 then
+		return attachment1.WorldPosition
+	end
+
+	return getBasePartPosition(beam)
+end
+
+local function getInstancePosition(instance: SupportedCullInstance): Vector3?
+	if instance:IsA("BillboardGui") then
+		return getBillboardPosition(instance)
+	end
+	if instance:IsA("Beam") then
+		return getBeamPosition(instance)
+	end
+
+	local parent = instance.Parent
+	if parent then
+		return getBasePartPosition(parent)
+	end
+
+	return nil
+end
+
+local function getCullDistance(instance: SupportedCullInstance, config: CullConfig): number
+	if instance:IsA("BillboardGui") then
+		return config.billboardDistance
+	end
+	if instance:IsA("ParticleEmitter") then
+		return config.particleDistance
+	end
+	if instance:IsA("Light") then
+		return config.lightDistance
+	end
+	if instance:IsA("Beam") then
+		return config.beamDistance
+	end
+	if instance:IsA("Trail") then
+		return config.trailDistance
+	end
+
+	return 0
+end
+
+local function getEnabled(instance: SupportedCullInstance): boolean
+	return (instance :: any).Enabled == true
+end
+
+local function setEnabled(instance: SupportedCullInstance, enabled: boolean)
+	(instance :: any).Enabled = enabled
+end
+
+local function restoreInstance(instance: Instance)
+	local state = instanceStates[instance]
+	if not state then
+		return
+	end
+
+	if state.wasCulled and state.previousEnabled ~= nil then
+		local supportedInstance = instance :: any
+		if supportedInstance.Parent ~= nil then
+			setEnabled(supportedInstance :: SupportedCullInstance, state.previousEnabled)
+		end
+	end
+
+	instanceStates[instance] = nil
+end
+
+local function applyCullState(instance: SupportedCullInstance, shouldCull: boolean)
+	local state = instanceStates[instance]
+	if not state then
+		state = {
+			wasCulled = false,
+			previousEnabled = nil,
+		}
+		instanceStates[instance] = state
+	end
+
+	if shouldCull then
+		if state.wasCulled then
+			return
+		end
+
+		state.previousEnabled = getEnabled(instance)
+		state.wasCulled = true
+		setEnabled(instance, false)
+		return
+	end
+
+	if not state.wasCulled then
+		return
+	end
+
+	if state.previousEnabled ~= nil then
+		setEnabled(instance, state.previousEnabled)
+	end
+	state.wasCulled = false
+	state.previousEnabled = nil
+end
+
+local function isSupportedInstance(instance: Instance): boolean
+	return instance:IsA("BillboardGui")
+		or instance:IsA("ParticleEmitter")
+		or instance:IsA("Light")
+		or instance:IsA("Beam")
+		or instance:IsA("Trail")
+end
+
+local function shouldSkipBillboardAutoTag(instance: BillboardGui): boolean
+	if instance:IsDescendantOf(Players.LocalPlayer:WaitForChild("PlayerGui")) then
+		return true
+	end
+
+	return instance:GetAttribute("DisableClientCulling") == true
+end
+
+local function autoTagBillboard(instance: Instance)
+	if not instance:IsA("BillboardGui") then
+		return
+	end
+	if shouldSkipBillboardAutoTag(instance) then
+		return
+	end
+	if CollectionService:HasTag(instance, ClientCullingService.Tags.Billboard) then
+		return
+	end
+
+	CollectionService:AddTag(instance, ClientCullingService.Tags.Billboard)
+end
+
+local function autoTagExistingBillboards()
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		autoTagBillboard(descendant)
+	end
+end
+
+local function updateTaggedSet(tag: string, config: CullConfig, cameraPosition: Vector3, distanceMultiplier: number)
+	for _, instance in ipairs(CollectionService:GetTagged(tag)) do
+		if not instance.Parent then
+			restoreInstance(instance)
+			continue
+		end
+
+		if not isSupportedInstance(instance) then
+			continue
+		end
+
+		local supportedInstance = instance :: SupportedCullInstance
+		local position = getInstancePosition(supportedInstance)
+		if not position then
+			applyCullState(supportedInstance, false)
+			continue
+		end
+
+		local maxDistance = getCullDistance(supportedInstance, config) * distanceMultiplier
+		local shouldCull = (position - cameraPosition).Magnitude > maxDistance
+		applyCullState(supportedInstance, shouldCull)
+	end
+end
+
+local function updateCulling()
+	local config = getConfig()
+	if not config.enabled then
+		for instance in pairs(instanceStates) do
+			restoreInstance(instance)
+		end
+		return
+	end
+
+	local currentCamera = Workspace.CurrentCamera
+	if not currentCamera then
+		return
+	end
+
+	local cameraPosition = currentCamera.CFrame.Position
+	local distanceMultiplier = getDistanceMultiplier(config)
+	updateTaggedSet(ClientCullingService.Tags.Billboard, config, cameraPosition, distanceMultiplier)
+	updateTaggedSet(ClientCullingService.Tags.Particle, config, cameraPosition, distanceMultiplier)
+	updateTaggedSet(ClientCullingService.Tags.Light, config, cameraPosition, distanceMultiplier)
+	updateTaggedSet(ClientCullingService.Tags.Beam, config, cameraPosition, distanceMultiplier)
+	updateTaggedSet(ClientCullingService.Tags.Trail, config, cameraPosition, distanceMultiplier)
+end
+
+local function bindTagCleanup(tag: string)
+	serviceMaid:GiveTask(CollectionService:GetInstanceRemovedSignal(tag):Connect(restoreInstance))
+end
+
+function ClientCullingService.Start()
+	if isRunning then
+		return
+	end
+	if not RunService:IsClient() then
+		return
+	end
+
+	local config = getConfig()
+	if not config.enabled then
+		return
+	end
+
+	isRunning = true
+	updateAccumulator = 0
+
+	bindTagCleanup(ClientCullingService.Tags.Billboard)
+	bindTagCleanup(ClientCullingService.Tags.Particle)
+	bindTagCleanup(ClientCullingService.Tags.Light)
+	bindTagCleanup(ClientCullingService.Tags.Beam)
+	bindTagCleanup(ClientCullingService.Tags.Trail)
+
+	if config.autoTagBillboards then
+		autoTagExistingBillboards()
+		serviceMaid:GiveTask(Workspace.DescendantAdded:Connect(autoTagBillboard))
+	end
+
+	heartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime)
+		local latestConfig = getConfig()
+		updateAccumulator += deltaTime
+		if updateAccumulator < latestConfig.updateInterval then
+			return
+		end
+
+		updateAccumulator = 0
+		updateCulling()
+	end)
+	serviceMaid:GiveTask(heartbeatConnection)
+
+	DebugModule.debugInfo("Client culling service started", "ClientCullingService")
+end
+
+function ClientCullingService.Stop()
+	if not isRunning then
+		return
+	end
+
+	isRunning = false
+	serviceMaid:DoCleaning()
+	heartbeatConnection = nil
+	updateAccumulator = 0
+
+	for instance in pairs(instanceStates) do
+		restoreInstance(instance)
+	end
+	table.clear(instanceStates)
+end
+
+function ClientCullingService.TagInstance(instance: Instance, tag: string)
+	assert(isSupportedInstance(instance), "ClientCullingService.TagInstance requires a supported visual instance")
+	assert(typeof(tag) == "string" and tag ~= "", "ClientCullingService.TagInstance requires a non-empty tag")
+
+	if not CollectionService:HasTag(instance, tag) then
+		CollectionService:AddTag(instance, tag)
+	end
+end
+
+return ClientCullingService

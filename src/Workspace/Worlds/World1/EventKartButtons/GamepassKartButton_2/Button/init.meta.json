@@ -1,0 +1,16 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "BackSurface": "SmoothNoOutlines",
+    "BottomSurface": "SmoothNoOutlines",
+    "CFrame": [-145.0242, 20.625, -91.5001, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "Color": [163, 75, 75],
+    "FrontSurface": "SmoothNoOutlines",
+    "LeftSurface": "SmoothNoOutlines",
+    "Material": "Neon",
+    "RightSurface": "SmoothNoOutlines",
+    "Size": [8, 0.25, 8],
+    "TopSurface": "SmoothNoOutlines"
+  }
+}

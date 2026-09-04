@@ -1,0 +1,12 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CFrame": [-4095.5, 107, -1004, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Locked": true,
+    "Size": [140.9998, 2, 2047.9999],
+    "TopSurface": "Smooth",
+    "Transparency": 1
+  }
+}

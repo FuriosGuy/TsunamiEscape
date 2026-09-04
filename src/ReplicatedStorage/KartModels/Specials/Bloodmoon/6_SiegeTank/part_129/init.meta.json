@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-25.3231, 11.4439, 2.2302, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [163, 75, 75],
+    "Massless": true,
+    "Material": "Neon",
+    "MaterialVariant": "2022 Stud",
+    "Reflectance": 1,
+    "Size": [0.399, 0.5, 5.8749]
+  }
+}

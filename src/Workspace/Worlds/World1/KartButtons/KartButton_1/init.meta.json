@@ -1,0 +1,10 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "KartNumber": 1,
+      "WinsRequired": 0
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

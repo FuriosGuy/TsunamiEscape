@@ -1,0 +1,10 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "XP_Multiplier": "1",
+      "XPGainInterval": 0.125
+    },
+    "Scale": 1.2966
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "CFrame": [-26.3516, 13.138, 12.709, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "Color": [196, 40, 28],
+    "DoubleSided": true,
+    "InitialSize": [2.188, 1.6322, 0.9515],
+    "Material": "CrackedLava",
+    "MeshContent": "rbxassetid://11349063737",
+    "Size": [2.188, 1.6322, 0.9515]
+  }
+}

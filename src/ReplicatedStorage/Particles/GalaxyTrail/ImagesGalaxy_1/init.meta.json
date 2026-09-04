@@ -1,0 +1,32 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/Galaxy_1",
+  "properties": {
+    "Color": [{
+        "color": [1.0, 0.8902, 0.4471],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.8902, 0.4471],
+        "time": 1.0
+      }],
+    "EmissionDirection": "Back",
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.5, 2],
+    "LightEmission": 1,
+    "LightInfluence": 1,
+    "Rate": 25,
+    "Rotation": [-360, 360],
+    "Size": [{
+        "envelope": 1.0,
+        "time": 0.0,
+        "value": 1.5
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Speed": [20, 20],
+    "Texture": "rbxassetid://14919880888"
+  }
+}

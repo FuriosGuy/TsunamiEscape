@@ -1,0 +1,11 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-17.2009, 9.1329, 32.5758, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "Size": [1.5982, 1.0655, 1.5982]
+  }
+}

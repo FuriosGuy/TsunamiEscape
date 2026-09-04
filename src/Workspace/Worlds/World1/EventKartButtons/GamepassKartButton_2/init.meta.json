@@ -1,0 +1,11 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "EventName": "Bloodmoon",
+      "KartName": "5_BloodDragon",
+      "ProductKey": "BloodDragon"
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

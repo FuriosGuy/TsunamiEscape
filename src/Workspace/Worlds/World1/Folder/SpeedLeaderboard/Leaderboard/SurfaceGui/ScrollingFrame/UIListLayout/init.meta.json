@@ -1,0 +1,8 @@
+{
+  "className": "UIListLayout",
+  "properties": {
+    "HorizontalFlex": "Fill",
+    "Padding": [0.02, 0],
+    "SortOrder": "LayoutOrder"
+  }
+}

@@ -1,0 +1,265 @@
+-- CoreConfig.luau
+
+local CoreConfig = {}
+
+-- Debug system configuration (universal across all modules)
+CoreConfig.debugSystem = {
+	enabled = true, -- Master debug toggle
+	showPrints = false, -- Show debug print messages
+	showWarns = true, -- Show debug warning messages
+	showErrors = true, -- Show debug error messages
+	timestamp = true, -- Include timestamps in debug messages
+
+	-- Optional module targeting. Leave empty to allow all modules.
+	enabledModules = {},
+	disabledModules = {}, -- Example: { "WorldManager" }
+	moduleOverrides = { -- Highest-priority per-module override
+		-- PlayerAttributeManager = true,
+		-- WorldManager = false,
+	},
+}
+
+-- Performance configuration (universal)
+CoreConfig.performance = {
+	maxFrameTime = 1 / 60, -- Target frame time (60 FPS)
+}
+
+-- Funnel analytics configuration (server-side Roblox AnalyticsService events)
+CoreConfig.analytics = {
+	enabled = true, -- Master toggle for funnel analytics helpers.
+	liveServerOnly = true, -- Funnel events only send from published live servers, never Studio/client.
+	tutorialKartPrefix = "2_", -- Kart-name prefix used to detect the tutorial's second kart unlock.
+	funnels = {
+		verifyReward = "VerifyRewardClaim", -- Daily verify reward claim conversion funnel.
+		rebirth = "RebirthFlow", -- Rebirth progression funnel across normal/purchased rebirths.
+		playtimeReward = "PlaytimeRewardClaim", -- Playtime gift claim funnel.
+		dailyReward = "DailyRewardClaim", -- Daily login reward claim funnel.
+		dailyRewardClaimAll = "DailyRewardClaimAll", -- Claim-all daily reward purchase funnel.
+		referral = "FriendInviteConversion", -- Invite/referral reward conversion funnel.
+		friendInvitePrompt = "FriendInvitePrompt", -- Client invite-prompt engagement funnel.
+		starterPack = "StarterPackFlow", -- Starter pack purchase/reward funnel.
+		kartProgression = "KartProgressionFlow", -- Kart purchase/equip progression funnel.
+	},
+}
+
+-- Client graphics overrides
+CoreConfig.clientGraphics = {
+	disableGlobalShadowsOnMobile = true, -- Disables Lighting.GlobalShadows for mobile clients to reduce render/shadowmap cost.
+}
+
+-- UI scaling safeguards (client)
+CoreConfig.uiAdjuster = {
+	referenceViewport = Vector2.new(1920, 1080), -- Baseline viewport used to compute UI scale ratio.
+	minScaleRatio = 0.45, -- Prevents ultra-small scaling on narrow/tall device viewports.
+	maxScaleRatio = 1.35, -- Prevents oversized scaling on large viewport extremes.
+	noUpscaleOnMobile = true, -- Prevents mobile clients from scaling above baseline text/tile sizes.
+	mobileMaxScaleRatio = 1.0, -- Effective max ratio when noUpscaleOnMobile is enabled.
+	minTextSize = 2, -- Absolute floor for TextSize/UITextSizeConstraint calculations.
+	minTileOffset = 1, -- TileSize offset floor to satisfy non-zero tile requirements.
+}
+
+-- Social configuration (shared by client/server systems)
+CoreConfig.social = {
+	verifyGroupId = 13706307, -- Group ID used for verify reward checks/prompts.
+	friendInviteMultiplierStep = 0.1, -- Permanent XP multiplier increase granted per unique referred player.
+	friendInviteTopbarIconImage = "rbxassetid://112009101194397", -- Topbar icon image used for the invite-friends button.
+	friendInviteTopbarLabel = "Invite Friends!", -- Short label shown beside the topbar invite icon.
+	friendInvitePromptMessage = "Invite friends to join and earn +0.10x multiplier per unique friend!", -- Prompt text shown in Roblox's invite modal.
+}
+
+-- System chat promotional loop tuning/content
+CoreConfig.systemChat = {
+	promoMinDelay = 60, -- Minimum seconds between promo broadcasts.
+	promoMaxDelay = 120,-- Maximum seconds between promo broadcasts.
+	likeFavoriteEmojis = { -- Emoji pool for Like/Favorite promotional messages.
+		"👍",
+		"⭐",
+		"🔥",
+		"🎉",
+		"💛",
+		"💬",
+		"📌",
+		"🌟",
+	},
+	groupEmojis = { -- Emoji pool for group-join promotional messages.
+		"👥",
+		"🎁",
+		"✨",
+		"🚀",
+		"🏆",
+		"🤝",
+		"📣",
+		"🎊",
+	},
+	shopEmojis = { -- Emoji pool for dev product/gamepass promotional messages.
+		"🛒",
+		"💎",
+		"⚡",
+		"🚗",
+		"🔥",
+		"🧪",
+		"💥",
+		"🎯",
+	},
+	likeFavoritePromotionalMessages = { -- Rotating social prompts for like/favorite actions.
+		"Favorite the game and leave a Like for more updates!",
+		"Enjoying the game? Favorite it and drop a Like!",
+		"Like + Favorite the game to support future content!",
+		"Show some support by Liking and Favoriting the game!",
+		"Like and Favorite the game if you want more awesome updates!",
+	},
+	groupPromotionalMessages = { -- Rotating social prompts for group joins.
+		"Join our group for exclusive rewards!",
+		"Join our group to claim exclusive rewards!",
+		"Group members get exclusive rewards, join us now!",
+		"Join our group and grab your exclusive rewards!",
+		"Want exclusive rewards? Join our group today!",
+	},
+	shopPromotionalTemplates = { -- Use "{ITEM}" placeholder for random catalog picks.
+		"Boost your run with {ITEM}!",
+		"Try {ITEM} from the shop!",
+		"Power up now with {ITEM}!",
+		"Upgrade your progress using {ITEM}!",
+		"Check out {ITEM} in the shop!",
+	},
+	shopPromotionOfferKeys = { -- Keys resolved from ProductService.Gamepasses/DevProducts.
+		"VIP",
+		"2xWins",
+		"3xTreadmill",
+		"15xTreadmill",
+		"35xTreadmill",
+		"100xTreadmill",
+		"AdvancedTank",
+		"ShoppingKart",
+		"FormulaCar",
+		"+1000",
+		"+5000",
+		"+10000",
+		"+100K",
+		"+1M",
+		"+10M",
+		"2x",
+		"4x",
+		"8x",
+		"16x",
+		"32x",
+		"64x",
+		"100x",
+	},
+}
+
+-- Leaderboard debug controls
+CoreConfig.leaderboard = {
+	debugUseFakeData = false, -- Replace datastore entries with fake rows for UI/dev testing.
+	debugAppendFakeData = false, -- Append fake rows after real entries for mixed testing.
+}
+
+-- Leveling/reward tuning
+CoreConfig.leveling = {
+	verifyRewardXP = 5000, -- XP granted after successful group verification.
+	verifyRewardWins = 50, -- Wins granted after successful group verification.
+	verifyRewardDailyGrowthMultiplier = 1.1, -- Multiplier applied per successful daily verify claim (compounding).
+	verifyRewardRoundStep = 5, -- Rewards round up to the next multiple of this value.
+	verifyRewardClaimCountAttribute = "VerifyRewardClaimCount", -- Attribute tracking successful verify-claim count.
+	verifyRewardCooldownSeconds = 24 * 60 * 60, -- Cooldown between group verify reward claims (24h).
+	debugVerifyIgnoreCooldownInStudio = true, -- Studio-only debug: verify reward is always claimable (cooldown ignored/reset).
+	rebirthConfettiColors = { -- Gradient palette used by rebirth confetti burst.
+		Color3.fromRGB(255, 215, 0),
+		Color3.fromRGB(255, 43, 43),
+		Color3.fromRGB(0, 200, 255),
+		Color3.fromRGB(57, 255, 20),
+		Color3.fromRGB(170, 0, 255),
+	},
+	rebirthConfettiDuration = 1.5, -- Seconds for rebirth confetti effect.
+	rebirthConfettiCount = 70, -- Total confetti particles for rebirth celebrations.
+	rewardCelebrationConfettiCount = 45, -- Total confetti particles for win/tutorial-complete celebrations.
+}
+
+-- Save system timing
+CoreConfig.persistence = {
+	saveDebounceSeconds = 10, -- Delay before regular save after recent write.
+	finalSaveDebounceSeconds = 2, -- Minimum spacing for forced/final saves.
+}
+
+-- Return-to-stage offer settings
+CoreConfig.returnToStage = {
+	enabled = true, -- Master toggle for return-to-stage feature.
+	duration = 10, -- Seconds the return-to-stage offer remains available.
+}
+
+-- Server gameplay/system tuning
+CoreConfig.server = {
+	playerAttributeManager = {
+		autosaveInterval = 300, -- Seconds between autosave passes.
+		disableWavesDuration = 30, -- Seconds the Disable Waves product cooldown/effect lasts.
+		playerCollisionGroup = "PlayersNoCollide", -- CollisionGroup assigned to player character parts.
+	},
+	tsunamiManager = {
+		startupSpawnCount = 25, -- Startup burst wave count before normal spawn loop.
+		startupSpawnInterval = 0, -- Delay between startup burst spawns (seconds).
+		minSpawnDelay = 10, -- Minimum random delay for normal spawn loop (seconds).
+		maxSpawnDelay = 20, -- Maximum random delay for normal spawn loop (seconds).
+	},
+	worldManager = {
+		debounceTime = 1.0, -- Touch/button debounce window (seconds).
+		gamepassKartShowcaseRotationDuration = 15, -- Rotation tween duration for gamepass kart showcases.
+		activeTreadmillUpdateInterval = 0.1, -- Tick rate for active treadmill reward updates (seconds).
+		treadmillScanInterval = 0.1, -- Tick rate for treadmill touch scanning (seconds).
+		kartHolderName = "EquippedKarts", -- Workspace folder used to hold kart runtime models.
+		debugDisableKartEquipping = false, -- Disable kart attach flow for debugging.
+		debugDisableKartSounds = false, -- Disable kart engine sound setup for debugging.
+		debugDisableKartMotors = false, -- Disable kart motor creation for debugging.
+		debugDisableKartWelds = false, -- Disable kart weld creation for debugging.
+	},
+	trollService = {
+		actionTimeout = 60, -- Seconds a troll action stays pending before expiring.
+		slowDuration = 10, -- Seconds the Slow troll effect lasts.
+		freezeDuration = 10, -- Seconds the Freeze troll effect lasts.
+		defaultSlowSpeed = 16, -- WalkSpeed applied during Slow effect.
+		notificationStyle = "Default", -- "Default" uses full notification; "QuickFade" uses fast fade variant.
+		notificationTickInterval = 1, -- Seconds between timed troll countdown notification updates.
+	},
+	playtimeRewards = {
+		debugSequentialClaimMode = true, -- Studio-only debug: Gift01 ignores timer; each claim unlocks the next gift immediately.
+	},
+	dailyRewards = {
+		debugSequentialClaimMode = true, -- Studio-only debug: each daily claim unlocks the next day immediately with no cooldown wait.
+	},
+	tsunamiSystem = {
+		minRandomPathDistance = 1000, -- Minimum path distance required before randomizing spawn offset.
+		disableWavesRecoveryBatchCount = 20, -- Number of recovery batches after disable-waves expires.
+		disableWavesRecoveryBatchInterval = 15, -- Seconds between recovery batches.
+		disableWavesRecoveryTsunamis = { -- Tsunami sets re-enabled during recovery.
+			"Medium",
+			"Fast",
+			"Very Fast",
+			"Extremely Fast",
+		},
+	},
+}
+
+-- Get debug settings (for backward compatibility)
+function CoreConfig.getDebugSettings()
+	return CoreConfig.debugSystem
+end
+
+-- Check if debug is enabled
+function CoreConfig.isDebugEnabled()
+	return CoreConfig.debugSystem.enabled
+end
+
+-- Update debug settings at runtime
+function CoreConfig.setDebugSettings(settings)
+	for key, value in pairs(settings) do
+		if CoreConfig.debugSystem[key] ~= nil then
+			CoreConfig.debugSystem[key] = value
+		end
+	end
+end
+
+-- Get performance settings
+function CoreConfig.getPerformanceSettings()
+	return CoreConfig.performance
+end
+
+return CoreConfig

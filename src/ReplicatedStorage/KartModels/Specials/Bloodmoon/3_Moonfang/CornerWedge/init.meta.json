@@ -1,0 +1,9 @@
+{
+  "className": "CornerWedgePart",
+  "properties": {
+    "CFrame": [-32.2015, 9.1573, 3.8132, 0, 0, -1, 0, 1, 0, 1, 0, 0],
+    "Color": [196, 40, 28],
+    "Material": "CrackedLava",
+    "Size": [1.0761, 1.0482, 1.8307]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "className": "SurfaceGui",
+  "properties": {
+    "ClipsDescendants": true,
+    "Face": "Back",
+    "MaxDistance": 1000,
+    "SizingMode": "PixelsPerStud",
+    "ZIndexBehavior": "Sibling"
+  }
+}

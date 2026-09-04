@@ -1,0 +1,31 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Color": [{
+        "time": 0.0,
+        "color": [0.451, 0.451, 0.451]
+      }, {
+        "time": 1.0,
+        "color": [0.451, 0.451, 0.451]
+      }],
+    "EmissionDirection": "Back",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.5, 2],
+    "LightInfluence": 1,
+    "Rate": 5,
+    "RotSpeed": [360, 360],
+    "Rotation": [-360, 360],
+    "Size": [{
+        "time": 0.0,
+        "value": 2.0,
+        "envelope": 1.0
+      }, {
+        "time": 1.0,
+        "value": 0.0,
+        "envelope": 0.0
+      }],
+    "Speed": [20, 20],
+    "Texture": "rbxassetid://74622531976680"
+  },
+  "originalName": "Images/blackhole"
+}

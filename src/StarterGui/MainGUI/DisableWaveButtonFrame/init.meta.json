@@ -1,0 +1,15 @@
+{
+  "className": "Frame",
+  "properties": {
+    "AnchorPoint": [0.5, 0.5],
+    "Attributes": {
+      "isHover": false
+    },
+    "BackgroundColor3": [0, 0, 0],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "Position": [[0.7422, 0.0], [0.1994, 0.0]],
+    "Size": [[0.1184, 0.0], [0.1614, 0.0]]
+  }
+}

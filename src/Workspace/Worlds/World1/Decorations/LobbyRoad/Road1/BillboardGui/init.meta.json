@@ -1,0 +1,9 @@
+{
+  "className": "BillboardGui",
+  "properties": {
+    "Active": true,
+    "ExtentsOffsetWorldSpace": [0, 15, 0],
+    "Size": [[100.0, 0.0], [25.0, 0.0]],
+    "ZIndexBehavior": "Sibling"
+  }
+}

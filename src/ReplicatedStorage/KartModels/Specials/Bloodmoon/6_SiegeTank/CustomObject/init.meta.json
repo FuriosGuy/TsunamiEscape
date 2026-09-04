@@ -1,0 +1,14 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "CanCollide": false,
+    "CFrame": [-22.2249, 14.1262, 10.2211, -0.7071, 0, -0.7071, 0, 1, 0, 0.7071, 0, -0.7071],
+    "Color": [17, 17, 17],
+    "InitialSize": [2.4763, 2.49, 13.8587],
+    "Massless": true,
+    "Material": "DiamondPlate",
+    "MeshContent": "rbxassetid://5682889995",
+    "RenderFidelity": "Precise",
+    "Size": [0.3566, 0.3586, 1.9957]
+  }
+}

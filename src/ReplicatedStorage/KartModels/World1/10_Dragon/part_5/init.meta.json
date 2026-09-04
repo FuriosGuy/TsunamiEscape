@@ -1,0 +1,13 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CFrame": [-39.1623, 12.0411, -4.9661, -0.7017, -0.5837, 0.4085, -0.7059, 0.6473, -0.2876, -0.0965, -0.4902, -0.8663],
+    "Color": [255, 255, 0],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Stud",
+    "Size": [0.6621, 0.5038, 0.5486]
+  }
+}

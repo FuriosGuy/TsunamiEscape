@@ -1,0 +1,11 @@
+{
+  "className": "ProximityPrompt",
+  "properties": {
+    "ActionText": "NOTIFY ME",
+    "Enabled": true,
+    "HoldDuration": 0,
+    "MaxActivationDistance": 14,
+    "ObjectText": "UPCOMING EVENT",
+    "RequiresLineOfSight": false
+  }
+}

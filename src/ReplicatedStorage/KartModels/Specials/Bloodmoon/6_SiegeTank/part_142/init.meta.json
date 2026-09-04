@@ -1,0 +1,13 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-26.5856, 13.7939, 9.3922, 1, 0, 0, 0, 1, 0, 0, 0, 1.0],
+    "Color": [196, 40, 28],
+    "Massless": true,
+    "Material": "CrackedLava",
+    "MaterialVariant": "2022 Stud",
+    "Reflectance": 1,
+    "Size": [1.774, 1.25, 1.3507]
+  }
+}

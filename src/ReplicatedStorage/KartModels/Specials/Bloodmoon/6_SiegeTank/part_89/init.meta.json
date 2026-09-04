@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-22.8099, 10.0576, 3.7158, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [163, 75, 75],
+    "Massless": true,
+    "Material": "Neon",
+    "MaterialVariant": "2022 Inlet",
+    "Reflectance": 1,
+    "Size": [0.6079, 0.375, 0.1249]
+  }
+}

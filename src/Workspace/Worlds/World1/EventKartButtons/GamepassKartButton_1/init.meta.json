@@ -1,0 +1,11 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "EventName": "Bloodmoon",
+      "KartName": "4_CrimsonCell",
+      "ProductKey": "CrimsonCell"
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

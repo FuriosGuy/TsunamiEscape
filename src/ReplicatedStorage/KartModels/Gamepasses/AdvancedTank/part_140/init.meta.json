@@ -1,0 +1,13 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-28.2495, 13.8188, -5.6877, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [33, 84, 185],
+    "Massless": true,
+    "Material": "Neon",
+    "MaterialVariant": "2022 Stud",
+    "Reflectance": 1,
+    "Size": [0.749, 0.35, 0.0749]
+  }
+}

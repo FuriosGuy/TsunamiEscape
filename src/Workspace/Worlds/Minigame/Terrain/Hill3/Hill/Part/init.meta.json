@@ -1,0 +1,16 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "AudioCanCollide": false,
+    "BottomSurface": "Smooth",
+    "CanCollide": false,
+    "CanTouch": false,
+    "CFrame": [-3989.0537, 30.6788, -6827.8027, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [124, 92, 70],
+    "Locked": true,
+    "MaterialVariant": "Studs",
+    "Size": [58.8061, 46.3575, 58.8062],
+    "TopSurface": "Smooth"
+  }
+}

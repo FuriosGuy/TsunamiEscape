@@ -1,0 +1,12 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-14.724, 12.4091, 1.87, 1, 0, 0, 0, 0.9848, -0.1736, 0, 0.1736, 0.9848],
+    "Color": [163, 75, 75],
+    "Material": "Neon",
+    "MaterialVariant": "2022 Universal",
+    "Size": [5.8108, 2.3474, 1.6639],
+    "UsePartColor": true
+  }
+}

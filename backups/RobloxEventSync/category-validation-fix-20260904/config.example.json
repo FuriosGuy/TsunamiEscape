@@ -1,0 +1,21 @@
+{
+  "universeId": "9799168239",
+  "groupId": "13706307",
+  "placeId": "116587108840614",
+  "managedEventId": "",
+  "stateFile": "event-state.json",
+  "title": "BLOOD MOON",
+  "subtitle": "SURVIVE THE BLOOD MOON",
+  "description": "Survive the Blood Moon, earn Blood Moon Wins, and unlock exclusive rewards.",
+  "startTimeUtc": "2026-09-12T00:00:00Z",
+  "endTimeUtc": "2026-09-15T00:00:00Z",
+  "visibility": "public",
+  "notificationAudience": "rsvp",
+  "thumbnailId": null,
+  "categories": [
+    {
+      "category": "challenge",
+      "rank": 1
+    }
+  ]
+}

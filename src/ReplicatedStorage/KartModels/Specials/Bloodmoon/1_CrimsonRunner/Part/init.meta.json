@@ -1,0 +1,18 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "BackSurface": "SmoothNoOutlines",
+    "BottomSurface": "SmoothNoOutlines",
+    "CFrame": [-14.5275, 9.2672, 8.6464, 1, 0, 0, 0, 0.9659, 0.2588, 0, -0.2588, 0.9659],
+    "Color": [163, 75, 75],
+    "FrontSurface": "SmoothNoOutlines",
+    "LeftSurface": "SmoothNoOutlines",
+    "Material": "Neon",
+    "RightSurface": "SmoothNoOutlines",
+    "Sandboxed": true,
+    "Shape": "Cylinder",
+    "Size": [0.0477, 0.419, 0.4211],
+    "TopSurface": "SmoothNoOutlines"
+  }
+}

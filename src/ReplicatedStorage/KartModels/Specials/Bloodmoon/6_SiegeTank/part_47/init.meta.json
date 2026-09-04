@@ -1,0 +1,14 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-23.4868, 10.0576, 3.7238, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "Color": [163, 75, 75],
+    "Massless": true,
+    "Material": "Neon",
+    "MaterialVariant": "2022 Inlet",
+    "Reflectance": 1,
+    "Size": [0.1259, 0.373, 0.746],
+    "TopSurface": "Studs"
+  }
+}

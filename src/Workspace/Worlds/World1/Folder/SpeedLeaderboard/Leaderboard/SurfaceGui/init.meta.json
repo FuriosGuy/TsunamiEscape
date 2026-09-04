@@ -1,0 +1,9 @@
+{
+  "className": "SurfaceGui",
+  "properties": {
+    "LightInfluence": 1,
+    "MaxDistance": 1000,
+    "SizingMode": "PixelsPerStud",
+    "ZIndexBehavior": "Sibling"
+  }
+}

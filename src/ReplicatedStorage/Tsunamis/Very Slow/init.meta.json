@@ -1,0 +1,13 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "Anchored": true,
+    "CanCollide": false,
+    "CFrame": [-24.0, 12.5, -130, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "Color": [91, 154, 76],
+    "Material": "Glacier",
+    "PivotOffset": [-14, -12.5, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Size": [28, 25, 144],
+    "UsePartColor": true
+  }
+}

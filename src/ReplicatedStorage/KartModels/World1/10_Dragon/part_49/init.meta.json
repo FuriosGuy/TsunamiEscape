@@ -1,0 +1,12 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-34.2651, 10.6522, -9.2833, -1, 0, 0, 0, -0.9934, 0.1143, 0, 0.1143, 0.9934],
+    "Color": [248, 248, 248],
+    "Massless": true,
+    "Material": "SmoothPlastic",
+    "Size": [0.15, 0.3, 0.4],
+    "TopSurface": "Studs"
+  }
+}

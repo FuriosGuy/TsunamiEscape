@@ -1,0 +1,18 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CastShadow": false,
+    "CFrame": [-4197.6899, 89.2678, -503.9527, 0.2918, 0, 0.9565, 0, 1, 0, -0.9565, 0, 0.2918],
+    "Color": [44, 101, 29],
+    "InitialSize": [18.2456, 50, 20.1387],
+    "Locked": true,
+    "Material": "SmoothPlastic",
+    "MaterialVariant": "GrassMeadow",
+    "MeshContent": "rbxassetid://8973557702",
+    "Size": [18.8006, 39.2013, 20.0169]
+  }
+}

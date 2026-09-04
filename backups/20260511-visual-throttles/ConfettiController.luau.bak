@@ -1,0 +1,328 @@
+--!strict
+
+local Workspace = game:GetService("Workspace")
+
+export type ConfettiController = {
+	PlayBurst: (
+		self: ConfettiController,
+		colors: { Color3 }?,
+		duration: number?,
+		totalCount: number?,
+		batchSize: number?,
+		batchDelay: number?
+	) -> (),
+	Stop: (self: ConfettiController) -> (),
+	Reset: (self: ConfettiController) -> (),
+	Destroy: (self: ConfettiController) -> (),
+	Update: (self: ConfettiController, deltaTime: number) -> (),
+	SetColors: (self: ConfettiController, colors: { Color3 }) -> (),
+}
+
+type ConfettiParticle = {
+	label: ImageLabel,
+	defaultSize: Vector2,
+	color: Color3,
+	emitterPosition: Vector2,
+	emitterPower: Vector2,
+	position: Vector2,
+	power: Vector2,
+	heightScale: number,
+	rotation: number,
+	rotationSpeed: number,
+	enabled: boolean,
+	outOfBounds: boolean,
+}
+
+type ConfettiControllerInternal = ConfettiController & {
+	_particles: { ConfettiParticle },
+	_parent: GuiObject,
+	_colors: { Color3 },
+	_gravity: Vector2,
+	_burstEndTime: number,
+	_destroyed: boolean,
+	_nextBatchTime: number,
+	_remainingBurstCount: number,
+	_batchSize: number,
+	_batchDelay: number,
+}
+
+local ConfettiController = {}
+ConfettiController.__index = ConfettiController
+
+local camera = Workspace.CurrentCamera
+
+local TEMPLATE_IMAGES = {
+	"rbxassetid://2695001063",
+	"rbxassetid://910256717",
+}
+
+local DEFAULT_COLORS = {
+	Color3.fromRGB(168, 100, 253),
+	Color3.fromRGB(41, 205, 255),
+	Color3.fromRGB(120, 255, 68),
+	Color3.fromRGB(255, 113, 141),
+	Color3.fromRGB(253, 255, 106),
+}
+
+local DEFAULT_GRAVITY = Vector2.new(0, 400)
+local DEFAULT_COUNT = 35
+local DEFAULT_DURATION = 1.4
+local DEFAULT_BATCH_DELAY = 0
+local DEFAULT_SIZE = Vector2.new(30, 30)
+local EMITTER_POSITION_Y = 0
+local MIN_EMITTER_X = 0
+local MAX_EMITTER_X = 1
+local MIN_FORCE_X = -150
+local MAX_FORCE_X = 150
+local MIN_FORCE_Y = 200
+local MAX_FORCE_Y = 500
+
+local function getViewportSize(): Vector2
+	local currentCamera = Workspace.CurrentCamera
+	if currentCamera then
+		camera = currentCamera
+	end
+
+	if camera then
+		return camera.ViewportSize
+	end
+
+	return Vector2.new(1920, 1080)
+end
+
+local function copyColors(colors: { Color3 }?): { Color3 }
+	if not colors or #colors == 0 then
+		return table.clone(DEFAULT_COLORS)
+	end
+
+	return table.clone(colors)
+end
+
+local function randomForce(): Vector2
+	return Vector2.new(math.random(MIN_FORCE_X, MAX_FORCE_X), math.random(MIN_FORCE_Y, MAX_FORCE_Y))
+end
+
+local function randomEmitterPosition(): Vector2
+	return Vector2.new(MIN_EMITTER_X + math.random() * (MAX_EMITTER_X - MIN_EMITTER_X), EMITTER_POSITION_Y)
+end
+
+local function createParticleLabel(parent: GuiObject): ImageLabel
+	local label = Instance.new("ImageLabel")
+	label.Name = "ConfettiParticle"
+	label.AnchorPoint = Vector2.new(0.5, 0.5)
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.Image = TEMPLATE_IMAGES[math.random(1, #TEMPLATE_IMAGES)]
+	label.Size = UDim2.fromOffset(DEFAULT_SIZE.X, DEFAULT_SIZE.Y)
+	label.Visible = false
+	label.ZIndex = 20
+	label.Parent = parent
+	return label
+end
+
+local function resetParticle(particle: ConfettiParticle, colors: { Color3 }, keepVisible: boolean)
+	particle.color = colors[math.random(1, #colors)]
+	particle.position = Vector2.zero
+	particle.power = particle.emitterPower + Vector2.new(math.random(-50, 50), math.random(-60, 60))
+	particle.heightScale = 1
+	particle.rotation = math.random(0, 359)
+	particle.rotationSpeed = math.random(-540, 540)
+	particle.outOfBounds = false
+	particle.label.Visible = keepVisible
+	particle.label.ImageColor3 = particle.color
+	particle.label.Rotation = particle.rotation
+	particle.label.Size = UDim2.fromOffset(particle.defaultSize.X, particle.defaultSize.Y)
+end
+
+local function createParticle(parent: GuiObject, colors: { Color3 }): ConfettiParticle
+	local label = createParticleLabel(parent)
+	local particle: ConfettiParticle = {
+		label = label,
+		defaultSize = DEFAULT_SIZE,
+		color = colors[1],
+		emitterPosition = randomEmitterPosition(),
+		emitterPower = randomForce(),
+		position = Vector2.zero,
+		power = Vector2.zero,
+		heightScale = 1,
+		rotation = 0,
+		rotationSpeed = 0,
+		enabled = false,
+		outOfBounds = true,
+	}
+
+	resetParticle(particle, colors, false)
+	return particle
+end
+
+function ConfettiController.new(parent: GuiObject, count: number?): ConfettiController
+	local colors = copyColors(nil)
+	local self = setmetatable({
+		_particles = {},
+		_parent = parent,
+		_colors = colors,
+		_gravity = DEFAULT_GRAVITY,
+		_burstEndTime = 0,
+		_destroyed = false,
+		_nextBatchTime = 0,
+		_remainingBurstCount = 0,
+		_batchSize = 0,
+		_batchDelay = DEFAULT_BATCH_DELAY,
+	}, ConfettiController) :: ConfettiControllerInternal
+
+	for _ = 1, count or DEFAULT_COUNT do
+		table.insert(self._particles, createParticle(parent, colors))
+	end
+
+	return self
+end
+
+function ConfettiController:_ensureParticleCount(targetCount: number)
+	while #self._particles < targetCount do
+		table.insert(self._particles, createParticle(self._parent, self._colors))
+	end
+end
+
+function ConfettiController:_activateParticles(count: number)
+	local activated = 0
+	for _, particle in ipairs(self._particles) do
+		if not particle.enabled then
+			particle.enabled = true
+			particle.emitterPosition = randomEmitterPosition()
+			particle.emitterPower = randomForce()
+			resetParticle(particle, self._colors, true)
+			activated += 1
+			if activated >= count then
+				break
+			end
+		end
+	end
+end
+
+function ConfettiController:SetColors(colors: { Color3 })
+	self._colors = copyColors(colors)
+end
+
+function ConfettiController:PlayBurst(
+	colors: { Color3 }?,
+	duration: number?,
+	totalCount: number?,
+	batchSize: number?,
+	batchDelay: number?
+)
+	self._colors = copyColors(colors)
+	local finalTotalCount = math.max(1, math.floor(totalCount or #self._particles))
+	local finalBatchSize = math.max(1, math.floor(batchSize or finalTotalCount))
+	self:_ensureParticleCount(finalTotalCount)
+
+	self._burstEndTime = os.clock() + (duration or DEFAULT_DURATION)
+	self._remainingBurstCount = finalTotalCount
+	self._batchSize = finalBatchSize
+	self._batchDelay = math.max(0, batchDelay or DEFAULT_BATCH_DELAY)
+	self._nextBatchTime = os.clock()
+end
+
+function ConfettiController:Stop()
+	self._burstEndTime = 0
+	self._nextBatchTime = 0
+	self._remainingBurstCount = 0
+	for _, particle in ipairs(self._particles) do
+		particle.enabled = false
+	end
+end
+
+function ConfettiController:Reset()
+	self:Stop()
+	for _, particle in ipairs(self._particles) do
+		resetParticle(particle, self._colors, false)
+	end
+end
+
+function ConfettiController:Update(deltaTime: number)
+	if self._destroyed then
+		return
+	end
+
+	local now = os.clock()
+	if self._burstEndTime > 0 and now >= self._burstEndTime then
+		self._burstEndTime = 0
+		self._nextBatchTime = 0
+		self._remainingBurstCount = 0
+		for _, particle in ipairs(self._particles) do
+			particle.enabled = false
+		end
+	end
+
+	if self._remainingBurstCount > 0 and now >= self._nextBatchTime then
+		local countToActivate = math.min(self._batchSize, self._remainingBurstCount)
+		self:_activateParticles(countToActivate)
+		self._remainingBurstCount -= countToActivate
+		self._nextBatchTime = now + self._batchDelay
+	end
+
+	local viewportSize = getViewportSize()
+	local gravityStep = self._gravity * deltaTime
+
+	for _, particle in ipairs(self._particles) do
+		if not particle.enabled and particle.outOfBounds then
+			particle.label.Visible = false
+			continue
+		end
+
+		particle.position += particle.power * deltaTime
+		particle.power += gravityStep
+		particle.rotation += particle.rotationSpeed * deltaTime
+
+		local screenX = viewportSize.X * particle.emitterPosition.X + particle.position.X
+		local screenY = viewportSize.Y * particle.emitterPosition.Y + particle.position.Y
+		particle.label.Position = UDim2.fromOffset(screenX, screenY)
+		particle.label.Rotation = particle.rotation
+
+		if particle.power.Y < 0 then
+			particle.heightScale = math.abs(math.cos(now * 10 + particle.rotation))
+		else
+			particle.heightScale = 1
+		end
+
+		local height = math.max(2, particle.defaultSize.Y * particle.heightScale)
+		particle.label.Size = UDim2.fromOffset(particle.defaultSize.X, height)
+		particle.label.ImageColor3 = if particle.heightScale < 0.35
+			then particle.color:Lerp(Color3.new(0, 0, 0), 0.35)
+			else particle.color
+		particle.label.Visible = true
+
+		local isOutOfBounds = screenX > viewportSize.X + particle.defaultSize.X
+			or screenX < -particle.defaultSize.X
+			or screenY > viewportSize.Y + particle.defaultSize.Y
+			or screenY < -particle.defaultSize.Y
+
+		if isOutOfBounds then
+			particle.outOfBounds = true
+			if particle.enabled and self._burstEndTime > 0 then
+				particle.emitterPower = randomForce()
+				resetParticle(particle, self._colors, true)
+			else
+				particle.label.Visible = false
+			end
+		else
+			particle.outOfBounds = false
+		end
+	end
+end
+
+function ConfettiController:Destroy()
+	if self._destroyed then
+		return
+	end
+
+	self._destroyed = true
+	self._burstEndTime = 0
+
+	for _, particle in ipairs(self._particles) do
+		particle.label:Destroy()
+	end
+
+	table.clear(self._particles)
+end
+
+return ConfettiController

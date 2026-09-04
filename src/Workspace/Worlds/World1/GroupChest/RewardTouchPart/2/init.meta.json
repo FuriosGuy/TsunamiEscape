@@ -1,0 +1,114 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Attributes": {
+      "EmitDelay": 0,
+      "LifetimeSequence": {
+        "NumberSequence": {
+          "keypoints": [{
+              "time": 0.0,
+              "value": 0.0,
+              "envelope": 0.0
+            }, {
+              "time": 0.0313,
+              "value": 286.8939,
+              "envelope": 0.0
+            }, {
+              "time": 0.0625,
+              "value": 1123.1592,
+              "envelope": 0.0
+            }, {
+              "time": 0.0938,
+              "value": 2472.171,
+              "envelope": 0.0
+            }, {
+              "time": 0.125,
+              "value": 4297.3047,
+              "envelope": 0.0
+            }, {
+              "time": 0.1875,
+              "value": 9229.438,
+              "envelope": 0.0
+            }, {
+              "time": 0.25,
+              "value": 15626.563,
+              "envelope": 0.0
+            }, {
+              "time": 0.3125,
+              "value": 23195.68,
+              "envelope": 0.0
+            }, {
+              "time": 0.375,
+              "value": 31643.79,
+              "envelope": 0.0
+            }, {
+              "time": 0.5,
+              "value": 50005.0,
+              "envelope": 0.0
+            }, {
+              "time": 0.625,
+              "value": 68366.21,
+              "envelope": 0.0
+            }, {
+              "time": 0.6875,
+              "value": 76814.32,
+              "envelope": 0.0
+            }, {
+              "time": 0.75,
+              "value": 84383.44,
+              "envelope": 0.0
+            }, {
+              "time": 0.8125,
+              "value": 90780.56,
+              "envelope": 0.0
+            }, {
+              "time": 0.8438,
+              "value": 93448.06,
+              "envelope": 0.0
+            }, {
+              "time": 0.875,
+              "value": 95712.695,
+              "envelope": 0.0
+            }, {
+              "time": 0.9063,
+              "value": 97537.83,
+              "envelope": 0.0
+            }, {
+              "time": 0.9375,
+              "value": 98886.84,
+              "envelope": 0.0
+            }, {
+              "time": 0.9688,
+              "value": 99723.11,
+              "envelope": 0.0
+            }, {
+              "time": 1.0,
+              "value": 100010.0,
+              "envelope": 0.0
+            }]
+        }
+      }
+    },
+    "Color": [{
+        "time": 0.0,
+        "color": [1.0, 0.6353, 0.0]
+      }, {
+        "time": 1.0,
+        "color": [1.0, 0.851, 0.0]
+      }],
+    "Lifetime": [3, 3],
+    "LightInfluence": 1,
+    "Rate": 100,
+    "Size": [{
+        "time": 0.0,
+        "value": 3.4375,
+        "envelope": 0.0
+      }, {
+        "time": 1.0,
+        "value": 0.5,
+        "envelope": 0.0
+      }],
+    "SpreadAngle": [5, 5],
+    "Texture": "rbxassetid://12386363554"
+  }
+}

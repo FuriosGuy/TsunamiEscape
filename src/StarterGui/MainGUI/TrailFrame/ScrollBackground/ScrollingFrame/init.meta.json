@@ -1,0 +1,17 @@
+{
+  "className": "ScrollingFrame",
+  "properties": {
+    "Active": true,
+    "AutomaticCanvasSize": "Y",
+    "BackgroundColor3": [0, 0, 0],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "ClipsDescendants": false,
+    "Position": [[0.0, 0.0], [0.0261, 0.0]],
+    "ScrollBarImageColor3": [0, 0, 0],
+    "ScrollBarThickness": 6,
+    "Size": [[1.0, 0.0], [0.9475, 0.0]],
+    "ZIndex": 2
+  }
+}

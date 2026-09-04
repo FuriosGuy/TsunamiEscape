@@ -1,0 +1,14 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-25.3242, 10.0295, 5.0443, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [17, 17, 17],
+    "Massless": true,
+    "Material": "DiamondPlate",
+    "MaterialVariant": "2022 Inlet",
+    "Reflectance": 1,
+    "Size": [8.4848, 0.311, 0.8903],
+    "TopSurface": "Studs"
+  }
+}

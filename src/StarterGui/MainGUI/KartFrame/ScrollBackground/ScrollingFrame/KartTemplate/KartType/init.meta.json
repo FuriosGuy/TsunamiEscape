@@ -1,0 +1,16 @@
+{
+  "className": "ImageLabel",
+  "properties": {
+    "BackgroundColor3": [1, 1, 1],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "ClipsDescendants": true,
+    "Interactable": false,
+    "Position": [[-0.0008, 0.0], [0.0219, 0.0]],
+    "ScaleType": "Fit",
+    "Size": [[0.4965, 0.0], [0.9453, 0.0]],
+    "TileSize": [[0.0, 100.0], [0.0, 100.0]],
+    "ZIndex": 3
+  }
+}

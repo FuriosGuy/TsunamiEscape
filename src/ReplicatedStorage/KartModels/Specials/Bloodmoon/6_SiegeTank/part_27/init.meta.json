@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-22.7286, 11.9193, 12.7943, -1, 0, 0, 0, 0.7037, 0.7105, 0, 0.7105, -0.7037],
+    "Color": [17, 17, 17],
+    "Massless": true,
+    "Material": "DiamondPlate",
+    "MaterialVariant": "2022 Stud",
+    "Reflectance": 1,
+    "Size": [0.517, 0.114, 0.37]
+  }
+}

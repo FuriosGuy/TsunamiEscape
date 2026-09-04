@@ -1,0 +1,39 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "EmissionDirection": "Back",
+    "Lifetime": [0.25, 1.5],
+    "LightEmission": 1,
+    "Orientation": "VelocityParallel",
+    "Rotation": [90, 90],
+    "Size": [{
+        "time": 0.0,
+        "value": 3.63,
+        "envelope": 3.63
+      }, {
+        "time": 1.0,
+        "value": 1.0,
+        "envelope": 1.0
+      }],
+    "Speed": [50, 50],
+    "Squash": [{
+        "time": 0.0,
+        "value": 2.0,
+        "envelope": 0.0
+      }, {
+        "time": 1.0,
+        "value": 2.0,
+        "envelope": 0.0
+      }],
+    "Texture": "rbxassetid://107059622686856",
+    "Transparency": [{
+        "time": 0.0,
+        "value": 0.7375,
+        "envelope": 0.0
+      }, {
+        "time": 1.0,
+        "value": 1.0,
+        "envelope": 0.0
+      }]
+  }
+}
