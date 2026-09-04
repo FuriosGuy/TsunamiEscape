@@ -951,9 +951,12 @@ try {
         exit 0
     }
 
-    $script:ApiKey = [Environment]::GetEnvironmentVariable($ApiKeyEnvironmentVariable)
+    $script:ApiKey = ([string][Environment]::GetEnvironmentVariable($ApiKeyEnvironmentVariable)).Trim()
     if ([string]::IsNullOrWhiteSpace($script:ApiKey)) {
         throw "Missing environment variable $ApiKeyEnvironmentVariable. API key never read from config or source code."
+    }
+    if ($script:ApiKey.Contains("`r") -or $script:ApiKey.Contains("`n") -or $script:ApiKey.Contains("`0")) {
+        throw "$ApiKeyEnvironmentVariable contains an internal newline or NUL character. Re-enter the secret as one line."
     }
 
     foreach ($candidate in $candidates) {
