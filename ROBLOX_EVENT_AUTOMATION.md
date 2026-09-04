@@ -82,14 +82,15 @@ system should use the other as gameplay authority.
 
 ## Sequential Publishing
 
-DEV configuration uses `publishPolicy.mode = "one-per-event-key"`. Synchronizer
+Both workflows use `publishPolicy.mode = "one-per-event-key"`. Synchronizer
 selects one current window plus one staged next window for every enabled event
 key. Blood Moon and 2X Weekend can therefore coexist. It never creates a second
 window for same event key beyond that pair.
 
-For recurring events, final visibility is configured as `public`, while the
-next window is created as `private`. Once the previous active window ends, the
-next event is patched to `public`. This prepares Roblox event pages and RSVP
+DEV config sets final visibility to `private`, so every DEV event remains
+private. MAIN config sets final visibility to `public`, while its next recurring
+window is created as `private`. Once previous active window ends, next MAIN
+event is patched to `public`. This prepares Roblox event pages and RSVP
 notifications without exposing next occurrence early. When no previous window
 is active, next scheduled occurrence is public immediately. Different event
 keys do not block each other.
@@ -303,7 +304,7 @@ dependency.
 Start with a small external command or scheduled workflow that:
 
 1. Reads `ROBLOX_EVENT_API_KEY` from a secret store.
-2. Reads DEV universe ID `9799168239` and DEV place ID `116587108840614` from configuration.
+2. Reads target universe and place IDs from environment-specific configuration.
 3. Computes next window for generic configured events.
 4. Selects current event plus one staged next event per event key.
 5. Lists existing events.
@@ -325,7 +326,9 @@ The generic synchronizer is located outside `src`:
 tools/RobloxEventSync/Sync-BloodMoonEvent.ps1
 tools/RobloxEventSync/config.example.json
 tools/RobloxEventSync/config.github-dev.json
+tools/RobloxEventSync/config.github-main.json
 .github/workflows/roblox-event-sync.yml
+.github/workflows/roblox-event-sync-main.yml
 ```
 
 Setup:
@@ -337,12 +340,12 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 notepad .env
 ```
 
-Put the API key in the local `.env` file as
-`ROBLOX_EVENT_API_KEY=your-key`. The `.env` file is ignored by this project and
-is loaded only by the external PowerShell tool. Process environment variables
-take priority over `.env`, so CI systems can continue using secret variables.
-The `.env` file is plain text on the local computer and must still be protected
-like a password.
+Put DEV key in local `.env` as `ROBLOX_EVENT_API_KEY=your-key` and MAIN key as
+`ROBLOX_EVENT_MAIN_API_KEY=your-main-key` when local MAIN testing is needed.
+The `.env` file is ignored by this project and is loaded only by external
+PowerShell tool. Process environment variables take priority over `.env`, so
+CI systems can continue using secret variables. The `.env` file is plain text
+on local computer and must still be protected like a password.
 
 Review `events[]`, metadata, and schedule definitions in `config.json`. The
 script is dry-run by default:
@@ -366,35 +369,51 @@ deterministic dry-run without making API requests.
 
 ## GitHub Actions Setup
 
-Workflow is included at:
+Workflows are included at:
 
 ```text
 .github/workflows/roblox-event-sync.yml
+.github/workflows/roblox-event-sync-main.yml
 ```
 
-First workflow targets DEV only:
+DEV workflow:
 
 ```text
 Universe: 9799168239
 Place:    116587108840614
 Config:   tools/RobloxEventSync/config.github-dev.json
+Visibility: always private
+```
+
+MAIN workflow:
+
+```text
+Universe: 9824719186
+Place:    86681121894203
+Config:   tools/RobloxEventSync/config.github-main.json
+Visibility: public, with next same-key window staged private
 ```
 
 Setup steps:
 
-1. Commit and push workflow, synchronizer, and DEV config to GitHub. Never
+1. Commit and push both workflows, synchronizer, and both environment configs
+   to GitHub. Never
    commit `config.json`, `.env`, `event-state.json`, or any API key.
 2. Open GitHub repository `Settings` > `Secrets and variables` > `Actions`.
 3. Select `New repository secret`.
 4. Set name exactly to `ROBLOX_EVENT_API_KEY`.
-5. Paste Roblox API key value, then save. GitHub masks secret in workflow logs.
-6. Confirm Roblox key has `universe.event:read` and `universe.event:write`,
-   targets DEV universe `9799168239`, and authenticated account has required
-   group event permission. Keep `Restrict by Experience` disabled if Roblox
-   rejects event ID reads or patches.
-7. Open GitHub `Actions` > `Roblox Experience Event Sync` > `Run workflow`.
-8. Review output. It must show DEV universe, selected windows, visibility, and
-   successful response verification.
+5. Paste DEV Roblox API key value, then save. GitHub masks secret in workflow logs.
+6. Add another repository secret named `ROBLOX_EVENT_MAIN_API_KEY`.
+7. Paste MAIN Roblox API key value, then save. Separate keys limit blast radius.
+8. Confirm DEV key has `universe.event:read` and `universe.event:write` for
+   universe `9799168239`. Confirm MAIN key has same scopes for universe
+   `9824719186`. Authenticated account needs group event permission. Keep
+   `Restrict by Experience` disabled if Roblox rejects event ID reads or patches.
+9. Open GitHub `Actions` > `DEV Version` > `Run workflow` for private DEV test.
+10. Open GitHub `Actions` > `Main Version` > `Run workflow` only when ready to
+    mutate public MAIN events.
+11. Review output. It must show correct universe, selected windows, visibility,
+    and successful response verification.
 
 Workflow runs every 15 minutes in UTC. GitHub scheduled workflows can be
 delayed during load, so manual dispatch remains available. `concurrency` keeps
@@ -413,15 +432,14 @@ pwsh -NoProfile -File .\tools\RobloxEventSync\Sync-BloodMoonEvent.ps1 `
   -NowUtcOverride 2026-09-05T16:00:00Z
 ```
 
-Second dry-run should show active `Weekend2x` public plus its next window
-private. Upcoming Blood Moon remains public because no prior Blood Moon window
-is active in that simulation. Do not use `-Apply` until API key scope and
-printed payloads are reviewed.
+DEV dry-run should show active and staged `Weekend2x` windows both private.
+Do not use `-Apply` until API key scope and printed payloads are reviewed.
 
 For production, copy `config.github-dev.json` to separately reviewed
-production config with main universe/place IDs, then use separate GitHub
-environment and secret. Do not make workflow target production by changing DEV
-IDs casually.
+production config with main universe/place IDs, or use the committed
+`config.github-main.json`. Keep separate GitHub secret and review every public
+event mutation. Do not make workflow target production by changing DEV IDs
+casually.
 
 ## Bottom Line
 

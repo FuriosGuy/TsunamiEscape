@@ -4,14 +4,14 @@ param(
     [switch]$Apply,
     [int]$MaxPages = 10,
     [string]$EventKey,
-    [string]$NowUtcOverride
+    [string]$NowUtcOverride,
+    [string]$ApiKeyEnvironmentVariable = "ROBLOX_EVENT_API_KEY"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ApiRoot = "https://apis.roblox.com/virtual-events/v3"
-$ApiKeyEnvironmentVariable = "ROBLOX_EVENT_API_KEY"
 $LocalDotEnvPath = Join-Path $PSScriptRoot ".env"
 
 function Import-LocalDotEnv {

@@ -3,9 +3,7 @@
   "groupId": "13706307",
   "placeId": "116587108840614",
   "stateFile": "event-state.json",
-  "visibility": "public",
-  "prePublishVisibility": "private",
-  "publishAfterPreviousWindowEnds": true,
+  "visibility": "private",
   "notificationAudience": "rsvp",
   "publishPolicy": {
     "mode": "one-per-event-key",

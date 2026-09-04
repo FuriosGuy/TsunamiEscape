@@ -1,4 +1,4 @@
-name: Roblox Experience Event Sync
+name: DEV Version
 
 on:
   workflow_dispatch:
