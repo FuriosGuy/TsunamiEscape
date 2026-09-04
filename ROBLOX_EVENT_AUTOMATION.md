@@ -415,7 +415,7 @@ Setup steps:
 11. Review output. It must show correct universe, selected windows, visibility,
     and successful response verification.
 
-Workflow runs every 15 minutes in UTC. GitHub scheduled workflows can be
+Workflow runs hourly at minute 0 in UTC. GitHub scheduled workflows can be
 delayed during load, so manual dispatch remains available. `concurrency` keeps
 overlapping runs queued instead of allowing duplicate create attempts.
 
