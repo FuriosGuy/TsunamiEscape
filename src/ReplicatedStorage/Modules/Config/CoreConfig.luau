@@ -126,6 +126,10 @@ CoreConfig.eventBoard = {
 		["6019459865490096779"] = 137113910559154, -- +1 Speed live event thumbnail.
 		["3893769414042059370"] = 95114581728373, -- ADMIN ABUSE live event thumbnail.
 	},
+	secondaryEventTitles = {
+		-- EventBoard shows these only when no major event is active or upcoming.
+		"2X WEEKEND",
+	},
 }
 
 -- One-time progression and race badges awarded by the server.

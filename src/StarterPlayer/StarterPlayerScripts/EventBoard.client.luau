@@ -732,6 +732,39 @@ local function applyAllBoards()
 	end
 end
 
+local function normalizeEventTitle(value: any): string
+	if typeof(value) ~= "string" then
+		return ""
+	end
+
+	local normalized = string.upper(value)
+	normalized = string.gsub(normalized, "[^%w]+", " ")
+	normalized = string.gsub(normalized, "^%s+", "")
+	normalized = string.gsub(normalized, "%s+$", "")
+	return normalized
+end
+
+local function isSecondaryEvent(eventData: EventDictionary): boolean
+	local title = eventData.DisplayTitle or eventData.Title
+	local normalizedTitle = normalizeEventTitle(title)
+	if normalizedTitle == "" then
+		return false
+	end
+
+	local secondaryTitles = eventBoardConfig.secondaryEventTitles
+	if typeof(secondaryTitles) ~= "table" then
+		return false
+	end
+
+	for _, secondaryTitle in ipairs(secondaryTitles) do
+		if normalizedTitle == normalizeEventTitle(secondaryTitle) then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function pickBestEvent(events: { any }): EventDictionary?
 	local normalizedEvents: { EventDictionary } = {}
 	for _, eventData in ipairs(events) do
@@ -746,25 +779,30 @@ local function pickBestEvent(events: { any }): EventDictionary?
 		return aTimestamp < bTimestamp
 	end)
 
-	for _, eventData in ipairs(normalizedEvents) do
-		if getEventLifecycleState(eventData) == "Active" then
-			return eventData
+	local function findFirstByState(state: EventLifecycleState, secondary: boolean): EventDictionary?
+		for _, eventData in ipairs(normalizedEvents) do
+			if getEventLifecycleState(eventData) == state and isSecondaryEvent(eventData) == secondary then
+				return eventData
+			end
 		end
+		return nil
 	end
 
-	for _, eventData in ipairs(normalizedEvents) do
-		if getEventLifecycleState(eventData) == "Upcoming" then
-			return eventData
+	local function findFirstNotEnded(secondary: boolean): EventDictionary?
+		for _, eventData in ipairs(normalizedEvents) do
+			if eventData.HasEnded ~= true and isSecondaryEvent(eventData) == secondary then
+				return eventData
+			end
 		end
+		return nil
 	end
 
-	for _, eventData in ipairs(normalizedEvents) do
-		if eventData.HasEnded ~= true then
-			return eventData
-		end
-	end
-
-	return nil
+	return findFirstByState("Active", false)
+		or findFirstByState("Upcoming", false)
+		or findFirstByState("Active", true)
+		or findFirstByState("Upcoming", true)
+		or findFirstNotEnded(false)
+		or findFirstNotEnded(true)
 end
 
 local function extractEventsFromResult(result: any): { any }
