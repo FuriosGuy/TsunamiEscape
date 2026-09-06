@@ -1,5 +1,3 @@
---!strict
-
 local DailyRewardsConfig = {}
 
 export type RewardKind = "XPSpeed" | "Wins" | "Level" | "Rebirth"

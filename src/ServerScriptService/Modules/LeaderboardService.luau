@@ -1,4 +1,3 @@
---!strict
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -6,23 +5,22 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local UIFolder = Modules:WaitForChild("UI")
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local VisualFunctions = require(UIFolder:WaitForChild("VisualFunctions"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local NumberFormatting = require(Modules.Shared:WaitForChild("NumberFormatting"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 
 local LeaderboardService = {}
 
 local leaderboardDebugConfig = CoreConfig.leaderboard
 LeaderboardService.DEBUG_USE_FAKE_DATA = if leaderboardDebugConfig
 		and typeof(leaderboardDebugConfig.debugUseFakeData) == "boolean"
-	then leaderboardDebugConfig.debugUseFakeData
+	then RunService:IsStudio() and leaderboardDebugConfig.debugUseFakeData
 	else false
 LeaderboardService.DEBUG_APPEND_FAKE_DATA = if leaderboardDebugConfig
 		and typeof(leaderboardDebugConfig.debugAppendFakeData) == "boolean"
-	then leaderboardDebugConfig.debugAppendFakeData
+	then RunService:IsStudio() and leaderboardDebugConfig.debugAppendFakeData
 	else false
 
 export type LeaderboardConfig = {
@@ -328,7 +326,7 @@ local function populateEntry(entryFrame: Frame, rank: number, userId: number, us
 
 	local amountLabel = entryFrame:FindFirstChild("Amount", true)
 	if amountLabel and amountLabel:IsA("TextLabel") then
-		amountLabel.Text = VisualFunctions.FormatNumber(value)
+		amountLabel.Text = NumberFormatting.FormatNumber(value)
 	end
 
 	local placeLabel = entryFrame:FindFirstChild("Place", true)

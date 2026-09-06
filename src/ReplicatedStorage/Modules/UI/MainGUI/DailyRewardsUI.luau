@@ -1,4 +1,3 @@
---!strict
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,14 +6,14 @@ local TweenService = game:GetService("TweenService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Maid = require(Modules:WaitForChild("Maid"))
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local ProductService = require(Modules:WaitForChild("ProductService"))
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local FunnelAnalytics = require(Modules:WaitForChild("FunnelAnalytics"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local ProductService = require(Modules:WaitForChild("Shared"):WaitForChild("ProductService_Client"))
+local PlayerHandler = require(Modules:WaitForChild("Shared"):WaitForChild("PlayerHandler_Client"))
+local FunnelAnalytics = require(Modules:WaitForChild("Shared"):WaitForChild("FunnelAnalytics_Client"))
+local SharedFolder = Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Client"))
 local UIFolder = Modules:WaitForChild("UI")
 local VisualFunctions = require(UIFolder:WaitForChild("VisualFunctions"))
-local DailyRewardsConfig = require(script.Parent:WaitForChild("DailyRewardsConfig"))
+local DailyRewardsConfig = require(Modules:WaitForChild("Shared"):WaitForChild("DailyRewardsConfig"))
 
 local DailyRewardsUI = {}
 DailyRewardsUI.__index = DailyRewardsUI
@@ -27,8 +26,8 @@ local CURRENT_DAY_ATTRIBUTE = DailyRewardsConfig.CURRENT_DAY_ATTRIBUTE
 local NEXT_CLAIM_ATTRIBUTE = DailyRewardsConfig.NEXT_CLAIM_ATTRIBUTE
 local CYCLE_COUNT_ATTRIBUTE = DailyRewardsConfig.CYCLE_COUNT_ATTRIBUTE
 local CLAIM_ALL_PRODUCT_ID = ProductService.DevProducts["ClaimAllDaily"]
-local dailyRewardsConfig = if CoreConfig.server and CoreConfig.server.dailyRewards
-	then CoreConfig.server.dailyRewards
+local dailyRewardsConfig = if CoreConfig.clientDebug and CoreConfig.clientDebug.dailyRewards
+	then CoreConfig.clientDebug.dailyRewards
 	else nil
 local DEBUG_SEQUENTIAL_CLAIM_MODE = RunService:IsStudio()
 	and dailyRewardsConfig
@@ -320,7 +319,7 @@ function DailyRewardsUI:Rebuild()
 	end
 
 	if self.claimDailyButton then
-		self.buttonMaid:GiveTask(self.claimDailyButton.MouseButton1Click:Connect(function()
+		self.buttonMaid:GiveTask(self.claimDailyButton.Activated:Connect(function()
 			if self.destroyed then
 				return
 			end
@@ -336,7 +335,7 @@ function DailyRewardsUI:Rebuild()
 	end
 
 	if self.claimAllButton and CLAIM_ALL_PRODUCT_ID then
-		self.buttonMaid:GiveTask(self.claimAllButton.MouseButton1Click:Connect(function()
+		self.buttonMaid:GiveTask(self.claimAllButton.Activated:Connect(function()
 			if self.destroyed then
 				return
 			end

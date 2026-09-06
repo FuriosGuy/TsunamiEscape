@@ -1,5 +1,3 @@
---!strict
-
 export type RewardKind = "Level" | "XPSpeed" | "Wins" | "Rebirth"
 
 export type RewardGrant = {

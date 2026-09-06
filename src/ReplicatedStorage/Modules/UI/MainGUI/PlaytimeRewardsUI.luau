@@ -1,16 +1,15 @@
---!strict
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Maid = require(Modules:WaitForChild("Maid"))
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
+local PlayerHandler = require(Modules:WaitForChild("Shared"):WaitForChild("PlayerHandler_Client"))
 local UIFolder = Modules:WaitForChild("UI")
 local VisualFunctions = require(UIFolder:WaitForChild("VisualFunctions"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
-local PlaytimeRewardsConfig = require(script.Parent:WaitForChild("PlaytimeRewardsConfig"))
+local SharedFolder = Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Client"))
+local PlaytimeRewardsConfig = require(Modules:WaitForChild("Shared"):WaitForChild("PlaytimeRewardsConfig"))
 
 local PlaytimeRewardsUI = {}
 PlaytimeRewardsUI.__index = PlaytimeRewardsUI
@@ -23,10 +22,11 @@ local COMPACT_NUMBER_THRESHOLD_LENGTH = 20
 local READY_TEXT_COLOR = Color3.fromRGB(0, 255, 0)
 local READY_GRADIENT_TOP = Color3.fromRGB(255, 255, 255)
 local READY_GRADIENT_BOTTOM = Color3.fromRGB(0, 130, 15)
-local playtimeConfig = if CoreConfig.server and CoreConfig.server.playtimeRewards
-	then CoreConfig.server.playtimeRewards
+local playtimeConfig = if CoreConfig.clientDebug and CoreConfig.clientDebug.playtimeRewards
+	then CoreConfig.clientDebug.playtimeRewards
 	else nil
-local DEBUG_SEQUENTIAL_CLAIM_MODE = if playtimeConfig and typeof(playtimeConfig.debugSequentialClaimMode) == "boolean"
+local DEBUG_SEQUENTIAL_CLAIM_MODE = if playtimeConfig
+		and typeof(playtimeConfig.debugSequentialClaimMode) == "boolean"
 	then RunService:IsStudio() and playtimeConfig.debugSequentialClaimMode
 	else false
 
@@ -170,8 +170,12 @@ local function formatRewardText(tier: RewardTier, player: Player): string
 			local miscMultiplier = getNumericAttribute(player, "Misc_XPSpeedMultiplier", 1)
 			local friendMultiplier = getNumericAttribute(player, "Friend_XPMultiplier", 1)
 			local treadmillMultiplier = getNumericAttribute(player, "Treadmill_XPMultiplier", 1)
-			local effectiveXP =
-				reward.amount * rebirthMultiplier * devMultiplier * miscMultiplier * friendMultiplier * treadmillMultiplier
+			local effectiveXP = reward.amount
+				* rebirthMultiplier
+				* devMultiplier
+				* miscMultiplier
+				* friendMultiplier
+				* treadmillMultiplier
 			local amount = formatCompactNumber(effectiveXP)
 			table.insert(parts, "+" .. amount .. " XP")
 		elseif reward.kind == "Wins" then
@@ -352,10 +356,7 @@ function PlaytimeRewardsUI:NotifyClaimableCount(claimableCount: number)
 
 	local ok, err = pcall(callback, claimableCount)
 	if not ok then
-		DebugModule.debugWarn(
-			string.format("onClaimableCountChanged callback failed: %s", tostring(err)),
-			MODULE_NAME
-		)
+		DebugModule.debugWarn(string.format("onClaimableCountChanged callback failed: %s", tostring(err)), MODULE_NAME)
 	end
 end
 
@@ -468,7 +469,7 @@ function PlaytimeRewardsUI:Rebuild()
 		}
 		self.entries[tier.id] = entry
 
-		self.entryMaid:GiveTask(claimButton.MouseButton1Click:Connect(function()
+		self.entryMaid:GiveTask(claimButton.Activated:Connect(function()
 			if entry.isClaimed or entry.inFlight then
 				return
 			end

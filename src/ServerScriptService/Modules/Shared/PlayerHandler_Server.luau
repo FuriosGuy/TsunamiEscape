@@ -3,190 +3,21 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
-local ConfigFolder = ReplicatedStorage.Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
-local spinWheelConfig = CoreConfig.spinWheel or {}
-local REWARDED_AD_MAX_SPINS = if typeof(spinWheelConfig.rewardedAdMaxSpins) == "number"
-	then math.max(1, math.floor(spinWheelConfig.rewardedAdMaxSpins))
-	else 5
+local SharedFolder = ReplicatedStorage.Modules:WaitForChild("Shared")
+local ServerSharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(ServerSharedFolder:WaitForChild("CoreConfig_Server"))
+local PlayerDataConfig = require(SharedFolder:WaitForChild("PlayerDataConfig"))
 
-local DefaultAttributes = {
-	Rebirths = 0,
-	Rebirth_XPMultiplier = 1,
-	DevProduct_XPSpeedMultiplier = 1,
-	Misc_XPSpeedMultiplier = 1,
-	Friend_XPMultiplier = 1,
-	FriendInviteCount = 0,
+PlayerHandler.DEFAULT_ATTRIBUTES = PlayerDataConfig.DEFAULT_ATTRIBUTES
+PlayerHandler.FRIEND_INVITE_MULTIPLIER_STEP = PlayerDataConfig.FRIEND_INVITE_MULTIPLIER_STEP
+PlayerHandler.TRAIL_ORDER = PlayerDataConfig.TRAIL_ORDER
+PlayerHandler.TRAIL_CONFIGS = PlayerDataConfig.TRAIL_CONFIGS
+PlayerHandler.MOVEMENT_CONFIG = PlayerDataConfig.MOVEMENT_CONFIG
 
-	Player_Speed = 16,
-	Max_Player_Speed = 16, -- Base and Max start at 16
-	Trail_Equipped = "None",
-	OwnedTrails = "",
-	OwnedKarts = "1_Default",
-	Kart_Equipped = "1_Default",
-	Current_World = "World1",
-	CurrentStage = 0,
-	MinigameRaceWins = 0,
-	BloodmoonWins = 0,
-	BloodmoonWinsCycleUnix = 0,
-
-	WinCount = 0,
-	WinMultiplier = 1,
-	HasVIPPass = false,
-	VerifyRewardClaimed = false,
-	VerifyRewardNextClaimUnix = 0,
-	VerifyRewardClaimCount = 0,
-	StarterPackRewardClaimed = false,
-	TutorialSeen = false,
-	TutorialCompleted = false,
-	Data_Loaded = false,
-	PlaytimeRewardElapsed = 0,
-	TotalPlaytimeSeconds = 0,
-	PlaytimeRewardsClaimed = "",
-	DailyRewardCurrentDay = 1,
-	DailyRewardNextClaimUnix = 0,
-	DailyRewardCycleCount = 0,
-	SpinWheelSpins = 0,
-	SpinWheelNextFreeSpinUnix = 0,
-	SpinWheelFreeSpinInitialized = false,
-	SpinWheelProcessedReceiptIds = "",
-	SpinWheelRewardedAdSpinsRemaining = REWARDED_AD_MAX_SPINS,
-	SpinWheelRewardedAdNextAvailableUnix = 0,
-	SpinWheelRewardedAdResetUnix = 0,
-	TemporarySpeedBoostEndUnix = 0,
-	TemporaryWinBoostEndUnix = 0,
-	CompensationClaimedCampaigns = "",
-
-	CurrentLevel = 1,
-	MaxLevel = 25,
-
-	AllXPSpeed = 0,
-	CurrentXPSpeed = 0,
-	MaxXPSpeed = 25,
-
-	Treadmill_XPMultiplier = 1,
-	Treadmill_Active = false,
-	Movement_XPGainRate = 10,
-	Movement_XPGainInterval = 0.25,
-}
-
-PlayerHandler.DEFAULT_ATTRIBUTES = DefaultAttributes
-local socialConfig = CoreConfig.social
-local FRIEND_INVITE_MULTIPLIER_STEP = if socialConfig
-		and typeof(socialConfig.friendInviteMultiplierStep) == "number"
-	then math.max(0, socialConfig.friendInviteMultiplierStep)
-	else 0.1
-PlayerHandler.FRIEND_INVITE_MULTIPLIER_STEP = FRIEND_INVITE_MULTIPLIER_STEP
-local DEFAULT_PLAYER_SPEED = if typeof(DefaultAttributes.Player_Speed) == "number"
-	then DefaultAttributes.Player_Speed
-	else 16
-local DEFAULT_MAX_PLAYER_SPEED = if typeof(DefaultAttributes.Max_Player_Speed) == "number"
-	then DefaultAttributes.Max_Player_Speed
-	else 16
-
-PlayerHandler.TRAIL_ORDER = {
-	"GalaxyTrail",
-	"DemonTrail",
-	"EclipseTrail",
-	"FlameTrail",
-	"GreenTrail",
-	"BlueTrail",
-	"PurpleTrail",
-	"GoldTrail",
-}
-
-PlayerHandler.TRAIL_CONFIGS = {
-	GalaxyTrail = {
-		DisplayName = "Galaxy Trail",
-		XPMultiplier = 15,
-		CanBuyWithWins = false,
-		WinsRequired = 0,
-		BackgroundColor = Color3.fromRGB(84, 0, 255),
-		GradientBottomColor = Color3.fromRGB(100, 100, 100),
-		ProductKey = "GalaxyTrail",
-	},
-	DemonTrail = {
-		DisplayName = "Demon Trail",
-		XPMultiplier = 7.5,
-		CanBuyWithWins = false,
-		WinsRequired = 0,
-		BackgroundColor = Color3.fromRGB(255, 0, 0),
-		GradientBottomColor = Color3.fromRGB(0, 0, 0),
-		ProductKey = "DemonTrail",
-	},
-	EclipseTrail = {
-		DisplayName = "Eclipse Trail",
-		XPMultiplier = 7,
-		CanBuyWithWins = false,
-		WinsRequired = 5,
-		BackgroundColor = Color3.fromRGB(255, 79, 79),
-		GradientBottomColor = Color3.fromRGB(206, 0, 3),
-		ImageAssetId = "rbxassetid://107479098911247",
-		EventOnly = true,
-		EventName = "Bloodmoon",
-	},
-	GreenTrail = {
-		DisplayName = "Green Trail",
-		XPMultiplier = 1.5,
-		CanBuyWithWins = true,
-		WinsRequired = 250,
-		BackgroundColor = Color3.fromRGB(0, 255, 0),
-		GradientBottomColor = Color3.fromRGB(0, 130, 15),
-		ProductKey = "GreenTrail",
-	},
-	BlueTrail = {
-		DisplayName = "Blue Trail",
-		XPMultiplier = 2,
-		CanBuyWithWins = true,
-		WinsRequired = 750,
-		BackgroundColor = Color3.fromRGB(88, 216, 255),
-		GradientBottomColor = Color3.fromRGB(0, 81, 255),
-		ProductKey = "BlueTrail",
-	},
-	PurpleTrail = {
-		DisplayName = "Purple Trail",
-		XPMultiplier = 3,
-		CanBuyWithWins = true,
-		WinsRequired = 2500,
-		BackgroundColor = Color3.fromRGB(228, 75, 255),
-		GradientBottomColor = Color3.fromRGB(74, 3, 255),
-		ProductKey = "PurpleTrail",
-	},
-	GoldTrail = {
-		DisplayName = "Gold Trail",
-		XPMultiplier = 4.5,
-		CanBuyWithWins = true,
-		WinsRequired = 7500,
-		BackgroundColor = Color3.fromRGB(255, 255, 0),
-		GradientBottomColor = Color3.fromRGB(255, 183, 0),
-		ProductKey = "GoldTrail",
-	},
-	FlameTrail = {
-		DisplayName = "Flame Trail",
-		XPMultiplier = 6,
-		CanBuyWithWins = false,
-		WinsRequired = 0,
-		BackgroundColor = Color3.fromRGB(254, 199, 41),
-		GradientBottomColor = Color3.fromRGB(255, 85, 0),
-		RewardSource = "SpinWheel",
-	},
-}
-
--- Centralized Movement and XP Configuration
-PlayerHandler.MOVEMENT_CONFIG = {
-	XP_GAIN_RATE = 100, -- Amount awarded each movement interval
-	XP_GAIN_INTERVAL = 0.5, -- Seconds between movement awards
-	XP_GAIN_TOLERANCE = 0.05, -- Seconds of slack for network jitter (must be < interval)
-	PLAYER_SPEED_PER_LEVEL = 4,
-	LEVEL_MULTIPLIERS = {
-		{ MaxLevel = 200, Multiplier = 1.125 },
-		{ MaxLevel = 400, Multiplier = 1.15 },
-	},
-	REBIRTH_CONFIG = {
-		MAX_LEVEL_INCREMENT = 25,
-		MULTIPLIER_INCREMENT = 0.5,
-	},
-}
+local DefaultAttributes = PlayerHandler.DEFAULT_ATTRIBUTES
+local FRIEND_INVITE_MULTIPLIER_STEP = PlayerHandler.FRIEND_INVITE_MULTIPLIER_STEP
+local DEFAULT_PLAYER_SPEED = PlayerDataConfig.DEFAULT_PLAYER_SPEED
+local DEFAULT_MAX_PLAYER_SPEED = PlayerDataConfig.DEFAULT_MAX_PLAYER_SPEED
 
 local function applyDefaultMovementAttributes(player: Player)
 	if player:GetAttribute("Movement_XPGainRate") == nil then
@@ -641,10 +472,7 @@ function PlayerHandler.GetBloodmoonUnlockDisplayName(rewardId: string): string?
 	end
 
 	for _, unlock in ipairs(progressConfig.unlocks) do
-		if typeof(unlock) == "table"
-			and unlock.id == rewardId
-			and typeof(unlock.displayName) == "string"
-		then
+		if typeof(unlock) == "table" and unlock.id == rewardId and typeof(unlock.displayName) == "string" then
 			return unlock.displayName
 		end
 	end
@@ -686,9 +514,12 @@ function PlayerHandler.SyncBloodmoonUnlocks(player: Player): { string }
 		local legacyIds = unlock.legacyIds
 		if typeof(legacyIds) == "table" then
 			for _, legacyId in ipairs(legacyIds) do
-				if typeof(legacyId) == "string"
-					and ((unlock.kind == "Kart" and PlayerHandler.OwnsKart(player, legacyId))
-						or (unlock.kind == "Trail" and PlayerHandler.OwnsTrail(player, legacyId)))
+				if
+					typeof(legacyId) == "string"
+					and (
+						(unlock.kind == "Kart" and PlayerHandler.OwnsKart(player, legacyId))
+						or (unlock.kind == "Trail" and PlayerHandler.OwnsTrail(player, legacyId))
+					)
 				then
 					legacyOwned = true
 					break
@@ -999,10 +830,7 @@ function PlayerHandler.AddWinButtonWins(player: Player, amount: number): number
 		)
 		return 0
 	end
-	local finalAmount = math.max(
-		0,
-		gamePassAward
-	)
+	local finalAmount = math.max(0, gamePassAward)
 	if not isFiniteNumber(finalAmount) then
 		DebugModule.debugWarn(
 			string.format("Rejected non-finite win-button award | player=%s | amount=%s", player.Name, tostring(amount)),

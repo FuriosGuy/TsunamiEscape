@@ -1,14 +1,17 @@
---!strict
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RobloxSoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 
 local SoundService = {}
-local guiSoundFolder = Instance.new("Folder")
-guiSoundFolder.Name = "GuiSounds"
-guiSoundFolder.Parent = RobloxSoundService
+local guiSoundFolder: Folder? = nil
+if RunService:IsClient() then
+	guiSoundFolder = Instance.new("Folder")
+	guiSoundFolder.Name = "GuiSounds"
+	guiSoundFolder.Parent = RobloxSoundService
+end
 
 SoundService.WorldMusicPlaylists = {
 	Fallback = {
@@ -226,6 +229,10 @@ local function createSound(parent: Instance, soundName: string, overrideSettings
 end
 
 local function getOrCreateCachedGuiSound(soundName: string): Sound?
+	if not guiSoundFolder then
+		return nil
+	end
+
 	local existing = guiSoundFolder:FindFirstChild(soundName)
 	if existing and existing:IsA("Sound") then
 		return existing

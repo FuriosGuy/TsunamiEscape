@@ -1,4 +1,3 @@
---!strict
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,6 +7,7 @@ local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
 local FramerateManager = require(ReplicatedStorage.Modules.FramerateManager)
+local NumberFormatting = require(ReplicatedStorage.Modules.Shared:WaitForChild("NumberFormatting"))
 
 local VisualFunctions = {}
 
@@ -92,28 +92,13 @@ VisualFunctions.Labels = {
 	Xp10MValueLabel = nil :: GuiObject?,
 }
 
-local SUFFIXES = { "", "K", "M", "B", "T", "Qd", "Qi", "Sx", "Sp", "Oc", "No", "Dc" }
 local COMPACT_NUMBER_THRESHOLD_LENGTH = 20
 local XP_LABEL_COMPACT_DIGITS_THRESHOLD = 9
 
-local function formatWithCommas(value: number): string
-	local rounded = math.round(value)
-	local formatted = tostring(rounded)
-
-	local count = 0
-	repeat
-		local updated
-		updated, count = string.gsub(formatted, "^(-?%d+)(%d%d%d)", "%1,%2")
-		formatted = updated
-	until count == 0
-
-	return formatted
-end
-
 local function formatWithCommasOrCompact(value: number): string
-	local commaText = formatWithCommas(value)
+	local commaText = NumberFormatting.FormatWithCommas(value)
 	if string.len(commaText) > COMPACT_NUMBER_THRESHOLD_LENGTH then
-		return VisualFunctions.FormatNumber(value)
+		return NumberFormatting.FormatNumber(value)
 	end
 
 	return commaText
@@ -122,20 +107,20 @@ end
 local function formatXPLabelValue(value: number): string
 	local rounded = math.round(math.abs(value))
 	if rounded >= (10 ^ (XP_LABEL_COMPACT_DIGITS_THRESHOLD - 1)) then
-		return VisualFunctions.FormatNumber(value)
+		return NumberFormatting.FormatNumber(value)
 	end
 
-	return formatWithCommas(value)
+	return NumberFormatting.FormatWithCommas(value)
 end
 
 local function formatPreciseNumber(value: number): string
 	if math.abs(value) >= 1000 then
-		return VisualFunctions.FormatNumber(value)
+		return NumberFormatting.FormatNumber(value)
 	end
 
 	local rounded = math.round(value * 100) / 100
 	if rounded == math.round(rounded) then
-		return formatWithCommas(rounded)
+		return NumberFormatting.FormatWithCommas(rounded)
 	end
 
 	local text = string.format("%.2f", rounded)
@@ -174,17 +159,7 @@ local function distributeValue(totalValue: number, splitCount: number): { number
 end
 
 function VisualFunctions.FormatNumber(val: number): string
-	if val < 1000 then
-		return formatWithCommas(val)
-	end
-	local index = math.floor(math.log10(val) / 3)
-	index = math.clamp(index, 0, #SUFFIXES - 1)
-	local suffix = SUFFIXES[index + 1]
-	local shortVal = val / (10 ^ (index * 3))
-	local text = string.format("%.2f", shortVal)
-	text = text:gsub("%.00$", "")
-	text = text:gsub("(%..-)0$", "%1")
-	return text .. suffix
+	return NumberFormatting.FormatNumber(val)
 end
 
 -- Internal state to track hover status and parameters for click return logic
@@ -220,7 +195,9 @@ local RainbowGradientMaids: { [UIGradient]: Maid } = {}
 local RainbowGradientStates: { [UIGradient]: { colors: { Color3 }, speed: number } } = setmetatable(
 	{},
 	{ __mode = "k" }
-) :: { [UIGradient]: { colors: { Color3 }, speed: number } }
+) :: {
+	[UIGradient]: { colors: { Color3 }, speed: number },
+}
 local HoverSetupBindings: { [GuiObject]: boolean } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: boolean }
 local ClickSetupBindings: { [GuiObject]: boolean } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: boolean }
 local AnimationMaids: { [Instance]: Maid } = setmetatable({}, { __mode = "k" }) :: { [Instance]: Maid }
@@ -872,7 +849,11 @@ local function resetHoverAndClickVisualState(root: Instance)
 			state.isHovering = false
 
 			local target = trackedFrame
-			if trackedFrame.Parent and trackedFrame.Parent:IsA("GuiObject") and string.find(trackedFrame.Parent.Name, "_Parent") then
+			if
+				trackedFrame.Parent
+				and trackedFrame.Parent:IsA("GuiObject")
+				and string.find(trackedFrame.Parent.Name, "_Parent")
+			then
 				target = trackedFrame.Parent :: GuiObject
 			end
 
@@ -915,6 +896,7 @@ function VisualFunctions.SetFrameDisabledState(frame: Frame?, isDisabled: boolea
 
 	for _, descendant in ipairs(frame:GetDescendants()) do
 		if descendant:IsA("GuiButton") then
+			descendant.Interactable = not isDisabled
 			descendant.Active = not isDisabled
 			descendant.AutoButtonColor = not isDisabled
 			descendant.Selectable = not isDisabled
@@ -936,6 +918,7 @@ function VisualFunctions.SetFrameInteractableState(frame: Frame?, isInteractable
 
 	for _, descendant in ipairs(frame:GetDescendants()) do
 		if descendant:IsA("GuiButton") then
+			descendant.Interactable = isInteractable
 			descendant.Active = isInteractable
 			descendant.AutoButtonColor = isInteractable
 			descendant.Selectable = isInteractable

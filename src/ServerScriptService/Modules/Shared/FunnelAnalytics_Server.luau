@@ -1,19 +1,17 @@
---!strict
-
 local AnalyticsService = game:GetService("AnalyticsService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DebugModule = require(ReplicatedStorage.Modules:WaitForChild("DebugModule"))
+local CoreConfig = require(ServerScriptService.Modules.Shared:WaitForChild("CoreConfig_Server"))
 
 local FunnelAnalytics = {}
 
-local MODULE_NAME = "FunnelAnalytics"
+local MODULE_NAME = "FunnelAnalytics_Server"
 local analyticsConfig = if CoreConfig.analytics then CoreConfig.analytics else nil
 local ANALYTICS_ENABLED = if analyticsConfig and typeof(analyticsConfig.enabled) == "boolean"
 	then analyticsConfig.enabled
@@ -408,11 +406,7 @@ function FunnelAnalytics.LogRecurringStep(
 
 	if typeof(sessionId) ~= "string" or sessionId == "" then
 		DebugModule.debugWarn(
-			string.format(
-				"Recurring funnel log missing session id | player=%s | funnel=%s",
-				player.Name,
-				funnelName
-			),
+			string.format("Recurring funnel log missing session id | player=%s | funnel=%s", player.Name, funnelName),
 			MODULE_NAME
 		)
 		return false
@@ -471,10 +465,7 @@ function FunnelAnalytics.LogRecurringStep(
 	return success
 end
 
-function FunnelAnalytics.RegisterClientAction(
-	actionName: string,
-	handler: (Player, { [string]: any }) -> ()
-)
+function FunnelAnalytics.RegisterClientAction(actionName: string, handler: (Player, { [string]: any }) -> ())
 	assert(RunService:IsServer(), "RegisterClientAction can only be called on the server")
 	assert(typeof(actionName) == "string" and actionName ~= "", "actionName must be a non-empty string")
 	assert(typeof(handler) == "function", "handler must be a function")
@@ -482,27 +473,6 @@ function FunnelAnalytics.RegisterClientAction(
 	FunnelAnalytics.Init()
 	bindClientActionRemote()
 	clientActionHandlers[string.sub(actionName, 1, MAX_CLIENT_ACTION_NAME_LENGTH)] = handler
-end
-
-function FunnelAnalytics.FireClientAction(actionName: string, payload: { [string]: ScalarValue }?)
-	if not RunService:IsClient() then
-		return
-	end
-
-	if typeof(actionName) ~= "string" or actionName == "" then
-		return
-	end
-
-	local remote = getClientActionRemote()
-	if not remote then
-		DebugModule.debugWarn(
-			string.format("Client analytics action skipped; remote missing | action=%s", actionName),
-			MODULE_NAME
-		)
-		return
-	end
-
-	remote:FireServer(string.sub(actionName, 1, MAX_CLIENT_ACTION_NAME_LENGTH), payload or {})
 end
 
 return FunnelAnalytics

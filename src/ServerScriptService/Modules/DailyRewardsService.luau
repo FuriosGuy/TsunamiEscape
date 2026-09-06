@@ -1,16 +1,17 @@
---!strict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local FunnelAnalytics = require(Modules:WaitForChild("FunnelAnalytics"))
+local SharedFolder = Modules:WaitForChild("Shared")
+local ServerSharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local FunnelAnalytics =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("FunnelAnalytics_Server"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local DailyRewardsConfig = require(Modules.UI.MainGUI:WaitForChild("DailyRewardsConfig"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DailyRewardsConfig = require(SharedFolder:WaitForChild("DailyRewardsConfig"))
+local CoreConfig = require(ServerSharedFolder:WaitForChild("CoreConfig_Server"))
 
 local LevelingService = require(script.Parent:WaitForChild("LevelingService"))
 local EconomyAnalytics = require(script.Parent:WaitForChild("EconomyAnalytics"))
