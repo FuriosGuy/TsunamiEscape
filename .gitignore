@@ -16,7 +16,5 @@
 # Misc
 .DS_Store
 
-# Roblox event automation secrets/state
-/tools/RobloxEventSync/config.json
-/tools/RobloxEventSync/event-state.json
-/tools/RobloxEventSync/.env
+# Roblox event and notification automation lives in the separate TE-Automation
+# repository. Keep credentials and generated state out of this source repo.
