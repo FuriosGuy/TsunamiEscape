@@ -175,8 +175,8 @@ validating the event ID against the current server schedule.
 ### 5. Offline readiness sync
 
 `TsunamiEscape-Automation/tools/RobloxNotificationSync/Sync-RewardNotifications.ps1`
-handles players who are not currently in the main experience. The hourly
-`Main Reward Notifications` workflow:
+handles players who are not currently in the main experience. The
+`Main Reward Notifications` workflow runs every 30 minutes:
 
 - Reads `PlayerStats_v1` through Open Cloud without changing player data.
 - Uses the Presence API and skips players active in the target universe.
