@@ -1,10 +1,9 @@
---!strict
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
+local ClientDeviceProfile = require(ReplicatedStorage.Modules.ClientDeviceProfile)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 
@@ -16,6 +15,14 @@ type ParticleConfig = {
 	positionMovementThreshold: number,
 	rotationThresholdDegrees: number,
 	groundRaycastInterval: number,
+	mobileRateMultiplier: number,
+}
+
+type ParticleDefinition = {
+	templateName: string,
+	instanceName: string,
+	placementMode: "Ground" | "AbovePlayer",
+	verticalOffset: number?,
 }
 
 type BloodmoonParticleController = {
@@ -37,6 +44,9 @@ type BloodmoonParticleController = {
 	humanoid: Humanoid?,
 	rootPart: BasePart?,
 	visual: BasePart?,
+	visualTemplateName: string?,
+	visualPlacementMode: ("Ground" | "AbovePlayer")?,
+	visualVerticalOffset: number?,
 	started: boolean,
 	destroyed: boolean,
 	templateWarningShown: boolean,
@@ -46,10 +56,25 @@ local BloodmoonParticleService = {}
 BloodmoonParticleService.__index = BloodmoonParticleService
 
 local MODULE_NAME = "BloodmoonParticleService"
-local BLOODMOON_ENVIRONMENT_NAME = "Bloodmoon"
 local TRANSITION_COMPLETE_ATTRIBUTE = "EnvironmentTransitionComplete"
-local PARTICLE_TEMPLATE_NAME = "BloodmoonParticle"
-local PARTICLE_INSTANCE_NAME = "BloodmoonParticle_Local"
+local PARTICLE_DEFINITIONS: { [string]: ParticleDefinition } = {
+	Bloodmoon = {
+		templateName = "BloodmoonParticle",
+		instanceName = "BloodmoonParticle_Local",
+		placementMode = "Ground",
+	},
+	NeonRush = {
+		templateName = "NeonrushParticle",
+		instanceName = "NeonrushParticle_Local",
+		placementMode = "Ground",
+	},
+	FrostbiteRally = {
+		templateName = "FrostbiteRallyParticle",
+		instanceName = "FrostbiteRallyParticle_Local",
+		placementMode = "AbovePlayer",
+		verticalOffset = 64,
+	},
+}
 
 local function getConfig(): ParticleConfig
 	local rawConfig = CoreConfig.bloodmoonParticle
@@ -62,6 +87,7 @@ local function getConfig(): ParticleConfig
 			positionMovementThreshold = 2,
 			rotationThresholdDegrees = 20,
 			groundRaycastInterval = 0.25,
+			mobileRateMultiplier = 0.55,
 		}
 	end
 
@@ -79,6 +105,9 @@ local function getConfig(): ParticleConfig
 	local groundRaycastInterval = if typeof(rawConfig.groundRaycastInterval) == "number"
 		then math.clamp(rawConfig.groundRaycastInterval, 0.1, 2)
 		else 0.25
+	local mobileRateMultiplier = if typeof(rawConfig.mobileRateMultiplier) == "number"
+		then math.clamp(rawConfig.mobileRateMultiplier, 0.5, 1)
+		else 0.55
 	return {
 		enabled = rawConfig.enabled ~= false,
 		size = size,
@@ -87,6 +116,7 @@ local function getConfig(): ParticleConfig
 		positionMovementThreshold = positionMovementThreshold,
 		rotationThresholdDegrees = rotationThresholdDegrees,
 		groundRaycastInterval = groundRaycastInterval,
+		mobileRateMultiplier = mobileRateMultiplier,
 	}
 end
 
@@ -110,29 +140,31 @@ local function getRootPart(character: Model): BasePart?
 	return if rootPart and rootPart:IsA("BasePart") then rootPart else nil
 end
 
-local function getGroundResult(
-	controller: BloodmoonParticleController,
-	rootPart: BasePart
-): RaycastResult?
+local function getGroundResult(controller: BloodmoonParticleController, rootPart: BasePart): RaycastResult?
 	local rayDepth = math.max(8, math.abs(controller.config.verticalOffset) + 3)
-	return Workspace:Raycast(
-		rootPart.Position,
-		Vector3.new(0, -rayDepth, 0),
-		controller.raycastParams
-	)
+	return Workspace:Raycast(rootPart.Position, Vector3.new(0, -rayDepth, 0), controller.raycastParams)
 end
 
 local function getGroundCFrame(rootPart: BasePart, groundY: number, height: number): CFrame
 	local _, yaw, _ = rootPart.CFrame:ToOrientation()
-	return CFrame.new(rootPart.Position.X, groundY + height * 0.5, rootPart.Position.Z)
-		* CFrame.Angles(0, yaw, 0)
+	return CFrame.new(rootPart.Position.X, groundY + height * 0.5, rootPart.Position.Z) * CFrame.Angles(0, yaw, 0)
 end
 
-local function normalizeParticleRates(visual: BasePart, sourceSize: Vector3, targetSize: number)
+local function getAbovePlayerCFrame(rootPart: BasePart, verticalOffset: number): CFrame
+	local _, yaw, _ = rootPart.CFrame:ToOrientation()
+	return CFrame.new(rootPart.Position + Vector3.new(0, verticalOffset, 0)) * CFrame.Angles(0, yaw, 0)
+end
+
+local function normalizeParticleRates(
+	visual: BasePart,
+	sourceSize: Vector3,
+	targetSize: number,
+	rateMultiplier: number
+)
 	local sourceArea = math.max(math.abs(sourceSize.X * sourceSize.Z), 0.01)
 	local targetArea = math.max(targetSize * targetSize, 0.01)
 	-- Scale emission with area so the larger ground effect keeps the same density.
-	local rateScale = targetArea / sourceArea
+	local rateScale = (targetArea / sourceArea) * rateMultiplier
 	if rateScale == 1 then
 		return
 	end
@@ -170,20 +202,32 @@ function BloodmoonParticleService.new(player: Player): BloodmoonParticleControll
 		humanoid = nil,
 		rootPart = nil,
 		visual = nil,
+		visualTemplateName = nil,
+		visualPlacementMode = nil,
+		visualVerticalOffset = nil,
 		started = false,
 		destroyed = false,
 		templateWarningShown = false,
 	}, BloodmoonParticleService) :: BloodmoonParticleController
 end
 
-function BloodmoonParticleService:_isBloodmoonLive(): boolean
+function BloodmoonParticleService:_getActiveParticleDefinition(): ParticleDefinition?
 	local stateFolder = self.stateFolder
 	if not stateFolder then
-		return false
+		return nil
 	end
 
-	return stateFolder:GetAttribute("EnvironmentName") == BLOODMOON_ENVIRONMENT_NAME
-		and stateFolder:GetAttribute(TRANSITION_COMPLETE_ATTRIBUTE) == true
+	local environmentName = stateFolder:GetAttribute("EnvironmentName")
+	if typeof(environmentName) ~= "string" then
+		return nil
+	end
+
+	local definition = PARTICLE_DEFINITIONS[environmentName]
+	if not definition or stateFolder:GetAttribute(TRANSITION_COMPLETE_ATTRIBUTE) ~= true then
+		return nil
+	end
+
+	return definition
 end
 
 function BloodmoonParticleService:_cleanupVisual()
@@ -193,6 +237,9 @@ function BloodmoonParticleService:_cleanupVisual()
 	end
 
 	self.visual = nil
+	self.visualTemplateName = nil
+	self.visualPlacementMode = nil
+	self.visualVerticalOffset = nil
 	self.visualGeneration += 1
 	self.lastRootPosition = nil
 	self.lastRootLookVector = nil
@@ -215,6 +262,23 @@ function BloodmoonParticleService:_updateVisual(forceUpdate: boolean?)
 	end
 	if visual.Parent == nil or rootPart.Parent ~= character or humanoid.Parent ~= character then
 		self:_cleanupVisual()
+		return
+	end
+
+	if self.visualPlacementMode == "AbovePlayer" then
+		local rootPosition = rootPart.Position
+		local rootLookVector = rootPart.CFrame.LookVector
+		local minimumMovement = self.config.positionMovementThreshold
+		local rotationThreshold = math.cos(math.rad(self.config.rotationThresholdDegrees))
+		local movedEnough = self.lastRootPosition == nil
+			or (rootPosition - self.lastRootPosition).Magnitude >= minimumMovement
+		local rotatedEnough = self.lastRootLookVector == nil
+			or self.lastRootLookVector:Dot(rootLookVector) < rotationThreshold
+		if forceUpdate or movedEnough or rotatedEnough then
+			visual.CFrame = getAbovePlayerCFrame(rootPart, self.visualVerticalOffset or 64)
+			self.lastRootPosition = rootPosition
+			self.lastRootLookVector = rootLookVector
+		end
 		return
 	end
 
@@ -264,28 +328,39 @@ function BloodmoonParticleService:_updateVisual(forceUpdate: boolean?)
 end
 
 function BloodmoonParticleService:_createVisual()
-	if self.visual or not self.config.enabled or not self:_isBloodmoonLive() then
+	local definition = self:_getActiveParticleDefinition()
+	if self.visual or not self.config.enabled or not definition then
 		return
 	end
 
 	local character = self.character
 	local humanoid = self.humanoid
 	local rootPart = self.rootPart
-	if not character or not humanoid or not rootPart or not isGrounded(humanoid) then
-		return
-	end
-	local groundResult = getGroundResult(self, rootPart)
-	if not groundResult then
+	if not character or not humanoid or not rootPart then
 		return
 	end
 
+	local groundY: number? = nil
+	if definition.placementMode == "Ground" then
+		if not isGrounded(humanoid) then
+			return
+		end
+		local groundResult = getGroundResult(self, rootPart)
+		if not groundResult then
+			return
+		end
+		groundY = groundResult.Position.Y
+	end
+
 	local particlesFolder = ReplicatedStorage:FindFirstChild("Particles")
-	local template = particlesFolder and particlesFolder:FindFirstChild(PARTICLE_TEMPLATE_NAME)
+	local template = particlesFolder and particlesFolder:FindFirstChild(definition.templateName)
 	if not template or not template:IsA("BasePart") then
 		if not self.templateWarningShown then
 			self.templateWarningShown = true
 			DebugModule.debugWarn(
-				"ReplicatedStorage.Particles.BloodmoonParticle is missing or is not a BasePart",
+				"ReplicatedStorage.Particles."
+					.. definition.templateName
+					.. " is missing or is not a BasePart",
 				MODULE_NAME
 			)
 		end
@@ -293,7 +368,7 @@ function BloodmoonParticleService:_createVisual()
 	end
 
 	local visual = template:Clone()
-	visual.Name = PARTICLE_INSTANCE_NAME
+	visual.Name = definition.instanceName
 	visual.Size = Vector3.new(self.config.size, math.max(visual.Size.Y, 0.1), self.config.size)
 	visual.Anchored = true
 	visual.CanCollide = false
@@ -301,8 +376,13 @@ function BloodmoonParticleService:_createVisual()
 	visual.CanQuery = false
 	visual.CastShadow = false
 	visual:SetAttribute("DisableClientCulling", true)
-	visual.CFrame = getGroundCFrame(rootPart, groundResult.Position.Y, visual.Size.Y)
-	normalizeParticleRates(visual, template.Size, self.config.size)
+	if definition.placementMode == "AbovePlayer" then
+		visual.CFrame = getAbovePlayerCFrame(rootPart, definition.verticalOffset or 64)
+	else
+		visual.CFrame = getGroundCFrame(rootPart, groundY :: number, visual.Size.Y)
+	end
+	local mobileRateMultiplier = if ClientDeviceProfile.IsMobile() then self.config.mobileRateMultiplier else 1
+	normalizeParticleRates(visual, template.Size, self.config.size, mobileRateMultiplier)
 
 	for _, descendant in ipairs(visual:GetDescendants()) do
 		if descendant:IsA("BasePart") then
@@ -318,8 +398,11 @@ function BloodmoonParticleService:_createVisual()
 	visualMaid:GiveTask(visual)
 	self.visualMaid = visualMaid
 	self.visual = visual
-	self.lastGrounded = true
-	self.lastGroundY = groundResult.Position.Y
+	self.visualTemplateName = definition.templateName
+	self.visualPlacementMode = definition.placementMode
+	self.visualVerticalOffset = definition.verticalOffset
+	self.lastGrounded = if definition.placementMode == "Ground" then true else nil
+	self.lastGroundY = groundY
 	self.lastRootPosition = rootPart.Position
 	self.lastRootLookVector = rootPart.CFrame.LookVector
 	self.visualGeneration += 1
@@ -328,10 +411,7 @@ function BloodmoonParticleService:_createVisual()
 
 	-- A lifetime-guarded loop avoids waking on every rendered frame just to throttle work.
 	task.spawn(function()
-		while not self.destroyed
-			and self.visual == visual
-			and self.visualGeneration == visualGeneration
-		do
+		while not self.destroyed and self.visual == visual and self.visualGeneration == visualGeneration do
 			self:_updateVisual()
 			task.wait(1 / self.config.positionUpdateFps)
 		end
@@ -339,7 +419,8 @@ function BloodmoonParticleService:_createVisual()
 end
 
 function BloodmoonParticleService:_refreshVisual(forcePositionUpdate: boolean?)
-	if self.destroyed or not self:_isBloodmoonLive() then
+	local definition = self:_getActiveParticleDefinition()
+	if self.destroyed or not definition then
 		self:_cleanupVisual()
 		return
 	end
@@ -347,6 +428,12 @@ function BloodmoonParticleService:_refreshVisual(forcePositionUpdate: boolean?)
 	if not self.character or not self.humanoid or not self.rootPart then
 		self:_cleanupVisual()
 		return
+	end
+
+	if self.visual
+		and (self.visualTemplateName ~= definition.templateName or self.visualPlacementMode ~= definition.placementMode)
+	then
+		self:_cleanupVisual()
 	end
 
 	if not self.visual then

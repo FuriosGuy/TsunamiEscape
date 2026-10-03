@@ -1,8 +1,7 @@
---!strict
-
 local WinDisplayController = {}
 WinDisplayController.__index = WinDisplayController
 
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 
@@ -29,7 +28,7 @@ type Controller = {
 	displayedWinCount: number,
 	winAnimationSession: number,
 	pendingWinCount: number?,
-	bloodmoonMappingWarningShown: boolean,
+	eventMappingWarningShown: boolean,
 	alive: boolean,
 }
 
@@ -58,7 +57,7 @@ function WinDisplayController.new(options: ControllerOptions): Controller
 		displayedWinCount = options.player:GetAttribute("WinCount") or 0,
 		winAnimationSession = 0,
 		pendingWinCount = nil,
-		bloodmoonMappingWarningShown = false,
+		eventMappingWarningShown = false,
 		alive = true,
 	}, WinDisplayController) :: Controller
 end
@@ -81,20 +80,75 @@ function WinDisplayController:UpdateWinDisplay()
 	self.onTutorialProgressChanged()
 end
 
-function WinDisplayController:OnBloodmoonWinAwarded(amount: number)
+local function parseHexColor(value: unknown): Color3?
+	if typeof(value) ~= "string" then
+		return nil
+	end
+
+	local redHex, greenHex, blueHex = string.match(value, "^#?(%x%x)(%x%x)(%x%x)$")
+	if not redHex or not greenHex or not blueHex then
+		return nil
+	end
+
+	local red = tonumber(redHex, 16)
+	local green = tonumber(greenHex, 16)
+	local blue = tonumber(blueHex, 16)
+	if red == nil or green == nil or blue == nil then
+		return nil
+	end
+
+	return Color3.fromRGB(red, green, blue)
+end
+
+local function getEventVisuals(eventName: string): (Color3?, Color3?, string?)
+	local stateFolder = ReplicatedStorage:FindFirstChild("LiveEventState")
+	if not stateFolder or not stateFolder:IsA("Folder") then
+		return nil, nil, nil
+	end
+
+	local encodedEvents = stateFolder:GetAttribute("ActiveEvents")
+	if typeof(encodedEvents) ~= "string" then
+		return nil, nil, nil
+	end
+
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, encodedEvents)
+	if not ok or typeof(decoded) ~= "table" then
+		return nil, nil, nil
+	end
+
+	for _, eventEntry in ipairs(decoded) do
+		if typeof(eventEntry) == "table" and eventEntry.id == eventName then
+			local displayColor = parseHexColor(eventEntry.displayColor)
+			local progressUi = eventEntry.progressUi
+			local gradientColor = if typeof(progressUi) == "table"
+				then parseHexColor(progressUi.gradientColor)
+				else nil
+			local imageAssetId = if typeof(eventEntry.winPopupImageAssetId) == "string"
+				and eventEntry.winPopupImageAssetId ~= ""
+				then eventEntry.winPopupImageAssetId
+				else nil
+			return displayColor, gradientColor, imageAssetId
+		end
+	end
+
+	return nil, nil, nil
+end
+
+function WinDisplayController:OnEventWinAwarded(eventName: string, amount: number)
 	if amount <= 0 then
 		return
 	end
 
 	local hud = self.visualFunctions.HUD
 	local template = hud.Float_CurrentBloodMoonWinFrame
-	local target = hud.BloodMoonCurrentWinsTarget
+	local target = hud.EventCurrentWinsTarget
 	if not template or not target then
-		if not self.bloodmoonMappingWarningShown then
-			self.bloodmoonMappingWarningShown = true
+		if not self.eventMappingWarningShown then
+			self.eventMappingWarningShown = true
 			DebugModule.debugWarn(
 				string.format(
-					"Bloodmoon popup mapping incomplete | template=%s | target=%s",
+					"Event win popup mapping incomplete | event=%s | template=%s | target=%s",
+					eventName,
 					tostring(template ~= nil),
 					tostring(target ~= nil)
 				),
@@ -104,24 +158,24 @@ function WinDisplayController:OnBloodmoonWinAwarded(amount: number)
 		return
 	end
 
+	local eventColor, gradientColor, imageAssetId = getEventVisuals(eventName)
 	self.visualFunctions.CreateFloatingText(template, amount, 1, {
 		TargetFrame = target,
 		IntegerOnly = true,
 		PlayPopSound = false,
+		TextColor = eventColor,
+		GradientBottomColor = gradientColor,
+		ImageColor = eventColor,
+		ImageAssetId = imageAssetId,
 	})
 end
 
 function WinDisplayController:OnWinAwarded(amount: number, source: string?)
-	if source == "BloodmoonWin" then
-		self:OnBloodmoonWinAwarded(amount)
-		return
-	end
-
 	local splitCount = 1
 	local absoluteAmount = math.abs(math.floor(amount))
 	if amount > 0 then
 		self.playRewardCelebration(false)
-		if source == "WinButton" then
+		if source == "WinButton" or source == "MinigameRace" then
 			self.playWinSound()
 		end
 	end
@@ -184,6 +238,12 @@ end
 function WinDisplayController:GetWinAwardedHandler(): (number, string?) -> ()
 	return function(amount: number, source: string?)
 		self:OnWinAwarded(amount, source)
+	end
+end
+
+function WinDisplayController:GetEventWinAwardedHandler(): (string, number) -> ()
+	return function(eventName: string, amount: number)
+		self:OnEventWinAwarded(eventName, amount)
 	end
 end
 

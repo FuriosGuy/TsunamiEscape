@@ -5,8 +5,7 @@
     "AudioCanCollide": false,
     "BottomSurface": "Smooth",
     "CanCollide": false,
-    "CFrame": [66.7499, 18, -12146.625, 0, 0, 1, 0, 1, 0, -1, 0, 0],
-    "Locked": true,
+    "CFrame": [66.7499, 18, -778, 0, 0, 1, 0, 1, 0, -1, 0, 0],
     "Size": [50, 20, 30],
     "TopSurface": "Smooth",
     "Transparency": 1

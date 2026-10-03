@@ -5,7 +5,6 @@
     "BottomSurface": "Smooth",
     "CFrame": [-77.3107, 10.5777, -121.5176, 0, 1, 0, 1, 0, 0, 0, 0, -1],
     "Color": [9, 137, 207],
-    "Locked": true,
     "Material": "Neon",
     "Shape": "Cylinder",
     "Size": [0.3581, 14.3243, 17.1892],

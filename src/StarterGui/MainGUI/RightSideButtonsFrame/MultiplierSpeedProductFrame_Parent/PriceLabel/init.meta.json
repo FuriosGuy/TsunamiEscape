@@ -6,10 +6,10 @@
     "BorderColor3": [0, 0, 0],
     "BorderSizePixel": 0,
     "FontFace": {
+      "cachedFaceId": null,
       "family": "rbxasset://fonts/families/FredokaOne.json",
-      "weight": "Regular",
       "style": "Normal",
-      "cachedFaceId": null
+      "weight": "Regular"
     },
     "Interactable": false,
     "Position": [[0.6528, 0.0], [0.7626, 0.0]],

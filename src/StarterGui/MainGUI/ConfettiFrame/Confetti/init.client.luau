@@ -1,5 +1,3 @@
---!strict
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ConfettiBurstPlayer = require(ReplicatedStorage.Modules.UI:WaitForChild("ConfettiBurstPlayer"))
@@ -22,23 +20,23 @@ local COLORS = {
 }
 
 local BURST_DURATION = 1.5
-local confettiPlayer = ConfettiBurstPlayer.GetOrCreateSingleton(script.Parent)
+local confettiFolder = script.Parent
+local confettiHost = confettiFolder and confettiFolder.Parent
+local confettiPlayer = if confettiHost and confettiHost:IsA("GuiObject")
+	then ConfettiBurstPlayer.GetOrCreateSingleton(confettiHost)
+	else nil
 local confettiRemoteConnection: RBXScriptConnection? = nil
 local isCleanedUp = false
 
-confettiRemoteConnection = confettiRemote.OnClientEvent:Connect(function(
-	colors: { Color3 }?,
-	duration: number?,
-	totalCount: number?,
-	batchSize: number?,
-	batchDelay: number?
-)
-	if not confettiPlayer then
-		return
-	end
+confettiRemoteConnection = confettiRemote.OnClientEvent:Connect(
+	function(colors: { Color3 }?, duration: number?, totalCount: number?, batchSize: number?, batchDelay: number?)
+		if not confettiPlayer then
+			return
+		end
 
-	confettiPlayer:PlayBurst(colors or COLORS, duration or BURST_DURATION, totalCount, batchSize, batchDelay)
-end)
+		confettiPlayer:PlayBurst(colors or COLORS, duration or BURST_DURATION, totalCount, batchSize, batchDelay)
+	end
+)
 
 local function cleanupConfettiListener()
 	if isCleanedUp then

@@ -3,9 +3,8 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [-77.4869, 8.527, -101.0001, 0, 0, 1, 1, 0, 0, 0, 1, 0],
+    "CFrame": [-77.4869, 9.6351, -101.0001, 0, 0, 1, 1, 0, 0, 0, 1, 0],
     "Color": [17, 17, 17],
-    "Locked": true,
     "MaterialVariant": "Weld",
     "Shape": "Cylinder",
     "Size": [0.5541, 13.2973, 13.2973],

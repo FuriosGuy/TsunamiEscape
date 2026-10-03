@@ -1,0 +1,16 @@
+{
+  "className": "UIGradient",
+  "properties": {
+    "Color": [{
+        "color": [0.0, 0.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [1.0, 1.0, 1.0],
+        "time": 0.5
+      }, {
+        "color": [0.0, 0.0, 0.0],
+        "time": 1.0
+      }],
+    "Rotation": 90
+  }
+}

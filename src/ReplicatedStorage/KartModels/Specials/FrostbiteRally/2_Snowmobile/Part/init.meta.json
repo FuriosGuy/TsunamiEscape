@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "BottomSurface": "Smooth",
+    "CFrame": [-24.0439, 8.6812, -47.5859, 0.9995, -0.0315, 0, 0.0315, 0.9995, 0.0, 0, -0.0, 1],
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "Sandboxed": true,
+    "Shape": "Cylinder",
+    "Size": [0.9843, 0.3594, 0.6337],
+    "TopSurface": "Smooth"
+  }
+}

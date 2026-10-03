@@ -1,0 +1,14 @@
+{
+  "className": "Part",
+  "properties": {
+    "BottomSurface": "Smooth",
+    "CFrame": [-22.4436, 9.3116, -52.1323, -0.527, -0.8498, 0, 0.8498, -0.527, 0.0, -0.0, 0.0, 1],
+    "Color": [17, 17, 17],
+    "EnableFluidForces": false,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "Shape": "Cylinder",
+    "Size": [2.354, 0.321, 0.321],
+    "TopSurface": "Smooth"
+  }
+}

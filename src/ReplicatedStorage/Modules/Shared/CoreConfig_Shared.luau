@@ -9,50 +9,16 @@ CoreConfig.debugSystem = {
 	timestamp = true,
 	studioOnly = true,
 	enabledModules = {
-		"ValidationService"
 	},
 	disabledModules = {
-		"EventBoard"
+		"EventBoard",
 	},
 	moduleOverrides = {},
-}
-
-CoreConfig.experienceNotifications = {
-	enabled = true,
-	studioEnabled = false,
-	allowedUniverseIds = {
-		[9824719186] = true,
-	},
-	promptOnJoin = true,
-	studioPromptEnabled = false,
-	promptDelaySeconds = 5,
-	-- 0 means there is no in-session budget; Roblox's per-user daily limit still applies.
-	maxSendsPerPlayerSession = 0,
-	-- Roblox limits delivery to one notification per user per experience per UTC day.
-	maxNotificationsPerPlayerPerUtcDay = 1,
-	messageIds = {
-		DailyRewardReady = "87f29950-6a58-f344-b2c3-aa40304b9db3",
-		SpinWheelReady = "21b959a7-1739-664c-b901-83461d6dbe3f",
-		GroupRewardReady = "63eeae6c-1497-4a41-8716-c9ef1e470670",
-		BloodMoonLive = "0fc76257-0e28-2342-868f-edcd87b84c2e",
-		AdminAbuseLive = "e91bce0e-bd27-304c-b072-5ec583871cb0",
-		TwoXWeekendLive = "f40cdd3a-7f48-ce4c-8b15-a52570213ac0",
-	},
-	categories = {
-		DailyRewardReady = "DailyReward",
-		SpinWheelReady = "SpinWheel",
-		GroupRewardReady = "GroupReward",
-		BloodMoonLive = "BloodMoon",
-		AdminAbuseLive = "AdminAbuse",
-		TwoXWeekendLive = "TwoXWeekend",
-	},
 }
 
 CoreConfig.social = {
 	verifyGroupId = 13706307,
 	friendInviteMultiplierStep = 0.1,
-	friendInviteTopbarIconImage = "rbxassetid://112009101194397",
-	friendInviteTopbarLabel = "Invite Friends!",
 	friendInvitePromptMessage = "Invite friends to join and earn +0.10x multiplier per unique friend!",
 }
 
@@ -77,7 +43,7 @@ CoreConfig.leveling = {
 }
 
 CoreConfig.spinWheel = {
-	freeSpinCooldownSeconds = 24 * 60 * 60,
+	freeSpinPlaytimeSeconds = 15 * 60, -- Active in-game time between free spins.
 	debugFreeSpinReadyInStudio = true,
 	rewardedAdMaxSpins = 5,
 	rewardedAdResetSeconds = 24 * 60 * 60,
@@ -96,6 +62,22 @@ CoreConfig.temporaryBoosts = {
 	rewardedAdDurationSeconds = 5 * 60,
 }
 
+CoreConfig.disableWaves = {
+	durationSeconds = 15,
+}
+
+CoreConfig.premium = {
+	debugPromptOwnedMembershipInStudio = true,
+}
+
+function CoreConfig.canShowPremiumPrompt(membershipType, isStudio: boolean): boolean
+	if membershipType ~= Enum.MembershipType.Premium then
+		return true
+	end
+
+	return isStudio and CoreConfig.premium.debugPromptOwnedMembershipInStudio == true
+end
+
 CoreConfig.rewardedVideo = {
 	enabled = true,
 	requestCooldownSeconds = 3,
@@ -111,6 +93,11 @@ CoreConfig.bloodmoonProgress = {
 	enabled = true,
 	maxWins = 100,
 	debugStudioWinAmount = 1,
+	winStageRewards = {
+		{ minimumStage = 16, amount = 1 },
+		{ minimumStage = 18, amount = 2 },
+		{ minimumStage = 20, amount = 3 },
+	},
 	unlocks = {
 		{ id = "EclipseTrail", displayName = "Eclipse Trail", winsRequired = 5, kind = "Trail" },
 		{

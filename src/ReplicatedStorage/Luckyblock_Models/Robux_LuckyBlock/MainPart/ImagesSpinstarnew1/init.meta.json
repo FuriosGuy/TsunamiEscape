@@ -1,0 +1,32 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/Spinstarnew1",
+  "properties": {
+    "Color": [{
+        "color": [0.0, 1.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [0.0, 1.0, 0.0],
+        "time": 1.0
+      }],
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0, 1],
+    "LightEmission": 1,
+    "LightInfluence": 1,
+    "Rate": 100,
+    "Rotation": [-360, 360],
+    "Size": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 1.375
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Speed": [10, 10],
+    "SpreadAngle": [360, 360],
+    "Texture": "rbxassetid://100277387086894"
+  }
+}

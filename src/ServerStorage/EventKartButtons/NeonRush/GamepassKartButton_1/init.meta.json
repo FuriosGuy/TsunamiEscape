@@ -1,0 +1,11 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "EventName": "NeonRush",
+      "KartName": "3_VoltVIper",
+      "ProductKey": "VoltVIper"
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

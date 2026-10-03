@@ -10,10 +10,16 @@ local Maid = require(Modules:WaitForChild("Maid"))
 local NumberFormatting = require(Modules.Shared:WaitForChild("NumberFormatting"))
 local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
 local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
+local DataStoreRequestGate = require(game:GetService("ServerScriptService").Modules:WaitForChild("DataStoreRequestGate"))
 
 local LeaderboardService = {}
 
 local leaderboardDebugConfig = CoreConfig.leaderboard
+local persistenceConfig = CoreConfig.persistence
+local DATASTORE_BUDGET_WAIT_SECONDS = if persistenceConfig
+		and typeof(persistenceConfig.datastoreBudgetWaitSeconds) == "number"
+	then math.max(0.25, persistenceConfig.datastoreBudgetWaitSeconds)
+	else 5
 LeaderboardService.DEBUG_USE_FAKE_DATA = if leaderboardDebugConfig
 		and typeof(leaderboardDebugConfig.debugUseFakeData) == "boolean"
 	then RunService:IsStudio() and leaderboardDebugConfig.debugUseFakeData
@@ -69,7 +75,7 @@ LeaderboardService.Configs = {
 		BoardPath = { "Folder", "WinLeaderboard", "Leaderboard", "SurfaceGui", "ScrollingFrame" },
 		MaxEntries = 100,
 		RefreshInterval = 60,
-		WriteInterval = 30,
+		WriteInterval = 120,
 	},
 	SpeedLeaderboard = {
 		Name = "SpeedLeaderboard",
@@ -78,7 +84,7 @@ LeaderboardService.Configs = {
 		BoardPath = { "Folder", "SpeedLeaderboard", "Leaderboard", "SurfaceGui", "ScrollingFrame" },
 		MaxEntries = 100,
 		RefreshInterval = 60,
-		WriteInterval = 30,
+		WriteInterval = 120,
 	},
 }
 
@@ -87,11 +93,23 @@ local lastPublishedValues: { [string]: { [number]: number } } = {}
 local lastWriteTimes: { [string]: { [number]: number } } = {}
 local pendingWriteValues: { [string]: { [number]: number } } = {}
 local pendingWriteThreads: { [string]: { [number]: thread } } = {}
+local forceWriteRequests: { [string]: { [number]: boolean } } = {}
+local failedWriteValues: { [string]: { [number]: number } } = {}
+local lastWriteFailureLogs: { [string]: { [number]: number } } = {}
+local lastSuccessfulEntries: { [string]: { LeaderboardEntryData } } = {}
 local boardCaches: { [string]: LeaderboardBoardCache } = {}
 local playerBindingMaids: { [Player]: Maid } = {}
 local serviceMaid = Maid.new()
 local isInitialized = false
 local isShuttingDown = false
+
+local FORCED_WRITE_WAIT_TIMEOUT_SECONDS = 10
+local WRITE_RETRY_INITIAL_SECONDS = 5
+local WRITE_RETRY_MAX_SECONDS = 30
+local WRITE_FAILURE_LOG_COOLDOWN_SECONDS = 30
+local LEADERBOARD_REQUEST_QUEUE = "Leaderboard"
+local ORDERED_WRITE_MIN_SPACING_SECONDS = 0.2
+local lastOrderedWriteAt = 0
 
 local function isRealLeaderboardUserId(userId: number): boolean
 	return userId > 0
@@ -106,6 +124,28 @@ local function getOrderedStore(storeName: string): OrderedDataStore
 	local store = DataStoreService:GetOrderedDataStore(storeName)
 	orderedStores[storeName] = store
 	return store
+end
+
+-- OrderedDataStore writes share one game-server budget. Serialize every write
+-- so per-player workers cannot flood Roblox's ordered-write request queue.
+local function setOrderedValue(config: LeaderboardConfig, userId: number, value: number): (boolean, any)
+	local success, result = DataStoreRequestGate.Run(
+		"OrderedWrite",
+		"LeaderboardSetAsync",
+		function()
+			local remainingSpacing = ORDERED_WRITE_MIN_SPACING_SECONDS - (os.clock() - lastOrderedWriteAt)
+			if remainingSpacing > 0 then
+				task.wait(remainingSpacing)
+			end
+			lastOrderedWriteAt = os.clock()
+			return getOrderedStore(config.OrderedStoreName):SetAsync(tostring(userId), value)
+		end,
+		{
+			maxWaitSeconds = DATASTORE_BUDGET_WAIT_SECONDS,
+			queueKey = LEADERBOARD_REQUEST_QUEUE,
+		}
+	)
+	return success, result
 end
 
 local function getBoardScrollingFrame(path: { string }): ScrollingFrame?
@@ -219,11 +259,10 @@ local function clearPlayerWriteState(userId: number)
 	for configName in pairs(LeaderboardService.Configs) do
 		local configThreads = pendingWriteThreads[configName]
 		if configThreads then
-			local thread = configThreads[userId]
-			if thread then
-				task.cancel(thread)
-				configThreads[userId] = nil
-			end
+			-- Do not cancel a worker that could currently own the global write
+			-- lock. Clearing its pending value lets it exit safely at its next
+			-- bounded wait point.
+			configThreads[userId] = nil
 		end
 
 		local configPendingValues = pendingWriteValues[configName]
@@ -239,6 +278,21 @@ local function clearPlayerWriteState(userId: number)
 		local configLastWriteTimes = lastWriteTimes[configName]
 		if configLastWriteTimes then
 			configLastWriteTimes[userId] = nil
+		end
+
+		local configForceRequests = forceWriteRequests[configName]
+		if configForceRequests then
+			configForceRequests[userId] = nil
+		end
+
+		local configFailedValues = failedWriteValues[configName]
+		if configFailedValues then
+			configFailedValues[userId] = nil
+		end
+
+		local configFailureLogs = lastWriteFailureLogs[configName]
+		if configFailureLogs then
+			configFailureLogs[userId] = nil
 		end
 	end
 end
@@ -395,65 +449,116 @@ local function fetchEntries(
 		return fakeEntries
 	end
 
-	local entries = {}
-	local success, pages = pcall(function()
-		return getOrderedStore(config.OrderedStoreName):GetSortedAsync(false, config.MaxEntries)
-	end)
+	local lastError: any = nil
+	for attempt = 1, 3 do
+		local success, pages = DataStoreRequestGate.Run(
+			"OrderedList",
+			"LeaderboardGetSortedAsync",
+			function()
+				return getOrderedStore(config.OrderedStoreName):GetSortedAsync(false, config.MaxEntries)
+			end,
+			{
+				maxWaitSeconds = DATASTORE_BUDGET_WAIT_SECONDS,
+				queueKey = LEADERBOARD_REQUEST_QUEUE,
+			}
+		)
+		if success and pages ~= nil then
+			local pageSuccess, currentPage = pcall(function()
+				return pages:GetCurrentPage()
+			end)
+			if pageSuccess and typeof(currentPage) == "table" then
+				local entries: { LeaderboardEntryData } = {}
+				for index, item in ipairs(currentPage) do
+					local userId = tonumber(item.key)
+					local value = tonumber(item.value) or 0
+					if not userId or not isRealLeaderboardUserId(userId) then
+						continue
+					end
 
-	if not success or not pages then
-		DebugModule.debugWarn("Failed to fetch ordered data for " .. config.Name, "LeaderboardService")
-		return entries
-	end
+					local username = tostring(userId)
+					local nameSuccess, resolvedName = pcall(function()
+						return Players:GetNameFromUserIdAsync(userId)
+					end)
+					if nameSuccess and resolvedName then
+						username = resolvedName
+					end
 
-	local currentPage = pages:GetCurrentPage()
-	for index, item in ipairs(currentPage) do
-		local userId = tonumber(item.key)
-		local value = tonumber(item.value) or 0
-		if not userId or not isRealLeaderboardUserId(userId) then
-			continue
+					table.insert(entries, {
+						rank = index,
+						userId = userId,
+						username = username,
+						value = value,
+					})
+				end
+
+				if LeaderboardService.DEBUG_APPEND_FAKE_DATA then
+					local realEntryCount = #entries
+					local lowestRealValue = entries[#entries] and entries[#entries].value or 100
+					local fakeStartValue = math.max(0, math.floor(lowestRealValue - 1))
+					local rank = realEntryCount + 1
+
+					while rank <= config.MaxEntries do
+						local offset = rank - realEntryCount
+						local fakeValue = math.max(0, fakeStartValue - offset + 1)
+						table.insert(entries, {
+							rank = rank,
+							userId = 0,
+							username = "FakePlayer" .. tostring(offset),
+							value = fakeValue,
+						})
+						rank += 1
+					end
+				end
+
+				lastSuccessfulEntries[config.Name] = table.clone(entries)
+				return entries
+			end
+			lastError = currentPage
+		else
+			lastError = pages
 		end
 
-		local username = tostring(userId)
-		local nameSuccess, resolvedName = pcall(function()
-			return Players:GetNameFromUserIdAsync(userId)
-		end)
-		if nameSuccess and resolvedName then
-			username = resolvedName
-		end
-
-		table.insert(entries, {
-			rank = index,
-			userId = userId,
-			username = username,
-			value = value,
-		})
-	end
-
-	if LeaderboardService.DEBUG_APPEND_FAKE_DATA then
-		local realEntryCount = #entries
-		local lowestRealValue = entries[#entries] and entries[#entries].value or 100
-		local fakeStartValue = math.max(0, math.floor(lowestRealValue - 1))
-		local rank = realEntryCount + 1
-
-		while rank <= config.MaxEntries do
-			local offset = rank - realEntryCount
-			local fakeValue = math.max(0, fakeStartValue - offset + 1)
-			table.insert(entries, {
-				rank = rank,
-				userId = 0,
-				username = "FakePlayer" .. tostring(offset),
-				value = fakeValue,
-			})
-			rank += 1
+		if attempt < 3 then
+			task.wait(math.min(8, 2 ^ (attempt - 1)))
 		end
 	end
 
-	return entries
+	DebugModule.debugWarn(
+		"Failed to fetch ordered data for " .. config.Name .. "; using last successful snapshot | err=" .. tostring(lastError),
+		"LeaderboardService"
+	)
+	local cachedEntries = lastSuccessfulEntries[config.Name]
+	if cachedEntries then
+		return table.clone(cachedEntries)
+	end
+	return {}
+end
+
+local function waitForForcedWrite(configName: string, userId: number, expectedValue: number, playerName: string): boolean
+	local deadline = os.clock() + FORCED_WRITE_WAIT_TIMEOUT_SECONDS
+	while os.clock() < deadline do
+		local lastPublished = lastPublishedValues[configName]
+		local pendingValues = pendingWriteValues[configName]
+		local failedValues = failedWriteValues[configName]
+		if lastPublished and lastPublished[userId] == expectedValue and (not pendingValues or pendingValues[userId] == nil) then
+			return true
+		end
+		if failedValues and failedValues[userId] == expectedValue then
+			return false
+		end
+		task.wait(0.1)
+	end
+
+	DebugModule.debugWarn(
+		string.format("Leaderboard flush timed out for %s (%s)", playerName, configName),
+		"LeaderboardService"
+	)
+	return false
 end
 
 local function writeLeaderboardValue(configName: string, player: Player, forceWrite: boolean)
 	local config = LeaderboardService.Configs[configName]
-	if not config then
+	if not config or (isShuttingDown and not forceWrite) then
 		return
 	end
 
@@ -482,93 +587,110 @@ local function writeLeaderboardValue(configName: string, player: Player, forceWr
 	end
 
 	lastPublishedValues[configName] = lastPublishedValues[configName] or {}
-	if lastPublishedValues[configName][userId] == normalizedValue and not forceWrite then
-		return
-	end
-
 	lastWriteTimes[configName] = lastWriteTimes[configName] or {}
 	pendingWriteValues[configName] = pendingWriteValues[configName] or {}
 	pendingWriteThreads[configName] = pendingWriteThreads[configName] or {}
+	forceWriteRequests[configName] = forceWriteRequests[configName] or {}
+	failedWriteValues[configName] = failedWriteValues[configName] or {}
+	lastWriteFailureLogs[configName] = lastWriteFailureLogs[configName] or {}
 
-	pendingWriteValues[configName][userId] = normalizedValue
+	local pendingValues = pendingWriteValues[configName]
+	if lastPublishedValues[configName][userId] == normalizedValue and pendingValues[userId] == nil then
+		return
+	end
+
+	pendingValues[userId] = normalizedValue
+	failedWriteValues[configName][userId] = nil
+	if forceWrite then
+		forceWriteRequests[configName][userId] = true
+	end
+
+	if not pendingWriteThreads[configName][userId] then
+		pendingWriteThreads[configName][userId] = task.spawn(function()
+			local retryDelay = WRITE_RETRY_INITIAL_SECONDS
+
+			while true do
+				local latestValue = pendingWriteValues[configName][userId]
+				if latestValue == nil then
+					break
+				end
+
+				local forceRequested = isShuttingDown or forceWriteRequests[configName][userId] == true
+				local lastWriteTime = lastWriteTimes[configName][userId] or 0
+				local timeUntilAllowed = math.max(0, config.WriteInterval - (os.clock() - lastWriteTime))
+				if timeUntilAllowed > 0 and not forceRequested then
+					local deadline = os.clock() + timeUntilAllowed
+					repeat
+						local remaining = deadline - os.clock()
+						if remaining <= 0 then
+							break
+						end
+						task.wait(math.min(remaining, 1))
+						forceRequested = isShuttingDown or forceWriteRequests[configName][userId] == true
+					until forceRequested
+				end
+
+				latestValue = pendingWriteValues[configName][userId]
+				if latestValue == nil then
+					break
+				end
+				pendingWriteValues[configName][userId] = nil
+
+				local success, err = setOrderedValue(config, userId, latestValue)
+				if success then
+					lastPublishedValues[configName][userId] = latestValue
+					lastWriteTimes[configName][userId] = os.clock()
+					failedWriteValues[configName][userId] = nil
+					if pendingWriteValues[configName][userId] == nil then
+						forceWriteRequests[configName][userId] = nil
+					end
+					retryDelay = WRITE_RETRY_INITIAL_SECONDS
+				else
+					if pendingWriteValues[configName][userId] == nil then
+						pendingWriteValues[configName][userId] = latestValue
+					end
+					failedWriteValues[configName][userId] = latestValue
+
+					local now = os.clock()
+					local lastFailureLog = lastWriteFailureLogs[configName][userId] or 0
+					if now - lastFailureLog >= WRITE_FAILURE_LOG_COOLDOWN_SECONDS or forceRequested then
+						lastWriteFailureLogs[configName][userId] = now
+						DebugModule.debugWarn(
+							string.format(
+								"Failed leaderboard update for %s (%s): %s",
+								player.Name,
+								configName,
+								tostring(err)
+							),
+							"LeaderboardService"
+						)
+					end
+
+					if isShuttingDown then
+						break
+					end
+					local retryDeadline = os.clock() + retryDelay
+					repeat
+						local remaining = retryDeadline - os.clock()
+						if remaining <= 0 then
+							break
+						end
+						task.wait(math.min(remaining, 1))
+					until isShuttingDown
+					retryDelay = math.min(retryDelay * 2, WRITE_RETRY_MAX_SECONDS)
+				end
+			end
+
+			local configThreads = pendingWriteThreads[configName]
+			if configThreads and configThreads[userId] == coroutine.running() then
+				configThreads[userId] = nil
+			end
+		end)
+	end
 
 	if forceWrite then
-		local success, err = pcall(function()
-			getOrderedStore(config.OrderedStoreName):SetAsync(tostring(userId), normalizedValue)
-		end)
-
-		if success then
-			lastPublishedValues[configName][userId] = normalizedValue
-			lastWriteTimes[configName][userId] = os.clock()
-			pendingWriteValues[configName][userId] = nil
-		else
-			DebugModule.debugWarn(
-				string.format("Failed leaderboard flush for %s (%s): %s", player.Name, configName, tostring(err)),
-				"LeaderboardService"
-			)
-		end
-		return
+		waitForForcedWrite(configName, userId, normalizedValue, player.Name)
 	end
-
-	if pendingWriteThreads[configName][userId] then
-		return
-	end
-
-	pendingWriteThreads[configName][userId] = task.spawn(function()
-		local alive = true
-
-		while alive and not isShuttingDown do
-			local latestValue = pendingWriteValues[configName][userId]
-			if latestValue == nil then
-				break
-			end
-
-			local lastWriteTime = lastWriteTimes[configName][userId] or 0
-			local timeUntilAllowed = math.max(0, config.WriteInterval - (os.clock() - lastWriteTime))
-			if timeUntilAllowed > 0 then
-				local deadline = os.clock() + timeUntilAllowed
-				repeat
-					local remaining = deadline - os.clock()
-					if remaining <= 0 then
-						break
-					end
-					task.wait(math.min(remaining, 1))
-				until not alive or isShuttingDown
-				continue
-			end
-
-			pendingWriteValues[configName][userId] = nil
-
-			local success, err = pcall(function()
-				getOrderedStore(config.OrderedStoreName):SetAsync(tostring(userId), latestValue)
-			end)
-
-			if success then
-				lastPublishedValues[configName][userId] = latestValue
-				lastWriteTimes[configName][userId] = os.clock()
-			else
-				pendingWriteValues[configName][userId] = latestValue
-				DebugModule.debugWarn(
-					string.format("Failed leaderboard update for %s (%s): %s", player.Name, configName, tostring(err)),
-					"LeaderboardService"
-				)
-
-				local retryDeadline = os.clock() + 5
-				repeat
-					local remaining = retryDeadline - os.clock()
-					if remaining <= 0 then
-						break
-					end
-					task.wait(math.min(remaining, 1))
-				until not alive or isShuttingDown
-			end
-		end
-
-		local configThreads = pendingWriteThreads[configName]
-		if configThreads and configThreads[userId] == coroutine.running() then
-			configThreads[userId] = nil
-		end
-	end)
 end
 
 function LeaderboardService.UpdatePlayerStat(configName: string, player: Player)
@@ -637,7 +759,9 @@ function LeaderboardService.Init()
 	end)
 
 	serviceMaid["PlayerRemoving"] = Players.PlayerRemoving:Connect(function(player)
-		LeaderboardService.FlushPlayer(player)
+		if not isShuttingDown then
+			LeaderboardService.FlushPlayer(player)
+		end
 		clearPlayerBinding(player)
 		clearPlayerWriteState(player.UserId)
 	end)
@@ -679,7 +803,8 @@ function LeaderboardService.Shutdown()
 	end
 
 	isShuttingDown = true
-	LeaderboardService.FlushPlayers(Players:GetPlayers())
+	-- Leaderboards are derived data; avoid a shutdown-wide ordered-write burst.
+	-- Player profile persistence owns the critical shutdown save path.
 	serviceMaid:DoCleaning()
 	isInitialized = false
 end

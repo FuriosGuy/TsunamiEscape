@@ -2,11 +2,11 @@
   "className": "ParticleEmitter",
   "properties": {
     "Color": [{
-        "time": 0.0,
-        "color": [0.0353, 0.5373, 0.8118]
+        "color": [0.0353, 0.5373, 0.8118],
+        "time": 0.0
       }, {
-        "time": 1.0,
-        "color": [0.0353, 0.5373, 0.8118]
+        "color": [0.0353, 0.5373, 0.8118],
+        "time": 1.0
       }],
     "FlipbookLayout": "Grid4x4",
     "FlipbookMode": "OneShot",

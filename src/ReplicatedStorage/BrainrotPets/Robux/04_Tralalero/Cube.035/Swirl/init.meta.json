@@ -1,0 +1,56 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Lifetime": [1, 1],
+    "LightEmission": 0.6,
+    "LightInfluence": 1,
+    "LockedToPart": true,
+    "Orientation": "VelocityPerpendicular",
+    "Rate": 2,
+    "Rotation": [-360, 360],
+    "RotSpeed": [-100, -100],
+    "Size": [{
+        "envelope": 0.125,
+        "time": 0.0,
+        "value": 0.2
+      }, {
+        "envelope": 0.125,
+        "time": 1.0,
+        "value": 0.375
+      }],
+    "Speed": [0.125, 0.125],
+    "SpreadAngle": [45, 45],
+    "Squash": [{
+        "envelope": 0.125,
+        "time": 0.0,
+        "value": 0.0
+      }, {
+        "envelope": 0.125,
+        "time": 0.5,
+        "value": -0.2
+      }, {
+        "envelope": 0.125,
+        "time": 1.0,
+        "value": 0.2
+      }],
+    "Texture": "http://www.roblox.com/asset/?id=7833655167",
+    "Transparency": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 1.0
+      }, {
+        "envelope": 0.0,
+        "time": 0.4,
+        "value": 0.5
+      }, {
+        "envelope": 0.0,
+        "time": 0.6,
+        "value": 0.5
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 1.0
+      }],
+    "ZOffset": 2
+  }
+}

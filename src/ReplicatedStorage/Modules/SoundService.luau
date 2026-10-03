@@ -2,11 +2,15 @@ local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RobloxSoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
+local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 
 local SoundService = {}
 local guiSoundFolder: Folder? = nil
+type SoundPreloadState = "loading" | "loaded" | "failed"
+local preloadStates: { [string]: SoundPreloadState } = {}
 if RunService:IsClient() then
 	guiSoundFolder = Instance.new("Folder")
 	guiSoundFolder.Name = "GuiSounds"
@@ -33,134 +37,43 @@ export type SoundSettings = {
 	TimePosition: number?,
 }
 
-SoundService.Sounds = {
-	["Click"] = {
-		SoundId = 124637583082916,
-		Volume = 0.4,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = false,
-	},
-	["Pop"] = {
-		SoundId = 109359226723492,
-		Volume = 0.8,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = true,
-	},
-	["Close"] = {
-		SoundId = 92389629512441,
-		Volume = 0.4,
-		Pitch = 1,
-		PlaybackSpeed = 0.75,
-		Looped = false,
-		AllowOverlap = false,
-	},
-	["BellRing"] = {
-		SoundId = 128714357287984,
-		Volume = 0.4,
-		Pitch = 1,
-		PlaybackSpeed = 0.75,
-		Looped = false,
-		AllowOverlap = false,
-	},
-	["Success"] = {
-		SoundId = 128044073486125,
-		Volume = 0.4,
-		Pitch = 1,
-		PlaybackSpeed = 0.75,
-		Looped = false,
-		AllowOverlap = false,
-	},
-	["Hover"] = {
-		SoundId = 139800881181209,
-		Volume = 0.3,
-		Pitch = 1,
-		PlaybackSpeed = 1.5,
-		Looped = false,
-		AllowOverlap = false,
-	},
-	["LevelUp"] = {
-		SoundId = 3120909354,
-		Volume = 0.7,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = true,
-	},
-	["Rebirth"] = {
-		SoundId = 100288208393628,
-		Volume = 0.7,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = true,
-	},
-	["WinReward"] = {
-		SoundId = 136993031050456,
-		Volume = 1,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = true,
-	},
-	["BloodmoonRise"] = {
-		SoundId = 89079094196786,
-		Volume = 1,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = false,
-	},
-	["Confetti"] = {
-		SoundId = 1631688574,
-		Volume = 1,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = true,
-	},
-	["Swish"] = {
-		SoundId = 91252825775281,
-		Volume = 1,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = false,
-		AllowOverlap = true,
-	},
-	["AmbientLoop"] = {
-		SoundId = 0,
-		Volume = 0.35,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = true,
-		RollOffMode = Enum.RollOffMode.InverseTapered,
-		RollOffMinDistance = 10,
-		RollOffMaxDistance = 80,
-	},
-	["Wave Crash"] = {
-		SoundId = 79068891226084,
-		Volume = 1,
-		Pitch = 1,
-		PlaybackSpeed = 1,
-		Looped = true,
-		RollOffMode = Enum.RollOffMode.InverseTapered,
-		RollOffMinDistance = 64,
-		RollOffMaxDistance = 256,
-	},
-	["KartEngine"] = {
-		SoundId = 9112787430,
-		Volume = 2,
-		Pitch = 1,
-		PlaybackSpeed = 0.5,
-		Looped = true,
-		RollOffMode = Enum.RollOffMode.InverseTapered,
-		RollOffMinDistance = 32,
-		RollOffMaxDistance = 96,
-	},
+export type SoundOverrides = {
+	SoundId: (string | number)?,
+	Volume: number?,
+	Pitch: number?,
+	PlaybackSpeed: number?,
+	Looped: boolean?,
+	RollOffMode: Enum.RollOffMode?,
+	RollOffMinDistance: number?,
+	RollOffMaxDistance: number?,
+	TimePosition: number?,
 }
+
+-- SoundId and playback defaults live on ReplicatedStorage.Sounds templates.
+SoundService.Sounds = {
+	Click = { AllowOverlap = false },
+	Pop = { AllowOverlap = true },
+	Close = { AllowOverlap = false },
+	BellRing = { AllowOverlap = false },
+	Success = { AllowOverlap = false },
+	Hover = { AllowOverlap = false },
+	LevelUp = { AllowOverlap = true },
+	Rebirth = { AllowOverlap = true },
+	WinReward = { AllowOverlap = true },
+	BloodmoonRise = { AllowOverlap = false },
+	NeonRushRise = { AllowOverlap = false },
+	Confetti = { AllowOverlap = true },
+	Swish = { AllowOverlap = true },
+	LuckyBlockFallWhoosh = { AllowOverlap = false },
+	LuckyBlockImpact = { AllowOverlap = false },
+	LuckyBlockThump = { AllowOverlap = false },
+	LuckyBlockReward = { AllowOverlap = true },
+	AmbientLoop = { AllowOverlap = false },
+	["Wave Crash"] = { AllowOverlap = false },
+	KartEngine = { AllowOverlap = false },
+}
+
+local registeredConfigs: { [string]: SoundSettings } = {}
 
 local function normalizeSoundId(soundId: string | number): string
 	if typeof(soundId) == "number" then
@@ -174,19 +87,23 @@ local function normalizeSoundId(soundId: string | number): string
 	return "rbxassetid://" .. soundId
 end
 
-local function getConfig(soundName: string): SoundSettings?
-	local config = SoundService.Sounds[soundName]
-	if not config then
-		DebugModule.debugWarn("Missing sound config for " .. soundName, "SoundService")
-		return nil
-	end
+local function getSoundAssetKey(soundId: string | number): string
+	local normalizedId = normalizeSoundId(soundId)
+	return string.gsub(normalizedId, "^rbxassetid://", "")
+end
 
-	return config
+local function getSoundTemplate(soundName: string): Sound?
+	local folder = ReplicatedStorage:FindFirstChild("Sounds")
+	local template = folder and folder:FindFirstChild(soundName)
+	if template and template:IsA("Sound") then
+		return template
+	end
+	return nil
 end
 
 local function applyProperties(sound: Sound, soundName: string, config: SoundSettings)
 	sound.SoundId = normalizeSoundId(config.SoundId)
-	sound.Volume = config.Volume or 1
+	sound.Volume = if config.Volume ~= nil then config.Volume else 1
 	sound.PlaybackSpeed = config.PlaybackSpeed or config.Pitch or 1
 	sound.Looped = config.Looped == true
 	sound.Name = soundName
@@ -208,21 +125,53 @@ local function applyProperties(sound: Sound, soundName: string, config: SoundSet
 	end
 end
 
-local function createSound(parent: Instance, soundName: string, overrideSettings: SoundSettings?): Sound?
-	local baseConfig = getConfig(soundName)
-	if not baseConfig then
+local function applyOverrides(sound: Sound, overrides: SoundOverrides): ()
+	if overrides.SoundId ~= nil then
+		sound.SoundId = normalizeSoundId(overrides.SoundId)
+	end
+	if overrides.Volume ~= nil then
+		sound.Volume = overrides.Volume
+	end
+	local playbackSpeed = overrides.PlaybackSpeed or overrides.Pitch
+	if playbackSpeed ~= nil then
+		sound.PlaybackSpeed = playbackSpeed
+	end
+	if overrides.Looped ~= nil then
+		sound.Looped = overrides.Looped
+	end
+	if overrides.TimePosition ~= nil then
+		sound.TimePosition = overrides.TimePosition
+	end
+	if overrides.RollOffMode ~= nil then
+		sound.RollOffMode = overrides.RollOffMode
+	end
+	if overrides.RollOffMinDistance ~= nil then
+		sound.RollOffMinDistance = overrides.RollOffMinDistance
+	end
+	if overrides.RollOffMaxDistance ~= nil then
+		sound.RollOffMaxDistance = overrides.RollOffMaxDistance
+	end
+end
+
+local function createSound(parent: Instance, soundName: string, overrideSettings: SoundOverrides?): Sound?
+	local registeredConfig = registeredConfigs[soundName]
+	local template = getSoundTemplate(soundName)
+	if not registeredConfig and not template then
+		DebugModule.debugWarn("Missing sound template/config for " .. soundName, "SoundService")
 		return nil
 	end
 
-	local mergedConfig = table.clone(baseConfig)
-	if overrideSettings then
-		for key, value in pairs(overrideSettings) do
-			(mergedConfig :: any)[key] = value
-		end
+	local sound: Sound
+	if registeredConfig then
+		sound = Instance.new("Sound")
+		applyProperties(sound, soundName, registeredConfig)
+	else
+		sound = (template :: Sound):Clone()
+		sound.Name = soundName
 	end
-
-	local sound = Instance.new("Sound")
-	applyProperties(sound, soundName, mergedConfig)
+	if overrideSettings then
+		applyOverrides(sound, overrideSettings)
+	end
 	sound.Parent = parent
 
 	return sound
@@ -246,9 +195,126 @@ local function getOrCreateCachedGuiSound(soundName: string): Sound?
 	return sound
 end
 
+local function preloadSoundInstances(sounds: { Sound })
+	local fetchedStates: { [string]: Enum.AssetFetchStatus } = {}
+	local succeeded, failureMessage = pcall(function()
+		ContentProvider:PreloadAsync(sounds, function(contentId: string, status: Enum.AssetFetchStatus)
+			fetchedStates[getSoundAssetKey(contentId)] = status
+		end)
+	end)
+	return fetchedStates, succeeded, failureMessage
+end
+
+local function preloadSounds(soundNames: { string }): ()
+	if not RunService:IsClient() then
+		return
+	end
+
+	local soundsByAsset: { [string]: Sound } = {}
+	for _, soundName in ipairs(soundNames) do
+		local sound = getOrCreateCachedGuiSound(soundName)
+		if not sound then
+			continue
+		end
+
+		local assetKey = getSoundAssetKey(sound.SoundId)
+		if assetKey == "0" or preloadStates[assetKey] == "loaded" or preloadStates[assetKey] == "loading" then
+			continue
+		end
+		if sound.IsLoaded then
+			preloadStates[assetKey] = "loaded"
+			continue
+		end
+
+		preloadStates[assetKey] = "loading"
+		soundsByAsset[assetKey] = sound
+	end
+
+	if next(soundsByAsset) == nil then
+		return
+	end
+	local soundsToPreload: { Sound } = {}
+	for _, sound in pairs(soundsByAsset) do
+		table.insert(soundsToPreload, sound)
+	end
+
+	task.spawn(function()
+		local fetchedStates, succeeded, failureMessage = preloadSoundInstances(soundsToPreload)
+
+		local loadedNames: { string } = {}
+		for assetKey, sound in pairs(soundsByAsset) do
+			local fetchStatus = fetchedStates[assetKey]
+			if succeeded and (fetchStatus == Enum.AssetFetchStatus.Success or sound.IsLoaded) then
+				preloadStates[assetKey] = "loaded"
+				table.insert(loadedNames, sound.Name)
+			else
+				preloadStates[assetKey] = "failed"
+				DebugModule.debugWarn(
+					"Sound preload failed | name="
+						.. sound.Name
+						.. " | SoundId="
+						.. sound.SoundId
+						.. " | status="
+						.. tostring(fetchStatus)
+						.. " | error="
+						.. tostring(failureMessage),
+					"SoundService"
+				)
+			end
+		end
+		if #loadedNames > 0 then
+			DebugModule.debugPrint(
+				"Preloaded " .. tostring(#loadedNames) .. " sounds | names=" .. table.concat(loadedNames, ", "),
+				"SoundService"
+			)
+		end
+	end)
+end
+
 function SoundService.RegisterSound(soundName: string, config: SoundSettings)
-	SoundService.Sounds[soundName] = config
+	registeredConfigs[soundName] = config
+	SoundService.Sounds[soundName] = { AllowOverlap = config.AllowOverlap }
+	local oldCachedSound = if guiSoundFolder then guiSoundFolder:FindFirstChild(soundName) else nil
+	if oldCachedSound and oldCachedSound:IsA("Sound") then
+		applyProperties(oldCachedSound, soundName, config)
+	end
 	DebugModule.debugPrint("Registered sound config for " .. soundName, "SoundService")
+end
+
+function SoundService.PreloadSounds(soundNames: { string }): ()
+	preloadSounds(soundNames)
+end
+
+function SoundService.PreloadSoundInstance(sound: Sound): boolean
+	if not RunService:IsClient() then
+		return false
+	end
+	if sound.IsLoaded then
+		return true
+	end
+
+	local assetKey = getSoundAssetKey(sound.SoundId)
+	local fetchedStates, succeeded, failureMessage = preloadSoundInstances({ sound })
+	local fetchStatus = fetchedStates[assetKey]
+	local loaded = succeeded and (fetchStatus == Enum.AssetFetchStatus.Success or sound.IsLoaded)
+	if loaded then
+		preloadStates[assetKey] = "loaded"
+		return true
+	end
+
+	preloadStates[assetKey] = "failed"
+	DebugModule.debugWarn(
+		"Sound preload failed | name="
+			.. sound.Name
+			.. " | SoundId="
+			.. sound.SoundId
+			.. " | status="
+			.. tostring(fetchStatus)
+			.. " | error="
+			.. tostring(failureMessage),
+		"SoundService"
+	)
+	return false
 end
 
 function SoundService.GetWorldMusicPlaylist(worldName: string?, playlistName: string?): { string | number }
@@ -268,17 +334,13 @@ function SoundService.GetWorldMusicPlaylist(worldName: string?, playlistName: st
 	return {}
 end
 
-function SoundService.CreateSound(parent: Instance, soundName: string, overrideSettings: SoundSettings?): Sound?
+function SoundService.CreateSound(parent: Instance, soundName: string, overrideSettings: SoundOverrides?): Sound?
 	return createSound(parent, soundName, overrideSettings)
 end
 
-function SoundService.PlayGuiSound(soundName: string, parent: Instance?, overrideSettings: SoundSettings?): Sound?
-	local baseConfig = getConfig(soundName)
-	if not baseConfig then
-		return nil
-	end
-
-	if parent == nil and overrideSettings == nil and not baseConfig.AllowOverlap then
+function SoundService.PlayGuiSound(soundName: string, parent: Instance?, overrideSettings: SoundOverrides?): Sound?
+	local soundPolicy = SoundService.Sounds[soundName]
+	if parent == nil and overrideSettings == nil and not (soundPolicy and soundPolicy.AllowOverlap) then
 		local cachedSound = getOrCreateCachedGuiSound(soundName)
 		if not cachedSound then
 			return nil
@@ -306,7 +368,7 @@ function SoundService.PlayGuiSound(soundName: string, parent: Instance?, overrid
 	return sound
 end
 
-function SoundService.PlayWorkspaceSound(soundName: string, parent: Instance, overrideSettings: SoundSettings?): Sound?
+function SoundService.PlayWorkspaceSound(soundName: string, parent: Instance, overrideSettings: SoundOverrides?): Sound?
 	local sound = createSound(parent, soundName, overrideSettings)
 	if not sound then
 		return nil
@@ -327,12 +389,32 @@ function SoundService.StopSound(sound: Sound)
 end
 
 function SoundService.FadeOutAndDestroy(sound: Sound, fadeTime: number)
-	local tween = TweenService:Create(sound, TweenInfo.new(fadeTime), { Volume = 0 })
+	local tween = TweenService:Create(sound, TweenConfig.WithDuration(fadeTime, TweenConfig.MusicFade), { Volume = 0 })
 	tween:Play()
 	tween.Completed:Once(function()
 		sound:Stop()
 		sound:Destroy()
 	end)
+end
+
+if RunService:IsClient() then
+	SoundService.PreloadSounds({
+		"Click",
+		"Pop",
+		"Close",
+		"BellRing",
+		"Success",
+		"Hover",
+		"LevelUp",
+		"Rebirth",
+		"WinReward",
+		"Confetti",
+		"Swish",
+		"LuckyBlockFallWhoosh",
+		"LuckyBlockImpact",
+		"LuckyBlockThump",
+		"LuckyBlockReward",
+	})
 end
 
 return SoundService

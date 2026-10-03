@@ -1,4 +1,5 @@
 local MessagingService = game:GetService("MessagingService")
+local HttpService = game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +15,7 @@ local SystemChatService = {}
 local REMOTE_NAME = "GlobalSystemChat"
 local TOPIC_NAME = "GlobalSystemChat_v1"
 local MODULE_NAME = "SystemChatService_Server"
+local ROBUX_ICON = utf8.char(0xE002)
 local serverSubscription: RBXScriptConnection? = nil
 local serverInstanceId = game.JobId ~= "" and game.JobId or ("studio-" .. tostring(os.clock()))
 local promotionalLoopStarted = false
@@ -70,11 +72,22 @@ local DEFAULT_BLOODMOON_PROMOTIONAL_TEMPLATES = {
 	"🎯 Check out {KART} in the Blood Moon shop while the event is active!",
 }
 local DEFAULT_BLOODMOON_TIP_MESSAGES = {
-	"🌑 Reach the final stage and touch the Win button to earn a Blood Moon Win!",
+	"🌑 Reach stage 16 for 1, stage 18 for 2, or stage 20 for 3 Blood Moon Wins!",
 	"🔴 The waves glow red while Blood Moon is active!",
 	"🎯 Stay alert and time your movement carefully!",
 	"🏁 Finish your run and touch the Win button before leaving the course!",
 	"🏆 Blood Moon Wins reset when the next event begins, but unlocked rewards stay yours permanently!",
+}
+local DEFAULT_LIVE_EVENT_MESSAGES = {
+	"✨ {EVENT} is live! Check the event progress before it ends!",
+	"🏆 {EVENT} is live! Earn event wins before it ends!",
+}
+local DEFAULT_EVENT_REWARD_TEMPLATES = {
+	"🏆 Earn {WINS} {EVENT} Wins to unlock {REWARD}!",
+}
+local DEFAULT_EVENT_PROMOTIONAL_TEMPLATES = {
+	"✨ {EVENT} is live! Chase {REWARD} before the event ends!",
+	"🏎️ Keep going to earn {EVENT} Wins and unlock {REWARD}!",
 }
 
 SystemChatService.Config = {
@@ -99,6 +112,10 @@ SystemChatService.Config = {
 	NormalSelectionWeight = if systemChatConfig and typeof(systemChatConfig.normalSelectionWeight) == "number"
 		then math.max(1, math.floor(systemChatConfig.normalSelectionWeight))
 		else 1,
+	LiveEventSelectionWeight = if systemChatConfig
+		and typeof(systemChatConfig.liveEventSelectionWeight) == "number"
+		then math.max(1, math.floor(systemChatConfig.liveEventSelectionWeight))
+		else 4,
 }
 
 SystemChatService.LikeFavoriteEmojis = if systemChatConfig
@@ -173,6 +190,12 @@ SystemChatService.BloodmoonTipMessages = if systemChatConfig
 	then systemChatConfig.bloodmoonTipMessages
 	else DEFAULT_BLOODMOON_TIP_MESSAGES
 
+SystemChatService.LiveEventMessages = if systemChatConfig
+		and typeof(systemChatConfig.liveEventMessages) == "table"
+		and #systemChatConfig.liveEventMessages > 0
+	then systemChatConfig.liveEventMessages
+	else DEFAULT_LIVE_EVENT_MESSAGES
+
 local OFFER_LABELS: { [string]: string } = {
 	VIP = "VIP Pass",
 	["2xWins"] = "2x Wins",
@@ -207,6 +230,19 @@ local function getRandomFromPool(pool: { string }): string?
 	end
 
 	return pool[math.random(1, count)]
+end
+
+local function getUsableText(value: any): string?
+	if typeof(value) ~= "string" then
+		return nil
+	end
+
+	local trimmed = string.gsub(value, "^%s*(.-)%s*$", "%1")
+	if trimmed == "" or string.lower(trimmed) == "nil" then
+		return nil
+	end
+
+	return trimmed
 end
 
 local function getMarketplaceItemName(itemId: number, infoType: Enum.InfoType): string?
@@ -274,41 +310,57 @@ end
 
 local shopPromotionOffers: { string }? = nil
 
-type BloodmoonReward = {
+type EventReward = {
 	name: string,
 	winsRequired: number,
 }
 
-local function isBloodmoonActive(): boolean
-	local stateFolder = ReplicatedStorage:FindFirstChild("LiveEventState")
-	if not stateFolder or not stateFolder:IsA("Folder") then
-		return false
+type LiveEventChatContext = {
+	id: string,
+	displayName: string,
+	color: Color3,
+	rewardTemplates: { string },
+	promotionalTemplates: { string },
+	tipMessages: { string },
+	rewards: { EventReward },
+	kartNames: { string },
+}
+
+local function getStringPool(source: any, key: string, fallback: { string }): { string }
+	if typeof(source) == "table" then
+		local pool = source[key]
+		if typeof(pool) == "table" and #pool > 0 then
+			local usablePool: { string } = {}
+			for _, value in ipairs(pool) do
+				local usableText = getUsableText(value)
+				if usableText then
+					table.insert(usablePool, usableText)
+				end
+			end
+			if #usablePool > 0 then
+				return usablePool
+			end
+		end
 	end
 
-	local activeEventIds = stateFolder:GetAttribute("ActiveEventIds")
-	if typeof(activeEventIds) ~= "string" then
-		return false
-	end
-
-	return string.find("," .. activeEventIds .. ",", ",Bloodmoon,", 1, true) ~= nil
+	return fallback
 end
 
-local function getBloodmoonRewards(): { BloodmoonReward }
-	local rewards: { BloodmoonReward } = {}
-	local progressConfig = CoreConfig.bloodmoonProgress
-	if typeof(progressConfig) ~= "table" or typeof(progressConfig.unlocks) ~= "table" then
+local function getEventRewards(eventDefinition: { [string]: any }): { EventReward }
+	local rewards: { EventReward } = {}
+	local progressUi = eventDefinition.progressUi
+	local unlocks = if typeof(progressUi) == "table" then progressUi.unlocks else nil
+	if typeof(unlocks) ~= "table" then
 		return rewards
 	end
 
-	for _, rawReward in ipairs(progressConfig.unlocks) do
-		if
-			typeof(rawReward) == "table"
-			and typeof(rawReward.displayName) == "string"
-			and rawReward.displayName ~= ""
-			and typeof(rawReward.winsRequired) == "number"
-		then
+	for _, rawReward in ipairs(unlocks) do
+		local rewardName = if type(rawReward) == "table"
+			then getUsableText(rawReward.displayName) or getUsableText(rawReward.name)
+			else nil
+		if rewardName and type(rawReward) == "table" and typeof(rawReward.winsRequired) == "number" then
 			table.insert(rewards, {
-				name = rawReward.displayName,
+				name = rewardName,
 				winsRequired = math.max(0, math.floor(rawReward.winsRequired)),
 			})
 		end
@@ -317,12 +369,20 @@ local function getBloodmoonRewards(): { BloodmoonReward }
 	return rewards
 end
 
-local function getBloodmoonKartNames(): { string }
+local function getEventKartNames(eventId: string): { string }
 	local kartNames: { string } = {}
-	for productKey, productConfig in pairs(ProductService.BloodmoonKartProducts) do
+	local eventProducts = ProductService.EventKartProducts[eventId]
+	if typeof(eventProducts) ~= "table" then
+		return kartNames
+	end
+
+	for productKey, productConfig in pairs(eventProducts) do
 		if typeof(productKey) == "string" and typeof(productConfig) == "table" then
-			local productId = ProductService.DevProducts[productKey]
-			if typeof(productId) == "number" and productId > 0 then
+			local gamePassId = ProductService.Gamepasses[productKey]
+			local devProductId = ProductService.DevProducts[productKey]
+			local hasProduct = (typeof(gamePassId) == "number" and gamePassId > 0)
+				or (typeof(devProductId) == "number" and devProductId > 0)
+			if hasProduct then
 				table.insert(kartNames, resolveOfferDisplayName(productKey))
 			end
 		end
@@ -332,7 +392,98 @@ local function getBloodmoonKartNames(): { string }
 	return kartNames
 end
 
-local function getBloodmoonBoostNames(): { string }
+local function getLiveEventDefinition(eventName: string): { [string]: any }?
+	local liveEventsConfig = CoreConfig.liveEvents
+	if typeof(liveEventsConfig) ~= "table" or typeof(liveEventsConfig.events) ~= "table" then
+		return nil
+	end
+
+	for _, eventDefinition in ipairs(liveEventsConfig.events) do
+		if
+			type(eventDefinition) == "table"
+			and typeof(eventDefinition.id) == "string"
+			and string.lower(eventDefinition.id) == string.lower(eventName)
+		then
+			return eventDefinition
+		end
+	end
+
+	return nil
+end
+
+local function getActiveEventContexts(): { LiveEventChatContext }
+	local contexts: { LiveEventChatContext } = {}
+	local stateFolder = ReplicatedStorage:FindFirstChild("LiveEventState")
+	if not stateFolder or not stateFolder:IsA("Folder") then
+		return contexts
+	end
+
+	local encodedEvents = stateFolder:GetAttribute("ActiveEvents")
+	if typeof(encodedEvents) ~= "string" then
+		return contexts
+	end
+
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, encodedEvents)
+	if not ok or typeof(decoded) ~= "table" then
+		return contexts
+	end
+
+	for _, eventEntry in ipairs(decoded) do
+		local eventId = if typeof(eventEntry) == "table" then getUsableText(eventEntry.id) else nil
+		if eventId then
+			local eventDefinition = getLiveEventDefinition(eventId)
+			if eventDefinition then
+				local eventChatConfig = eventDefinition.systemChat
+				local isBloodmoon = string.lower(eventId) == "bloodmoon"
+				local rawDisplayName = if typeof(eventEntry.displayText) == "string"
+					then getUsableText(eventEntry.displayText)
+					else nil
+				local displayName = string.upper(
+					getUsableText(rawDisplayName)
+						or getUsableText(eventDefinition.displayText)
+						or eventId
+				)
+				local color = if isBloodmoon
+					then SystemChatService.Config.BloodmoonColor
+					elseif typeof(eventDefinition.displayColor) == "Color3"
+					then eventDefinition.displayColor
+					else SystemChatService.Config.DefaultColor
+				table.insert(contexts, {
+					id = eventId,
+					displayName = displayName,
+					color = color,
+					rewardTemplates = getStringPool(
+						eventChatConfig,
+						"rewardTemplates",
+						if isBloodmoon
+							then SystemChatService.BloodmoonRewardTemplates
+							else DEFAULT_EVENT_REWARD_TEMPLATES
+					),
+					promotionalTemplates = getStringPool(
+						eventChatConfig,
+						"promotionalTemplates",
+						if isBloodmoon
+							then SystemChatService.BloodmoonPromotionalTemplates
+							else DEFAULT_EVENT_PROMOTIONAL_TEMPLATES
+					),
+					tipMessages = getStringPool(
+						eventChatConfig,
+						"tipMessages",
+						if isBloodmoon
+							then SystemChatService.BloodmoonTipMessages
+							else SystemChatService.LiveEventMessages
+					),
+					rewards = getEventRewards(eventDefinition),
+					kartNames = getEventKartNames(eventEntry.id),
+				})
+			end
+		end
+	end
+
+	return contexts
+end
+
+local function getEventBoostNames(): { string }
 	local boostNames: { string } = {}
 	local temporaryWinBoostId = ProductService.DevProducts.TempWinBoost
 	if typeof(temporaryWinBoostId) == "number" and temporaryWinBoostId > 0 then
@@ -353,41 +504,51 @@ local function replaceTemplateValues(template: string, values: { [string]: strin
 	return message
 end
 
-local function buildBloodmoonRewardMessage(): string?
-	local template = getRandomFromPool(SystemChatService.BloodmoonRewardTemplates)
-	local rewards = getBloodmoonRewards()
-	local reward = if #rewards > 0 then rewards[math.random(1, #rewards)] else nil
+local function buildEventRewardMessage(context: LiveEventChatContext): string?
+	local template = getRandomFromPool(context.rewardTemplates)
+	local reward = if #context.rewards > 0
+		then context.rewards[math.random(1, #context.rewards)]
+		else nil
 	if not template or not reward then
 		return nil
 	end
 
 	return replaceTemplateValues(template, {
+		EVENT = context.displayName,
 		WINS = tostring(reward.winsRequired),
 		REWARD = reward.name,
 	})
 end
 
-local function buildBloodmoonPromotionalMessage(): string?
-	local template = getRandomFromPool(SystemChatService.BloodmoonPromotionalTemplates)
+local function buildEventPromotionalMessage(context: LiveEventChatContext): string?
+	local template = getRandomFromPool(context.promotionalTemplates)
 	if not template then
 		return nil
 	end
 
 	local rewardNames: { string } = {}
-	for _, reward in ipairs(getBloodmoonRewards()) do
+	for _, reward in ipairs(context.rewards) do
 		table.insert(rewardNames, reward.name)
 	end
 
 	local reward = getRandomFromPool(rewardNames)
-	local boost = getRandomFromPool(getBloodmoonBoostNames())
-	local kart = getRandomFromPool(getBloodmoonKartNames())
-	local replacements: { [string]: string } = {}
+	local boost = getRandomFromPool(getEventBoostNames())
+	local kart = getRandomFromPool(context.kartNames)
+	local replacements: { [string]: string } = {
+		EVENT = context.displayName,
+	}
 
 	if string.find(template, "{REWARD}", 1, true) then
 		if not reward then
 			return nil
 		end
 		replacements.REWARD = reward
+	end
+	if string.find(template, "{WINS}", 1, true) then
+		if not reward then
+			return nil
+		end
+		replacements.WINS = tostring(reward.winsRequired)
 	end
 	if string.find(template, "{BOOST}", 1, true) then
 		if not boost then
@@ -405,15 +566,15 @@ local function buildBloodmoonPromotionalMessage(): string?
 	return replaceTemplateValues(template, replacements)
 end
 
-local function buildBloodmoonMessage(): string?
-	local messageType = math.random(1, 3)
-	if messageType == 1 then
-		return getRandomFromPool(SystemChatService.BloodmoonTipMessages)
-	elseif messageType == 2 then
-		return buildBloodmoonRewardMessage() or getRandomFromPool(SystemChatService.BloodmoonTipMessages)
+local function buildEventTipMessage(context: LiveEventChatContext): string?
+	local template = getRandomFromPool(context.tipMessages)
+	if not template then
+		return nil
 	end
 
-	return buildBloodmoonPromotionalMessage() or getRandomFromPool(SystemChatService.BloodmoonTipMessages)
+	return replaceTemplateValues(template, {
+		EVENT = context.displayName,
+	})
 end
 
 local function buildPromotionalMessage(): string?
@@ -448,24 +609,52 @@ local function buildPromotionalMessage(): string?
 	return if emoji then string.format("%s %s", emoji, message) else message
 end
 
-local function buildScheduledMessage(): (string?, boolean)
-	if not isBloodmoonActive() then
-		return buildPromotionalMessage(), false
+local function buildLiveEventMessage(context: LiveEventChatContext): string
+	local template = getRandomFromPool(SystemChatService.LiveEventMessages)
+	if template then
+		return replaceTemplateValues(template, {
+			EVENT = context.displayName,
+		})
 	end
 
-	local bloodmoonWeight = SystemChatService.Config.BloodmoonSelectionWeight
-	local normalWeight = SystemChatService.Config.NormalSelectionWeight
-	local totalWeight = bloodmoonWeight + normalWeight
-	local chooseBloodmoon = math.random(1, totalWeight) <= bloodmoonWeight
+	return string.format("%s is live! Check the event progress before it ends!", context.displayName)
+end
 
-	if chooseBloodmoon then
-		local message = buildBloodmoonMessage()
+local function buildEventMessage(context: LiveEventChatContext): string
+	local messageType = math.random(1, 3)
+	if messageType == 1 then
+		return buildEventTipMessage(context) or buildLiveEventMessage(context)
+	elseif messageType == 2 then
+		return buildEventRewardMessage(context)
+			or buildEventTipMessage(context)
+			or buildLiveEventMessage(context)
+	end
+
+	return buildEventPromotionalMessage(context)
+		or buildEventTipMessage(context)
+		or buildLiveEventMessage(context)
+end
+
+local function buildScheduledMessage(): (string?, Color3?, string?)
+	local activeEvents = getActiveEventContexts()
+	if #activeEvents == 0 then
+		return buildPromotionalMessage(), SystemChatService.Config.PromoColor, nil
+	end
+
+	local eventWeight = SystemChatService.Config.LiveEventSelectionWeight
+	local normalWeight = SystemChatService.Config.NormalSelectionWeight
+	local totalWeight = eventWeight + normalWeight
+	local chooseEvent = math.random(1, totalWeight) <= eventWeight
+
+	if chooseEvent then
+		local activeEvent = activeEvents[math.random(1, #activeEvents)]
+		local message = buildEventMessage(activeEvent)
 		if message then
-			return message, true
+			return message, activeEvent.color, activeEvent.id
 		end
 	end
 
-	return buildPromotionalMessage(), false
+	return buildPromotionalMessage(), SystemChatService.Config.PromoColor, nil
 end
 
 local function getRemotesFolder(): Instance
@@ -519,7 +708,7 @@ function SystemChatService.FormatPurchaseMessage(
 	price: number,
 	color: Color3?
 ): string
-	local message = string.format("[SYSTEM]: %s just bought '%s' for %d Robux!", playerName, itemName, price)
+	local message = string.format("[SYSTEM]: %s just bought '%s' for %s %d!", playerName, itemName, ROBUX_ICON, price)
 	return SystemChatService.FormatMessage(message, color)
 end
 
@@ -658,20 +847,26 @@ function SystemChatService.StartPromotionalLoop()
 				break
 			end
 
-			local message, isBloodmoonMessage = buildScheduledMessage()
+			local message, messageColor, eventId = buildScheduledMessage()
 			if not message then
 				continue
 			end
 
-			-- Recheck immediately before sending so a message selected during Blood Moon
+			-- Recheck immediately before sending so a message selected during an event
 			-- cannot leak after LiveEventService has published the event end.
-			if isBloodmoonMessage and not isBloodmoonActive() then
-				continue
+			if eventId then
+				local eventStillActive = false
+				for _, currentEvent in ipairs(getActiveEventContexts()) do
+					if string.lower(currentEvent.id) == string.lower(eventId) then
+						eventStillActive = true
+						break
+					end
+				end
+				if not eventStillActive then
+					continue
+				end
 			end
 
-			local messageColor = if isBloodmoonMessage
-				then SystemChatService.Config.BloodmoonColor
-				else SystemChatService.Config.PromoColor
 			SystemChatService.BroadcastLocalMessage("[SYSTEM]: " .. message, messageColor)
 		end
 	end)

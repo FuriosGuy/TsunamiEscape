@@ -1,5 +1,3 @@
---!strict
-
 local Lighting = game:GetService("Lighting")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,27 +7,53 @@ local TweenService = game:GetService("TweenService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local SharedFolder = Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Client"))
+local PlayerHandler = require(SharedFolder:WaitForChild("PlayerHandler_Client"))
 local SpinWheelConfig = require(ConfigFolder:WaitForChild("SpinWheelConfig"))
+local ColorConfig = require(ConfigFolder:WaitForChild("ColorConfig"))
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local ProductService = require(Modules:WaitForChild("ProductService"))
+local ProductService = require(Modules:WaitForChild("Shared"):WaitForChild("ProductService_Client"))
 local RewardedVideoClient = require(Modules:WaitForChild("RewardedVideoClient"))
 local VisualFunctions = require(Modules:WaitForChild("UI"):WaitForChild("VisualFunctions"))
+local ConfettiBurstPlayer = require(Modules:WaitForChild("UI"):WaitForChild("ConfettiBurstPlayer"))
+local ModalGuiVisibilityController = require(Modules:WaitForChild("UI"):WaitForChild("MainGUI"):WaitForChild("ModalGuiVisibilityController"))
 local SoundService = require(Modules:WaitForChild("SoundService"))
+local TweenConfig = require(Modules:WaitForChild("UI"):WaitForChild("TweenConfig"))
 
 local SpinWheelUI = {}
 SpinWheelUI.__index = SpinWheelUI
 
 local MODULE_NAME = "SpinWheelUI"
 local SPINS_ATTRIBUTE = "SpinWheelSpins"
-local NEXT_FREE_SPIN_ATTRIBUTE = "SpinWheelNextFreeSpinUnix"
-local FREE_SPIN_COOLDOWN_SECONDS = 24 * 60 * 60
+local NEXT_FREE_SPIN_PLAYTIME_ATTRIBUTE = "SpinWheelNextFreeSpinPlaytimeSeconds"
+local TOTAL_PLAYTIME_ATTRIBUTE = "TotalPlaytimeSeconds"
 local REWARDED_AD_REMAINING_ATTRIBUTE = "SpinWheelRewardedAdSpinsRemaining"
 local REWARDED_AD_NEXT_AVAILABLE_ATTRIBUTE = "SpinWheelRewardedAdNextAvailableUnix"
 local REWARDED_AD_RESET_ATTRIBUTE = "SpinWheelRewardedAdResetUnix"
 local BLUR_SIZE = 24
 local BADGE_NAME = "SpinWheelClaimableNotification"
+local SPIN_LABEL_TEXT_COLOR = ColorConfig.UI.SpinWheel.LabelTextColor
+local SPIN_LABEL_GRADIENT_BOTTOM = ColorConfig.UI.SpinWheel.LabelGradientBottomColor
+local SPIN_LABEL_SHINE = ColorConfig.UI.SpinWheel.LabelShineColor
+local SPIN_LABEL_BASE_SHAKE_DEGREES = 1.5
+local SPIN_LABEL_MAX_SHAKE_DEGREES = 10
+local SPIN_LABEL_BASE_SCALE_POP = 0.015
+local SPIN_LABEL_MAX_SCALE_POP = 0.12
+local SPIN_WHEEL_BASE_SHAKE_PIXELS = 2
+local SPIN_WHEEL_MAX_SHAKE_PIXELS = 12
+local SPIN_WHEEL_BASE_SCALE_POP = 0.01
+local SPIN_WHEEL_MAX_SCALE_POP = 0.075
+local SPIN_ARROW_BASE_SHAKE_PIXELS = 1
+local SPIN_ARROW_MAX_SHAKE_PIXELS = 7
+local SPIN_ARROW_BASE_SHAKE_DEGREES = 0.75
+local SPIN_ARROW_MAX_SHAKE_DEGREES = 6
+local SPIN_REWARD_CONFETTI_COLORS = ColorConfig.UI.SpinWheel.RewardConfettiColors
+local SPIN_REWARD_CONFETTI_DURATION = 1.5
+local SPIN_REWARD_CONFETTI_COUNT = 55
+local DEFAULT_JUMP_HEIGHT = 8.6
+local DEFAULT_JUMP_POWER = 50
 local MOVEMENT_LOCK_ACTION = "SpinWheelMovementLock"
 local MOVEMENT_LOCK_KEYS = {
 	Enum.KeyCode.W,
@@ -43,30 +67,37 @@ local MOVEMENT_LOCK_KEYS = {
 	Enum.KeyCode.Space,
 }
 
-type VisibilityState = {
-	visible: boolean,
-	interactable: boolean,
-}
-
 type Controller = {
 	root: Instance,
 	player: Player,
 	maid: any,
 	frame: Frame?,
 	mainFrame: Frame?,
-	notificationFrame: Frame?,
-	notificationFrameDefaultZIndex: number?,
+	modalVisibilityController: any,
+	confettiHost: GuiObject?,
+	confettiPlayer: any,
 	arrow: GuiObject?,
 	spinWheelButtonFrame: GuiObject?,
+	spinWheelLightRay: GuiObject?,
 	spinButtonFrame: Frame?,
 	spinButton: TextButton?,
+	spinLabel: TextLabel?,
+	spinLabelShineOverlay: TextLabel?,
+	spinLabelScale: UIScale?,
+	spinLabelShineScale: UIScale?,
+	spinLabelOriginalRotation: number?,
+	spinLabelShineOriginalRotation: number?,
+	arrowOriginalPosition: UDim2?,
+	arrowOriginalRotation: number?,
+	mainFrameScale: UIScale?,
+	mainFrameOriginalPosition: UDim2?,
+	mainFrameOriginalScale: number?,
 	nextSpinLabel: TextLabel?,
 	nextSpinLabel1: TextLabel?,
 	watchAdButtonFrame: Frame?,
 	watchAdButton: TextButton?,
 	exitButton: GuiButton?,
 	rewardFrames: { [SpinWheelConfig.RewardId]: GuiObject },
-	visibilitySnapshot: { [GuiObject]: VisibilityState },
 	badge: GuiObject?,
 	blurEffect: BlurEffect?,
 	createdBlur: boolean,
@@ -86,6 +117,7 @@ type Controller = {
 	availabilityThread: thread?,
 	spinThread: thread?,
 	spinTickThread: thread?,
+	spinLabelEffectThread: thread?,
 	grantThread: thread?,
 	activeTween: Tween?,
 	lastBadgeText: string?,
@@ -160,19 +192,31 @@ function SpinWheelUI.new(root: Instance): Controller
 		maid = Maid.new(),
 		frame = nil,
 		mainFrame = nil,
-		notificationFrame = nil,
-		notificationFrameDefaultZIndex = nil,
+		modalVisibilityController = ModalGuiVisibilityController.new(root),
+		confettiHost = nil,
+		confettiPlayer = nil,
 		arrow = nil,
 		spinWheelButtonFrame = nil,
+		spinWheelLightRay = nil,
 		spinButtonFrame = nil,
 		spinButton = nil,
+		spinLabel = nil,
+		spinLabelShineOverlay = nil,
+		spinLabelScale = nil,
+		spinLabelShineScale = nil,
+		spinLabelOriginalRotation = nil,
+		spinLabelShineOriginalRotation = nil,
+		arrowOriginalPosition = nil,
+		arrowOriginalRotation = nil,
+		mainFrameScale = nil,
+		mainFrameOriginalPosition = nil,
+		mainFrameOriginalScale = nil,
 		nextSpinLabel = nil,
 		nextSpinLabel1 = nil,
 		watchAdButtonFrame = nil,
 		watchAdButton = nil,
 		exitButton = nil,
 		rewardFrames = {},
-		visibilitySnapshot = {},
 		badge = nil,
 		blurEffect = nil,
 		createdBlur = false,
@@ -192,6 +236,7 @@ function SpinWheelUI.new(root: Instance): Controller
 		availabilityThread = nil,
 		spinThread = nil,
 		spinTickThread = nil,
+		spinLabelEffectThread = nil,
 		grantThread = nil,
 		activeTween = nil,
 		lastBadgeText = nil,
@@ -220,29 +265,42 @@ function SpinWheelUI:findReferences()
 
 	self.frame = frameInstance
 	self.mainFrame = frameInstance:FindFirstChild("MainFrame") :: Frame?
-	local notificationFrame = self.root:FindFirstChild("NotificationFrame", true)
-	self.notificationFrame = if notificationFrame and notificationFrame:IsA("Frame")
-		then notificationFrame
-		else nil
-	if self.notificationFrame then
-		self.notificationFrameDefaultZIndex = self.notificationFrame.ZIndex
+	local confettiHost = self.root:FindFirstChild("ConfettiFrame", true)
+	self.confettiHost = if confettiHost and confettiHost:IsA("GuiObject") then confettiHost else nil
+	if self.confettiHost then
+		self.confettiPlayer = ConfettiBurstPlayer.GetOrCreateSingleton(self.confettiHost)
+		self:raiseConfettiLayer()
 	end
 	self.arrow = frameInstance:FindFirstChild("Arrow") :: GuiObject?
+	if self.arrow then
+		self.arrowOriginalPosition = self.arrow.Position
+		self.arrowOriginalRotation = self.arrow.Rotation
+	end
 	self.spinWheelButtonFrame = buttonFrame
+	local lightRay = buttonFrame:FindFirstChild("LightRay")
+	self.spinWheelLightRay = if lightRay and lightRay:IsA("GuiObject") then lightRay else nil
+	if self.spinWheelLightRay then
+		self.spinWheelLightRay.Visible = false
+	end
 	self.spinButtonFrame = frameInstance:FindFirstChild("SpinButton") :: Frame?
 	local spinButton = findGuiButton(self.spinButtonFrame)
 	self.spinButton = if spinButton and spinButton:IsA("TextButton") then spinButton else nil
+	self.spinLabel = findTextLabel(frameInstance, "SpinLabel")
 	self.nextSpinLabel = findTextLabel(frameInstance, "NextSpinLabel")
 	self.nextSpinLabel1 = findTextLabel(frameInstance, "NextSpinLabel1")
 	local watchAdButtonFrame = frameInstance:FindFirstChild("WatchAdButton")
-	self.watchAdButtonFrame = if watchAdButtonFrame and watchAdButtonFrame:IsA("Frame")
-		then watchAdButtonFrame
-		else nil
+	self.watchAdButtonFrame = if watchAdButtonFrame and watchAdButtonFrame:IsA("Frame") then watchAdButtonFrame else nil
 	local watchAdButton = findGuiButton(watchAdButtonFrame)
 	self.watchAdButton = if watchAdButton and watchAdButton:IsA("TextButton") then watchAdButton else nil
 	self.exitButton = findGuiButton(frameInstance:FindFirstChild("ExitButton"))
 
-	if not self.mainFrame or not self.arrow or not self.spinButtonFrame or not self.spinButton or not self.exitButton then
+	if
+		not self.mainFrame
+		or not self.arrow
+		or not self.spinButtonFrame
+		or not self.spinButton
+		or not self.exitButton
+	then
 		DebugModule.debugWarn("Spin wheel UI references incomplete", MODULE_NAME)
 		return false
 	end
@@ -257,22 +315,177 @@ function SpinWheelUI:findReferences()
 	return true
 end
 
+function SpinWheelUI:raiseConfettiLayer()
+	local confettiHost = self.confettiHost
+	if not confettiHost then
+		return
+	end
+
+	local highestSiblingZIndex = 0
+	for _, child in ipairs(self.root:GetChildren()) do
+		if child:IsA("GuiObject") and child ~= confettiHost then
+			highestSiblingZIndex = math.max(highestSiblingZIndex, child.ZIndex)
+		end
+	end
+
+	confettiHost.ZIndex = math.max(confettiHost.ZIndex, highestSiblingZIndex + 1)
+end
+
+function SpinWheelUI:playRewardConfetti()
+	local confettiPlayer = self.confettiPlayer
+	if not confettiPlayer then
+		return
+	end
+
+	local confettiHost = self.confettiHost
+	if confettiHost then
+		confettiHost.Visible = true
+	end
+	self:raiseConfettiLayer()
+	confettiPlayer:PlayBurst(
+		SPIN_REWARD_CONFETTI_COLORS,
+		SPIN_REWARD_CONFETTI_DURATION,
+		SPIN_REWARD_CONFETTI_COUNT
+	)
+end
+
 function SpinWheelUI:setNotificationLayerForWheel(isWheelOpen: boolean)
-	local notificationFrame = self.notificationFrame
-	if not notificationFrame then
+	self.modalVisibilityController:SetNotificationLayer(self.frame, isWheelOpen)
+end
+
+function SpinWheelUI:setupSpinLabelGradient(): TextLabel?
+	local label = self.spinLabel
+	if not label then
+		return nil
+	end
+
+	label.TextColor3 = SPIN_LABEL_TEXT_COLOR
+
+	for _, child in ipairs(label:GetChildren()) do
+		local isGradient = child.Name == "SpinLabelBottomColor" or child.Name == "SpinLabelShine"
+		local isScale = child.Name == "SpinLabelSpinScale"
+		if isGradient or isScale then
+			if (isGradient and child:IsA("UIGradient")) or (isScale and child:IsA("UIScale")) then
+				child:Destroy()
+			else
+				DebugModule.debugWarn(
+					child.Name .. " has an unexpected class: " .. child.ClassName,
+					MODULE_NAME
+				)
+				return nil
+			end
+		end
+	end
+
+	local bottomColorGradient = Instance.new("UIGradient")
+	bottomColorGradient.Name = "SpinLabelBottomColor"
+	bottomColorGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, ColorConfig.Colors.White.Color),
+		ColorSequenceKeypoint.new(1, SPIN_LABEL_GRADIENT_BOTTOM),
+	})
+	bottomColorGradient.Rotation = 90
+	bottomColorGradient.Parent = label
+
+	local parent = label.Parent
+	if not parent then
+		bottomColorGradient:Destroy()
+		return nil
+	end
+
+	local existingOverlay = parent:FindFirstChild("SpinLabelShineOverlay")
+	if existingOverlay then
+		existingOverlay:Destroy()
+	end
+
+	local shineOverlay = label:Clone()
+	shineOverlay.Name = "SpinLabelShineOverlay"
+	shineOverlay.ZIndex = label.ZIndex + 1
+	shineOverlay.TextColor3 = SPIN_LABEL_SHINE
+	shineOverlay.TextTransparency = 0
+	shineOverlay.BackgroundTransparency = 1
+	shineOverlay.Interactable = false
+	for _, child in ipairs(shineOverlay:GetChildren()) do
+		if child:IsA("UIStroke") or child:IsA("UIGradient") then
+			child:Destroy()
+		end
+	end
+
+	local shineGradient = Instance.new("UIGradient")
+	shineGradient.Name = "SpinLabelShine"
+	shineGradient.Color = ColorSequence.new(SPIN_LABEL_SHINE)
+	shineGradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.42, 1),
+		NumberSequenceKeypoint.new(0.5, 0),
+		NumberSequenceKeypoint.new(0.58, 1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	shineGradient.Offset = Vector2.new(-1, 0)
+	shineGradient.Parent = shineOverlay
+	shineOverlay.Parent = parent
+
+	local labelScale = Instance.new("UIScale")
+	labelScale.Name = "SpinLabelSpinScale"
+	labelScale.Scale = 1
+	labelScale.Parent = label
+
+	local shineScale = Instance.new("UIScale")
+	shineScale.Name = "SpinLabelSpinScale"
+	shineScale.Scale = 1
+	shineScale.Parent = shineOverlay
+
+	self.maid:GiveTask(bottomColorGradient)
+	self.maid:GiveTask(shineOverlay)
+	self.maid:GiveTask(labelScale)
+	self.maid:GiveTask(shineScale)
+	self.spinLabelShineOverlay = shineOverlay
+	self.spinLabelScale = labelScale
+	self.spinLabelShineScale = shineScale
+	self.spinLabelOriginalRotation = label.Rotation
+	self.spinLabelShineOriginalRotation = shineOverlay.Rotation
+
+	local shineTween = TweenService:Create(
+		shineGradient,
+		TweenConfig.SpinWheelShine,
+		{ Offset = Vector2.new(1, 0) }
+	)
+	self.maid:GiveTask(shineTween)
+	shineTween:Play()
+
+	self.maid:GiveTask(label:GetPropertyChangedSignal("Visible"):Connect(function()
+		shineOverlay.Visible = label.Visible
+	end))
+	self.maid:GiveTask(label:GetPropertyChangedSignal("Text"):Connect(function()
+		shineOverlay.Text = label.Text
+	end))
+
+	return shineOverlay
+end
+
+function SpinWheelUI:setupSpinWheelEffect()
+	local mainFrame = self.mainFrame
+	if not mainFrame then
 		return
 	end
 
-	if isWheelOpen then
-		local wheelZIndex = if self.frame then self.frame.ZIndex else notificationFrame.ZIndex
-		notificationFrame.ZIndex = math.max(notificationFrame.ZIndex, wheelZIndex + 1)
+	self.mainFrameOriginalPosition = mainFrame.Position
+	local existingScale = mainFrame:FindFirstChild("SpinWheelSpinScale")
+	if existingScale and not existingScale:IsA("UIScale") then
+		DebugModule.debugWarn("SpinWheelSpinScale has an unexpected class: " .. existingScale.ClassName, MODULE_NAME)
 		return
 	end
 
-	local defaultZIndex = self.notificationFrameDefaultZIndex
-	if defaultZIndex ~= nil then
-		notificationFrame.ZIndex = defaultZIndex
+	local scale = existingScale :: UIScale?
+	if not scale then
+		scale = Instance.new("UIScale")
+		scale.Name = "SpinWheelSpinScale"
+		scale.Scale = 1
+		scale.Parent = mainFrame
+		self.maid:GiveTask(scale)
 	end
+
+	self.mainFrameScale = scale
+	self.mainFrameOriginalScale = scale.Scale
 end
 
 function SpinWheelUI:setButtonEnabled(button: GuiButton, isEnabled: boolean)
@@ -284,11 +497,11 @@ function SpinWheelUI:setButtonEnabled(button: GuiButton, isEnabled: boolean)
 	end
 end
 
-function SpinWheelUI:getFreeSpinCooldownSeconds(): number
+function SpinWheelUI:getFreeSpinPlaytimeSeconds(): number
 	local config = CoreConfig.spinWheel
-	return if config and typeof(config.freeSpinCooldownSeconds) == "number"
-		then math.max(1, math.floor(config.freeSpinCooldownSeconds))
-		else FREE_SPIN_COOLDOWN_SECONDS
+	return if config and typeof(config.freeSpinPlaytimeSeconds) == "number"
+		then math.max(1, math.floor(config.freeSpinPlaytimeSeconds))
+		else 15 * 60
 end
 
 function SpinWheelUI:getRewardedAdMaxSpins(): number
@@ -309,8 +522,7 @@ function SpinWheelUI:getRewardedAdState(): (number, number, number)
 		or getNumberAttribute(self.player, REWARDED_AD_REMAINING_ATTRIBUTE, maxSpins)
 	local nextAvailableUnix = self.rewardedAdNextAvailableOverride
 		or getNumberAttribute(self.player, REWARDED_AD_NEXT_AVAILABLE_ATTRIBUTE, 0)
-	local resetUnix = self.rewardedAdResetOverride
-		or getNumberAttribute(self.player, REWARDED_AD_RESET_ATTRIBUTE, 0)
+	local resetUnix = self.rewardedAdResetOverride or getNumberAttribute(self.player, REWARDED_AD_RESET_ATTRIBUTE, 0)
 	local safeRemaining = math.clamp(math.floor(remaining), 0, maxSpins)
 	local safeNextAvailableUnix = math.max(0, math.floor(nextAvailableUnix))
 	local safeResetUnix = math.max(0, math.floor(resetUnix))
@@ -360,12 +572,17 @@ function SpinWheelUI:updateWatchAdButton()
 end
 
 function SpinWheelUI:hasSpinAvailable(): boolean
+	if self.player:GetAttribute("Data_Loaded") ~= true then
+		return false
+	end
+
 	if getNumberAttribute(self.player, SPINS_ATTRIBUTE, 0) > 0 then
 		return true
 	end
 
-	local nextFreeSpinUnix = getNumberAttribute(self.player, NEXT_FREE_SPIN_ATTRIBUTE, 0)
-	return nextFreeSpinUnix <= os.time()
+	local nextFreeSpinPlaytime = getNumberAttribute(self.player, NEXT_FREE_SPIN_PLAYTIME_ATTRIBUTE, 0)
+	local totalPlaytime = getNumberAttribute(self.player, TOTAL_PLAYTIME_ATTRIBUTE, 0)
+	return nextFreeSpinPlaytime > 0 and totalPlaytime >= nextFreeSpinPlaytime
 end
 
 function SpinWheelUI:updateAvailabilityBadge()
@@ -415,17 +632,33 @@ function SpinWheelUI:updateCountdownLabel()
 		return
 	end
 
+	if self.player:GetAttribute("Data_Loaded") ~= true then
+		label.Text = "LOADING..."
+		return
+	end
+
 	if self:hasSpinAvailable() then
 		label.Text = "NEXT SPIN READY!"
 		return
 	end
 
-	local nextFreeSpinUnix = getNumberAttribute(self.player, NEXT_FREE_SPIN_ATTRIBUTE, 0)
-	local remaining = math.max(0, nextFreeSpinUnix - os.time())
+	local nextFreeSpinPlaytime = getNumberAttribute(self.player, NEXT_FREE_SPIN_PLAYTIME_ATTRIBUTE, 0)
+	local totalPlaytime = getNumberAttribute(self.player, TOTAL_PLAYTIME_ATTRIBUTE, 0)
+	local targetPlaytime = if nextFreeSpinPlaytime > 0
+		then nextFreeSpinPlaytime
+		else totalPlaytime + self:getFreeSpinPlaytimeSeconds()
+	local remaining = math.max(0, targetPlaytime - totalPlaytime)
 	label.Text = "NEXT SPIN IN " .. formatDuration(remaining)
 end
 
 function SpinWheelUI:updateSpinButton()
+	local lightRay = self.spinWheelLightRay
+	if lightRay and lightRay.Parent then
+		lightRay.Visible = self.player:GetAttribute("Data_Loaded") == true
+			and not self.spinInFlight
+			and self:hasSpinAvailable()
+	end
+
 	local button = self.spinButton
 	if not button then
 		return
@@ -509,7 +742,10 @@ function SpinWheelUI:loadPrices()
 					end
 				else
 					priceLabel.Text = "0"
-					DebugModule.debugWarn("Failed price lookup for " .. pack.productKey .. " (" .. tostring(info) .. ")", MODULE_NAME)
+					DebugModule.debugWarn(
+						"Failed price lookup for " .. pack.productKey .. " (" .. tostring(info) .. ")",
+						MODULE_NAME
+					)
 				end
 			end)
 			self.maid:GiveSpawnTask(thread)
@@ -582,8 +818,141 @@ function SpinWheelUI:stopAvailabilityWatcher()
 	end
 end
 
+function SpinWheelUI:resetSpinVisuals()
+	local label = self.spinLabel
+	if label then
+		label.Rotation = self.spinLabelOriginalRotation or 0
+	end
+	local shineOverlay = self.spinLabelShineOverlay
+	if shineOverlay then
+		shineOverlay.Rotation = self.spinLabelShineOriginalRotation or 0
+	end
+	if self.spinLabelScale then
+		self.spinLabelScale.Scale = 1
+	end
+	if self.spinLabelShineScale then
+		self.spinLabelShineScale.Scale = 1
+	end
+	local arrow = self.arrow
+	if arrow then
+		if self.arrowOriginalPosition then
+			arrow.Position = self.arrowOriginalPosition
+		end
+		arrow.Rotation = self.arrowOriginalRotation or 0
+	end
+	local mainFrame = self.mainFrame
+	if mainFrame and self.mainFrameOriginalPosition then
+		mainFrame.Position = self.mainFrameOriginalPosition
+	end
+	if self.mainFrameScale and self.mainFrameOriginalScale then
+		self.mainFrameScale.Scale = self.mainFrameOriginalScale
+	end
+end
+
+function SpinWheelUI:stopSpinEffect()
+	if self.spinLabelEffectThread then
+		task.cancel(self.spinLabelEffectThread)
+		self.spinLabelEffectThread = nil
+	end
+	self:resetSpinVisuals()
+end
+
+function SpinWheelUI:startSpinEffect(token: number, plannedTravelDegrees: number, duration: number)
+	self:stopSpinEffect()
+
+	local label = self.spinLabel
+	local shineOverlay = self.spinLabelShineOverlay
+	local labelScale = self.spinLabelScale
+	local shineScale = self.spinLabelShineScale
+	local arrow = self.arrow
+	local mainFrame = self.mainFrame
+	if not mainFrame then
+		return
+	end
+
+	local referenceSpeed = math.max(1, plannedTravelDegrees / math.max(duration, 0.5) * 5)
+	self.spinLabelEffectThread = task.spawn(function()
+		local previousRotation = mainFrame.Rotation
+		local shakePhase = 0
+		while
+			self.alive
+			and self.isOpen
+			and self.spinInFlight
+			and token == self.spinToken
+			and mainFrame.Parent ~= nil
+		do
+			local deltaTime = RunService.RenderStepped:Wait()
+			local currentRotation = mainFrame.Rotation
+			local degreesPerSecond = if deltaTime > 0
+				then math.abs(currentRotation - previousRotation) / deltaTime
+				else 0
+			previousRotation = currentRotation
+
+			local speedAlpha = math.clamp(degreesPerSecond / referenceSpeed, 0, 1)
+			local intensity = speedAlpha ^ 0.7
+			shakePhase += deltaTime * (18 + (28 * intensity))
+			local shakeOffset = math.sin(shakePhase) * (
+				SPIN_LABEL_BASE_SHAKE_DEGREES + (SPIN_LABEL_MAX_SHAKE_DEGREES * intensity)
+			)
+			local pulse = 0.5 + (0.5 * math.sin(shakePhase + (math.pi / 2)))
+			if label and shineOverlay and labelScale and shineScale then
+				local scale = 1
+					+ (SPIN_LABEL_BASE_SCALE_POP + (SPIN_LABEL_MAX_SCALE_POP * intensity)) * pulse
+
+				label.Rotation = (self.spinLabelOriginalRotation or 0) + shakeOffset
+				shineOverlay.Rotation = (self.spinLabelShineOriginalRotation or 0) + shakeOffset
+				labelScale.Scale = scale
+				shineScale.Scale = scale
+			end
+
+			if arrow and self.arrowOriginalPosition then
+				local arrowShake = math.sin((shakePhase * 1.2) + math.pi) * (
+					SPIN_ARROW_BASE_SHAKE_PIXELS + (SPIN_ARROW_MAX_SHAKE_PIXELS * intensity)
+				)
+				local arrowBounce = math.abs(math.sin(shakePhase * 0.9)) * (
+					SPIN_ARROW_BASE_SHAKE_PIXELS + (SPIN_ARROW_MAX_SHAKE_PIXELS * 0.65 * intensity)
+				)
+				arrow.Position = UDim2.new(
+					self.arrowOriginalPosition.X.Scale,
+					self.arrowOriginalPosition.X.Offset + arrowShake,
+					self.arrowOriginalPosition.Y.Scale,
+					self.arrowOriginalPosition.Y.Offset + arrowBounce
+				)
+				arrow.Rotation = (self.arrowOriginalRotation or 0) + math.sin(shakePhase * 1.05) * (
+					SPIN_ARROW_BASE_SHAKE_DEGREES + (SPIN_ARROW_MAX_SHAKE_DEGREES * intensity)
+				)
+			end
+
+			local mainFrameScale = self.mainFrameScale
+			local mainFramePosition = self.mainFrameOriginalPosition
+			if mainFrameScale and mainFramePosition then
+				local wheelShake = math.sin(shakePhase * 0.85) * (
+					SPIN_WHEEL_BASE_SHAKE_PIXELS + (SPIN_WHEEL_MAX_SHAKE_PIXELS * intensity)
+				)
+				local wheelVerticalShake = math.sin(shakePhase * 1.1) * (
+					(SPIN_WHEEL_BASE_SHAKE_PIXELS * 0.35) + (SPIN_WHEEL_MAX_SHAKE_PIXELS * 0.25 * intensity)
+				)
+				mainFrame.Position = UDim2.new(
+					mainFramePosition.X.Scale,
+					mainFramePosition.X.Offset + wheelShake,
+					mainFramePosition.Y.Scale,
+					mainFramePosition.Y.Offset + wheelVerticalShake
+				)
+				mainFrameScale.Scale = (self.mainFrameOriginalScale or 1)
+					* (1 + (SPIN_WHEEL_BASE_SCALE_POP + (SPIN_WHEEL_MAX_SCALE_POP * intensity)) * pulse)
+			end
+		end
+
+		if self.spinLabelEffectThread == coroutine.running() then
+			self.spinLabelEffectThread = nil
+			self:resetSpinVisuals()
+		end
+	end)
+end
+
 function SpinWheelUI:stopSpinTween()
 	self.spinToken += 1
+	self:stopSpinEffect()
 	if self.spinTickThread then
 		task.cancel(self.spinTickThread)
 		self.spinTickThread = nil
@@ -651,7 +1020,8 @@ function SpinWheelUI:startSpinTickSound(tween: Tween, token: number)
 	local maxPlaybackSpeed = if config and typeof(config.wheelTickMaxPlaybackSpeed) == "number"
 		then math.max(minPlaybackSpeed, config.wheelTickMaxPlaybackSpeed)
 		else 1.6
-	local referenceDegreesPerSecond = if config and typeof(config.wheelTickReferenceDegreesPerSecond) == "number"
+	local referenceDegreesPerSecond = if config
+			and typeof(config.wheelTickReferenceDegreesPerSecond) == "number"
 		then math.max(1, config.wheelTickReferenceDegreesPerSecond)
 		else 720
 
@@ -673,8 +1043,7 @@ function SpinWheelUI:startSpinTickSound(tween: Tween, token: number)
 					then math.abs(currentRotation - previousRotation) / deltaTime
 					else 0
 				local speedAlpha = math.clamp(degreesPerSecond / referenceDegreesPerSecond, 0, 1)
-				local playbackSpeed = minPlaybackSpeed
-					+ ((maxPlaybackSpeed - minPlaybackSpeed) * speedAlpha)
+				local playbackSpeed = minPlaybackSpeed + ((maxPlaybackSpeed - minPlaybackSpeed) * speedAlpha)
 				local tickCount = math.min(crossedSegments, 4)
 
 				for _ = 1, tickCount do
@@ -758,6 +1127,7 @@ function SpinWheelUI:showResult(result: { [string]: any })
 		else getRewardName(rewardId :: SpinWheelConfig.RewardId)
 
 	SoundService.PlayGuiSound("WinReward")
+	self:playRewardConfetti()
 	VisualFunctions.ShowNotification("YOU WIN " .. rewardText .. "!", theme.textColor, theme.gradientBottomColor)
 end
 
@@ -798,6 +1168,7 @@ function SpinWheelUI:spin(result: { [string]: any })
 	end
 
 	local typedRewardId = rewardId :: SpinWheelConfig.RewardId
+	local startingRotation = self.mainFrame.Rotation
 	local targetRotation = self:getRotationForReward(typedRewardId)
 	if not targetRotation then
 		self.spinInFlight = false
@@ -818,19 +1189,21 @@ function SpinWheelUI:spin(result: { [string]: any })
 		else 4
 	local tween = TweenService:Create(
 		self.mainFrame,
-		TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		TweenConfig.WithDuration(duration, TweenConfig.SpinWheelRotation),
 		{ Rotation = targetRotation }
 	)
 	self.activeTween = tween
 
 	self.spinThread = task.spawn(function()
 		tween:Play()
+		self:startSpinEffect(token, math.abs(targetRotation - startingRotation), duration)
 		self:startSpinTickSound(tween, token)
 		tween.Completed:Wait()
 		if self.spinTickThread then
 			task.cancel(self.spinTickThread)
 			self.spinTickThread = nil
 		end
+		self:stopSpinEffect()
 		if not self.alive or not self.isOpen or token ~= self.spinToken then
 			return
 		end
@@ -868,28 +1241,11 @@ function SpinWheelUI:spin(result: { [string]: any })
 end
 
 function SpinWheelUI:captureVisibility()
-	table.clear(self.visibilitySnapshot)
-	for _, child in ipairs(self.root:GetChildren()) do
-		if child:IsA("GuiObject") then
-			self.visibilitySnapshot[child] = {
-				visible = child.Visible,
-				interactable = child.Interactable,
-			}
-			if child ~= self.frame then
-				child.Visible = false
-			end
-		end
-	end
+	self.modalVisibilityController:Capture(self.frame)
 end
 
 function SpinWheelUI:restoreVisibility()
-	for guiObject, state in pairs(self.visibilitySnapshot) do
-		if guiObject.Parent then
-			guiObject.Visible = state.visible
-			guiObject.Interactable = state.interactable
-		end
-	end
-	table.clear(self.visibilitySnapshot)
+	self.modalVisibilityController:Restore()
 end
 
 function SpinWheelUI:enableBlur()
@@ -929,15 +1285,9 @@ function SpinWheelUI:bindMovementInputLock()
 		return
 	end
 
-	ContextActionService:BindActionAtPriority(
-		MOVEMENT_LOCK_ACTION,
-		function()
-			return Enum.ContextActionResult.Sink
-		end,
-		false,
-		Enum.ContextActionPriority.High.Value,
-		table.unpack(MOVEMENT_LOCK_KEYS)
-	)
+	ContextActionService:BindActionAtPriority(MOVEMENT_LOCK_ACTION, function()
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, table.unpack(MOVEMENT_LOCK_KEYS))
 	self.movementInputBound = true
 end
 
@@ -953,18 +1303,30 @@ end
 function SpinWheelUI:unlockPlayerMovement()
 	local humanoid = self.movementLockedHumanoid
 	if humanoid and humanoid.Parent then
-		if typeof(self.movementWalkSpeed) == "number" then
-			humanoid.WalkSpeed = self.movementWalkSpeed
-		end
-		if typeof(self.movementJumpHeight) == "number" then
-			humanoid.JumpHeight = self.movementJumpHeight
-		end
-		if typeof(self.movementJumpPower) == "number" then
-			humanoid.JumpPower = self.movementJumpPower
-		end
-		if typeof(self.movementAutoRotate) == "boolean" then
-			humanoid.AutoRotate = self.movementAutoRotate
-		end
+		local savedWalkSpeed = self.movementWalkSpeed
+		local effectiveWalkSpeed = PlayerHandler.GetEffectiveWalkSpeed(self.player)
+		humanoid.WalkSpeed = if typeof(savedWalkSpeed) == "number" and savedWalkSpeed > 0
+			then savedWalkSpeed
+			else math.max(effectiveWalkSpeed, 1)
+
+		local savedJumpHeight = self.movementJumpHeight
+		humanoid.JumpHeight = if typeof(savedJumpHeight) == "number" and savedJumpHeight > 0
+			then savedJumpHeight
+			else DEFAULT_JUMP_HEIGHT
+
+	local savedJumpPower = self.movementJumpPower
+		humanoid.JumpPower = if typeof(savedJumpPower) == "number" and savedJumpPower > 0
+			then savedJumpPower
+			else DEFAULT_JUMP_POWER
+
+		local trollFrame = self.root:FindFirstChild("TrollFrame", true)
+		local anotherMovementLockActive = trollFrame and trollFrame:IsA("GuiObject") and trollFrame.Visible
+		local savedAutoRotate = self.movementAutoRotate
+		humanoid.AutoRotate = if anotherMovementLockActive
+			then false
+			elseif typeof(savedAutoRotate) == "boolean"
+			then savedAutoRotate
+			else true
 	end
 
 	self.movementLockedHumanoid = nil
@@ -973,6 +1335,26 @@ function SpinWheelUI:unlockPlayerMovement()
 	self.movementJumpPower = nil
 	self.movementAutoRotate = nil
 	self:unbindMovementInputLock()
+end
+
+function SpinWheelUI:resetModalState()
+	self.isOpen = false
+	self:setNotificationLayerForWheel(false)
+	self.player:SetAttribute("SpinWheelModalOpen", false)
+	if self.player:GetAttribute("ModalLockOwner") == "SpinWheel" then
+		self.player:SetAttribute("ModalLockOwner", nil)
+	end
+	self:unlockPlayerMovement()
+	self:stopIdleRotation()
+	self:stopCountdown()
+	self:stopSpinTween()
+	if self.frame then
+		self.frame.Visible = false
+		self.frame.Interactable = false
+	end
+	self:disableBlur()
+	self:restoreVisibility()
+	self:updateAvailabilityBadge()
 end
 
 function SpinWheelUI:lockPlayerMovement()
@@ -1005,10 +1387,18 @@ function SpinWheelUI:open()
 	if self.isOpen or not self.frame then
 		return
 	end
+	if self.player:GetAttribute("LuckyBlockModalOpen") == true then
+		return
+	end
+	local modalOwner = self.player:GetAttribute("ModalLockOwner")
+	if modalOwner ~= nil and modalOwner ~= "SpinWheel" then
+		return
+	end
 	self:captureVisibility()
 	self.isOpen = true
 	self:setNotificationLayerForWheel(true)
 	self.player:SetAttribute("SpinWheelModalOpen", true)
+	self.player:SetAttribute("ModalLockOwner", "SpinWheel")
 	self:lockPlayerMovement()
 	self.frame.Visible = true
 	self.frame.Interactable = true
@@ -1026,20 +1416,7 @@ function SpinWheelUI:close()
 	if self.spinInFlight then
 		return
 	end
-	self.isOpen = false
-	self:setNotificationLayerForWheel(false)
-	self.player:SetAttribute("SpinWheelModalOpen", false)
-	self:unlockPlayerMovement()
-	self:stopIdleRotation()
-	self:stopCountdown()
-	self:stopSpinTween()
-	if self.frame then
-		self.frame.Visible = false
-		self.frame.Interactable = false
-	end
-	self:disableBlur()
-	self:restoreVisibility()
-	self:updateAvailabilityBadge()
+	self:resetModalState()
 end
 
 function SpinWheelUI:requestSpin(ignoreLocalAvailability: boolean?): boolean
@@ -1065,6 +1442,16 @@ function SpinWheelUI:requestSpin(ignoreLocalAvailability: boolean?): boolean
 end
 
 function SpinWheelUI:bind()
+	local frame = self.frame
+	if frame then
+		self.maid:GiveTask(frame:GetPropertyChangedSignal("Visible"):Connect(function()
+			if self.isOpen and not frame.Visible then
+				DebugModule.debugInfo("Spin wheel modal reset after external frame hide", MODULE_NAME)
+				self:resetModalState()
+			end
+		end))
+	end
+
 	local spinWheelButtonFrame = self.spinWheelButtonFrame
 	local spinWheelButton = findGuiButton(spinWheelButtonFrame)
 	if spinWheelButton then
@@ -1072,6 +1459,15 @@ function SpinWheelUI:bind()
 			SoundService.PlayGuiSound("Click")
 			self:open()
 		end))
+	end
+
+	self:setupSpinWheelEffect()
+	if self.spinLabel then
+		local shineOverlay = self:setupSpinLabelGradient()
+		VisualFunctions.SetupPulsate(self.spinLabel, 1.06)
+		if shineOverlay then
+			VisualFunctions.SetupPulsate(shineOverlay, 1.06)
+		end
 	end
 
 	if self.exitButton then
@@ -1133,12 +1529,25 @@ function SpinWheelUI:bind()
 	self.maid:GiveTask(self.player:GetAttributeChangedSignal(SPINS_ATTRIBUTE):Connect(function()
 		self:updateSpinButton()
 	end))
-	self.maid:GiveTask(self.player.CharacterAdded:Connect(function()
-		if self.isOpen then
-			self:lockPlayerMovement()
-		end
+	self.maid:GiveTask(self.player:GetAttributeChangedSignal("Data_Loaded"):Connect(function()
+		self:updateSpinButton()
 	end))
-	self.maid:GiveTask(self.player:GetAttributeChangedSignal(NEXT_FREE_SPIN_ATTRIBUTE):Connect(function()
+	self.maid:GiveTask(self.player.CharacterAdded:Connect(function()
+		if not self.alive or not self.isOpen then
+			return
+		end
+
+		self:unlockPlayerMovement()
+		task.defer(function()
+			if self.alive and self.isOpen then
+				self:lockPlayerMovement()
+			end
+		end)
+	end))
+	self.maid:GiveTask(self.player:GetAttributeChangedSignal(NEXT_FREE_SPIN_PLAYTIME_ATTRIBUTE):Connect(function()
+		self:updateSpinButton()
+	end))
+	self.maid:GiveTask(self.player:GetAttributeChangedSignal(TOTAL_PLAYTIME_ATTRIBUTE):Connect(function()
 		self:updateSpinButton()
 	end))
 	self.maid:GiveTask(self.player:GetAttributeChangedSignal(REWARDED_AD_REMAINING_ATTRIBUTE):Connect(function()
@@ -1162,71 +1571,77 @@ function SpinWheelUI:bind()
 	self.maid:GiveTask(self.player:GetAttributeChangedSignal("WinCount"):Connect(function()
 		self:refreshRewardPreviews()
 	end))
-	self.maid:GiveTask(RewardedVideoClient.ConnectResult(function(
-		placementName: string,
-		completed: boolean,
-		_resultName: string,
-		remainingUses: number?,
-		nextAvailableUnix: number?,
-		resetUnix: number?
+	self.maid:GiveTask(
+		RewardedVideoClient.ConnectResult(
+			function(
+				placementName: string,
+				completed: boolean,
+				_resultName: string,
+				remainingUses: number?,
+				nextAvailableUnix: number?,
+				resetUnix: number?
+			)
+				if placementName ~= "SpinWheel" then
+					return
+				end
+				if typeof(remainingUses) == "number" then
+					self.rewardedAdRemainingOverride = remainingUses
+				end
+				if typeof(nextAvailableUnix) == "number" then
+					self.rewardedAdNextAvailableOverride = nextAvailableUnix
+				end
+				if typeof(resetUnix) == "number" then
+					self.rewardedAdResetOverride = resetUnix
+				end
+				if not completed then
+					self.rewardedAdInFlight = false
+					self.rewardedAdCooldownVisible = false
+					self.rewardedAdRemainingOverride = nil
+					self.rewardedAdNextAvailableOverride = nil
+					self.rewardedAdResetOverride = nil
+					DebugModule.debugInfo("Spin wheel rewarded ad did not complete", MODULE_NAME)
+				end
+				self:updateWatchAdButton()
+			end
+		)
 	)
-		if placementName ~= "SpinWheel" then
-			return
-		end
-		if typeof(remainingUses) == "number" then
-			self.rewardedAdRemainingOverride = remainingUses
-		end
-		if typeof(nextAvailableUnix) == "number" then
-			self.rewardedAdNextAvailableOverride = nextAvailableUnix
-		end
-		if typeof(resetUnix) == "number" then
-			self.rewardedAdResetOverride = resetUnix
-		end
-		if not completed then
-			self.rewardedAdInFlight = false
-			self.rewardedAdCooldownVisible = false
-			self.rewardedAdRemainingOverride = nil
-			self.rewardedAdNextAvailableOverride = nil
-			self.rewardedAdResetOverride = nil
-			DebugModule.debugInfo("Spin wheel rewarded ad did not complete", MODULE_NAME)
-		end
-		self:updateWatchAdButton()
-	end))
 
 	local spinAdRewardedRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("SpinWheelAdRewarded")
 	if spinAdRewardedRemote and spinAdRewardedRemote:IsA("RemoteEvent") then
-		self.maid:GiveTask(spinAdRewardedRemote.OnClientEvent:Connect(function(
-			spinCount: number?,
-			remainingUses: number?,
-			nextAvailableUnix: number?,
-			resetUnix: number?
-		)
-			self.rewardedAdInFlight = false
-			self.rewardedAdCooldownVisible = (typeof(nextAvailableUnix) == "number"
-				and nextAvailableUnix > os.time())
-				or (typeof(remainingUses) == "number"
-					and remainingUses <= 0
-					and typeof(resetUnix) == "number"
-					and resetUnix > os.time())
-			if typeof(remainingUses) == "number" then
-				self.rewardedAdRemainingOverride = remainingUses
-			end
-			if typeof(nextAvailableUnix) == "number" then
-				self.rewardedAdNextAvailableOverride = nextAvailableUnix
-			end
-			if typeof(resetUnix) == "number" then
-				self.rewardedAdResetOverride = resetUnix
-			end
-			self:updateWatchAdButton()
-			DebugModule.debugInfo(
-				"Starting wheel spin after rewarded ad | spins=" .. tostring(spinCount),
-				MODULE_NAME
+		self.maid:GiveTask(
+			spinAdRewardedRemote.OnClientEvent:Connect(
+				function(spinCount: number?, remainingUses: number?, nextAvailableUnix: number?, resetUnix: number?)
+					self.rewardedAdInFlight = false
+					self.rewardedAdCooldownVisible = (
+						typeof(nextAvailableUnix) == "number" and nextAvailableUnix > os.time()
+					)
+						or (
+							typeof(remainingUses) == "number"
+							and remainingUses <= 0
+							and typeof(resetUnix) == "number"
+							and resetUnix > os.time()
+						)
+					if typeof(remainingUses) == "number" then
+						self.rewardedAdRemainingOverride = remainingUses
+					end
+					if typeof(nextAvailableUnix) == "number" then
+						self.rewardedAdNextAvailableOverride = nextAvailableUnix
+					end
+					if typeof(resetUnix) == "number" then
+						self.rewardedAdResetOverride = resetUnix
+					end
+					self:updateWatchAdButton()
+					DebugModule.debugInfo(
+						"Starting wheel spin after rewarded ad | spins=" .. tostring(spinCount),
+						MODULE_NAME
+					)
+					if not self.isOpen then
+						self:open()
+					end
+					self:requestSpin(true)
+				end
 			)
-			if not self.isOpen then
-				self:open()
-			end
-			self:requestSpin(true)
-		end))
+		)
 	else
 		DebugModule.debugWarn("SpinWheelAdRewarded remote missing", MODULE_NAME)
 	end
@@ -1247,6 +1662,7 @@ function SpinWheelUI:bind()
 				local token = result.token
 				if typeof(token) == "string" and token == self.pendingServerToken then
 					self:stopGrantThread()
+					self:stopSpinEffect()
 					self.pendingServerToken = nil
 					self.spinInFlight = false
 					self.activeTween = nil
@@ -1264,6 +1680,7 @@ function SpinWheelUI:bind()
 					return
 				end
 				self:stopGrantThread()
+				self:stopSpinEffect()
 				self.pendingServerToken = nil
 				self.spinInFlight = false
 				self.activeTween = nil
@@ -1295,8 +1712,7 @@ function SpinWheelUI:Init()
 	self:loadPrices()
 	self:startAvailabilityWatcher()
 	local remaining, nextAvailableUnix, resetUnix = self:getRewardedAdState()
-	self.rewardedAdCooldownVisible = nextAvailableUnix > os.time()
-		or (remaining <= 0 and resetUnix > os.time())
+	self.rewardedAdCooldownVisible = nextAvailableUnix > os.time() or (remaining <= 0 and resetUnix > os.time())
 	self:updateSpinButton()
 	self.frame.Visible = false
 	self.frame.Interactable = false
@@ -1310,6 +1726,9 @@ function SpinWheelUI:Destroy()
 	self.isOpen = false
 	self:setNotificationLayerForWheel(false)
 	self.player:SetAttribute("SpinWheelModalOpen", false)
+	if self.player:GetAttribute("ModalLockOwner") == "SpinWheel" then
+		self.player:SetAttribute("ModalLockOwner", nil)
+	end
 	self:unlockPlayerMovement()
 	self:stopIdleRotation()
 	self:stopCountdown()
@@ -1326,6 +1745,7 @@ function SpinWheelUI:Destroy()
 	end
 	self:disableBlur()
 	self:restoreVisibility()
+	self.modalVisibilityController:Destroy()
 	self.maid:DoCleaning()
 end
 

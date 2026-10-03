@@ -1,10 +1,11 @@
 {
   "className": "UIGridLayout",
   "properties": {
-    "CellPadding": [[0.1, 0.0], [0.05, 0.0]],
-    "CellSize": [[0.45, 0.0], [0.45, 0.0]],
+    "CellPadding": [[0.0, 0.0], [0.2, 0.0]],
+    "CellSize": [[0.25, 0.0], [0.45, 0.0]],
     "FillDirectionMaxCells": 2,
     "HorizontalAlignment": "Right",
+    "SortOrder": "LayoutOrder",
     "StartCorner": "TopRight"
   }
 }

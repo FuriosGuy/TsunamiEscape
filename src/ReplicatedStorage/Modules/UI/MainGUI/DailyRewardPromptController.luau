@@ -1,4 +1,3 @@
---!strict
 local DailyRewardPromptController = {}
 DailyRewardPromptController.__index = DailyRewardPromptController
 
@@ -14,6 +13,7 @@ type ControllerOptions = {
 	getDailyRewardFrame: () -> Frame?,
 	closeOtherFrames: (Frame?) -> (),
 	openWindow: (Frame) -> (),
+	canAutoOpen: (() -> boolean)?,
 }
 
 function DailyRewardPromptController.new(options: ControllerOptions)
@@ -25,14 +25,33 @@ function DailyRewardPromptController.new(options: ControllerOptions)
 	self.getDailyRewardFrame = options.getDailyRewardFrame
 	self.closeOtherFrames = options.closeOtherFrames
 	self.openWindow = options.openWindow
+	self.canAutoOpen = options.canAutoOpen
 	self.isClaimable = false
 	self.didAutoOpen = false
+	self.lightRay = options.badgeState.buttonFrame
+		and options.badgeState.buttonFrame:FindFirstChild("LightRay")
+	if self.lightRay and self.lightRay:IsA("GuiObject") then
+		self.lightRay.Visible = false
+	else
+		self.lightRay = nil
+	end
 
 	return self
 end
 
 function DailyRewardPromptController:RefreshBadge()
-	if self.player:GetAttribute("Data_Loaded") ~= true then
+	local dailyButtonFrame = self.badgeState.buttonFrame
+	local dataLoaded = self.player:GetAttribute("Data_Loaded") == true
+	local dailyButtonLabel = dailyButtonFrame and dailyButtonFrame:FindFirstChild("TextLabel", true)
+	if dailyButtonLabel and dailyButtonLabel:IsA("TextLabel") then
+		dailyButtonLabel.Text = if self.isClaimable then "CLAIM" else "DAILY"
+	end
+
+	if self.lightRay and self.lightRay.Parent then
+		self.lightRay.Visible = dataLoaded and self.isClaimable
+	end
+
+	if not dataLoaded then
 		self.updateButtonNotificationBadge(self.badgeState, false, "DailyClaimableNotification", "0")
 		return
 	end
@@ -47,6 +66,10 @@ end
 
 function DailyRewardPromptController:TryAutoOpen()
 	if self.didAutoOpen then
+		return
+	end
+
+	if self.canAutoOpen and not self.canAutoOpen() then
 		return
 	end
 
@@ -90,6 +113,9 @@ function DailyRewardPromptController:Reset()
 	self.badgeState.refresh = nil
 	self.isClaimable = false
 	self.didAutoOpen = false
+	if self.lightRay and self.lightRay.Parent then
+		self.lightRay.Visible = false
+	end
 	self.updateButtonNotificationBadge(self.badgeState, false, "DailyClaimableNotification", "0")
 end
 

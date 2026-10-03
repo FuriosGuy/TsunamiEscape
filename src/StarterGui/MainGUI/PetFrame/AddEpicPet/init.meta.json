@@ -1,0 +1,24 @@
+{
+  "className": "TextButton",
+  "properties": {
+    "AnchorPoint": [0.5, 0.5],
+    "BackgroundColor3": [1, 1, 1],
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "FontFace": {
+      "cachedFaceId": null,
+      "family": "rbxasset://fonts/families/FredokaOne.json",
+      "style": "Normal",
+      "weight": "Regular"
+    },
+    "Position": [[1.0675, 0.0], [0.6649, 0.0]],
+    "Size": [[0.152, 0.0], [0.1269, 0.0]],
+    "Text": "ADD EPIC PET",
+    "TextColor3": [1, 1, 1],
+    "TextScaled": true,
+    "TextSize": 22,
+    "TextWrapped": true,
+    "Visible": false,
+    "ZIndex": 4
+  }
+}

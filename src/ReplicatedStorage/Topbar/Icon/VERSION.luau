@@ -1,14 +1,9 @@
---!strict
 -- LOCAL
 local VERSION = {}
-
-
 
 -- SHARED
 VERSION.appVersion = "v3.4.0"
 VERSION.latestVersion = nil :: string?
-
-
 
 -- FUNCTIONS
 function VERSION.getLatestVersion(): string?
@@ -45,7 +40,5 @@ function VERSION.isUpToDate()
 	local appVersion = VERSION.getAppVersion()
 	return latestVersion ~= nil and latestVersion == appVersion
 end
-
-
 
 return VERSION

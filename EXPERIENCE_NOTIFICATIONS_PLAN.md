@@ -1,8 +1,9 @@
 # Experience Notifications Implementation Plan
 
-Status: implemented adapter, readiness routing, live-event routing, join
-opt-in prompt, and separate offline readiness sync. Live delivery is enabled
-only for main universe `9824719186`; Studio and DEV remain disabled.
+Status: retired in-game. The in-game Open Cloud notification adapter, readiness
+routing, live-event routing, and join opt-in prompt were removed. This document
+remains as historical design context. The separate external GitHub scanner is
+not managed by this repository and remains untouched.
 
 ## Roblox System Findings
 
@@ -244,7 +245,11 @@ direct notification integration defect.
 Do not claim delivery from a successful API request. Only Roblox dashboard data
 can confirm impressions and engagement.
 
-## Current Rollout
+## Historical Rollout
+
+The rollout below is no longer active. Do not reinstall the in-game package or
+restore the deleted runtime scripts from this document. External notification
+automation has its own repository and deployment lifecycle.
 
 1. Keep Studio delivery disabled by default.
 2. Install the official `OpenCloud.V2.UserNotification` package under

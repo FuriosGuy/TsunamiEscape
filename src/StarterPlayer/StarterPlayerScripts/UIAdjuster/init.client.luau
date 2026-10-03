@@ -1,5 +1,3 @@
---!strict
-
 local Players = game:GetService("Players")
 local UISizeAdjuster = require(script.UISizeAdjuster)
 

@@ -1,5 +1,3 @@
---!strict
-
 local LiveEventSchedule = {}
 
 type ScheduleDefinition = {
@@ -54,11 +52,7 @@ local function normalizeDuration(value: any): number?
 	return math.max(1, math.floor(value))
 end
 
-local function resolveDurationRange(
-	minimumValue: any,
-	maximumValue: any,
-	fixedValue: any
-): DurationRange?
+local function resolveDurationRange(minimumValue: any, maximumValue: any, fixedValue: any): DurationRange?
 	local minimum = normalizeDuration(minimumValue) or normalizeDuration(fixedValue)
 	local maximum = normalizeDuration(maximumValue) or minimum
 	if minimum == nil or maximum == nil then
@@ -88,11 +82,7 @@ local function getDeterministicDuration(
 
 	local step = math.max(1, math.floor(stepSeconds))
 	local span = math.floor((range.maximum - range.minimum) / step) + 1
-	local rawValue = (
-		math.floor(seed)
-		+ cycleIndex * 1103515245
-		+ salt * 12345
-	) % DETERMINISTIC_MODULUS
+	local rawValue = (math.floor(seed) + cycleIndex * 1103515245 + salt * 12345) % DETERMINISTIC_MODULUS
 	return range.minimum + (rawValue % span) * step
 end
 
@@ -108,13 +98,8 @@ local function createRecurringWindow(
 		17,
 		values.randomStepSeconds
 	)
-	local graceDuration = getDeterministicDuration(
-		values.graceDurationRange,
-		cycleIndex,
-		values.randomSeed,
-		31,
-		values.randomStepSeconds
-	)
+	local graceDuration =
+		getDeterministicDuration(values.graceDurationRange, cycleIndex, values.randomSeed, 31, values.randomStepSeconds)
 
 	return {
 		firstActiveStartUnix = values.firstActiveStartUnix,
@@ -130,10 +115,7 @@ local function createRecurringWindow(
 	}
 end
 
-local function matchesRecurringDefinition(
-	cache: RecurringWindowCache,
-	values: RecurringDefinitionValues
-): boolean
+local function matchesRecurringDefinition(cache: RecurringWindowCache, values: RecurringDefinitionValues): boolean
 	return cache.firstActiveStartUnix == values.firstActiveStartUnix
 		and cache.activeDurationRange.minimum == values.activeDurationRange.minimum
 		and cache.activeDurationRange.maximum == values.activeDurationRange.maximum
@@ -190,11 +172,7 @@ local function getNextPacificMondayMidnight(timestamp: number): number
 		daysUntilMonday = 7
 	end
 
-	local localMidnight = DateTime.fromUniversalTime(
-		pacificDate.year,
-		pacificDate.month,
-		pacificDate.day
-	).UnixTimestamp
+	local localMidnight = DateTime.fromUniversalTime(pacificDate.year, pacificDate.month, pacificDate.day).UnixTimestamp
 	local targetLocalMidnight = localMidnight + daysUntilMonday * 24 * 60 * 60
 	local candidateTimestamp = targetLocalMidnight - pacificOffset
 	return targetLocalMidnight - getPacificOffset(candidateTimestamp)
@@ -203,11 +181,7 @@ end
 local function getNextTokyoSaturdayMidnight(timestamp: number): number
 	local tokyoDate = getUniversalDate(timestamp + 9 * 60 * 60)
 	local daysUntilSaturday = (7 - tokyoDate.wday) % 7
-	local localMidnight = DateTime.fromUniversalTime(
-		tokyoDate.year,
-		tokyoDate.month,
-		tokyoDate.day
-	).UnixTimestamp
+	local localMidnight = DateTime.fromUniversalTime(tokyoDate.year, tokyoDate.month, tokyoDate.day).UnixTimestamp
 	local candidateTimestamp = localMidnight + daysUntilSaturday * 24 * 60 * 60 - 9 * 60 * 60
 	if candidateTimestamp <= timestamp then
 		candidateTimestamp += 7 * 24 * 60 * 60
@@ -240,13 +214,7 @@ local function getRecurringDefinitionValues(definition: ScheduleDefinition): Rec
 	local randomStepSeconds = normalizeDuration(definition.randomStepSeconds) or 1
 	local firstActiveStartUnix = cycleStartUnix
 	if definition.firstCycleStartsActive == false then
-		firstActiveStartUnix += getDeterministicDuration(
-			graceDurationRange,
-			0,
-			randomSeed,
-			31,
-			randomStepSeconds
-		)
+		firstActiveStartUnix += getDeterministicDuration(graceDurationRange, 0, randomSeed, 31, randomStepSeconds)
 	end
 
 	return {
@@ -258,10 +226,7 @@ local function getRecurringDefinitionValues(definition: ScheduleDefinition): Rec
 	}
 end
 
-local function getRecurringWindowAtTimestamp(
-	definition: ScheduleDefinition,
-	timestamp: number
-): RecurringWindowCache?
+local function getRecurringWindowAtTimestamp(definition: ScheduleDefinition, timestamp: number): RecurringWindowCache?
 	local values = getRecurringDefinitionValues(definition)
 	if not values then
 		return nil
@@ -280,10 +245,8 @@ local function getRecurringWindowAtTimestamp(
 			+ values.graceDurationRange.minimum
 			+ values.graceDurationRange.maximum
 		) / 2
-		local estimatedCycleIndex = math.max(
-			cache.cycleIndex,
-			math.floor((timestamp - values.firstActiveStartUnix) / averageCycleDuration)
-		)
+		local estimatedCycleIndex =
+			math.max(cache.cycleIndex, math.floor((timestamp - values.firstActiveStartUnix) / averageCycleDuration))
 		if estimatedCycleIndex > cache.cycleIndex then
 			for cycleIndex = cache.cycleIndex + 1, math.min(estimatedCycleIndex, MAX_CYCLE_SEARCH) do
 				cache = createRecurringWindow(values, cycleIndex, cache.nextActiveStartUnix)
@@ -415,7 +378,8 @@ function LiveEventSchedule.GetPreEventCountdownSeconds(
 	end
 
 	local recurringWindow = getRecurringWindowAtTimestamp(definition, timestamp)
-	if not recurringWindow
+	if
+		not recurringWindow
 		or recurringWindow.cycleIndex ~= 0
 		or timestamp < firstCountdownStartUnix
 		or timestamp >= recurringWindow.activeStartUnix

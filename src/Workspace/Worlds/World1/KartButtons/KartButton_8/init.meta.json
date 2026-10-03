@@ -2,8 +2,8 @@
   "className": "Model",
   "properties": {
     "Attributes": {
-      "WinsRequired": 20000,
-      "KartNumber": 8
+      "KartNumber": 8,
+      "WinsRequired": 20000
     },
     "ModelStreamingMode": "Persistent"
   }

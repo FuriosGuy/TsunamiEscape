@@ -1,52 +1,102 @@
-local Character = script.Parent
-local Humanoid = Character:WaitForChild("Humanoid")
+--!strict
 
-local animNames = {
-	sit = {
-		{ id = "rbxassetid://109644062453391", weight = 10 },
-	},
+local Players = game:GetService("Players")
+
+local Character = script.Parent
+local Humanoid = Character:WaitForChild("Humanoid") :: Humanoid
+local Player = Players.LocalPlayer
+
+local DEFAULT_SIT_ANIMATION_ID = "rbxassetid://109644062453391"
+local KART_SIT_ANIMATION_IDS: { [string]: string } = {
+	["2_Snowmobile"] = "rbxassetid://93995264730867",
 }
 
 local currentTrack: AnimationTrack? = nil
+local currentAnimation: Animation? = nil
+local currentAnimationId: string? = nil
+local alive = true
+local connections: { RBXScriptConnection } = {}
 
-local function getSitAnimation(): Animation
-	local animation = Instance.new("Animation")
-	animation.Name = "SitOnlyAnimation"
-	animation.AnimationId = animNames.sit[1].id
-	return animation
+local function disconnectConnections()
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	table.clear(connections)
 end
 
 local function stopCurrentTrack()
-	if currentTrack then
-		currentTrack:Stop(0.1)
-		currentTrack:Destroy()
-		currentTrack = nil
+	local track = currentTrack
+	currentTrack = nil
+	if track then
+		track:Stop(0.1)
+		track:Destroy()
 	end
+
+	local animation = currentAnimation
+	currentAnimation = nil
+	if animation then
+		animation:Destroy()
+	end
+
+	currentAnimationId = nil
+end
+
+local function getSitAnimationId(): string
+	local equippedKart = Player:GetAttribute("Kart_Equipped")
+	if typeof(equippedKart) == "string" then
+		return KART_SIT_ANIMATION_IDS[equippedKart] or DEFAULT_SIT_ANIMATION_ID
+	end
+
+	return DEFAULT_SIT_ANIMATION_ID
+end
+
+local function getAnimator(): Animator
+	local animator = Humanoid:FindFirstChildOfClass("Animator")
+	if animator then
+		return animator
+	end
+
+	local newAnimator = Instance.new("Animator")
+	newAnimator.Parent = Humanoid
+	return newAnimator
 end
 
 local function playSitAnimation()
-	local animator = Humanoid:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = Humanoid
+	if not alive or Humanoid.Health <= 0 then
+		stopCurrentTrack()
+		return
 	end
 
-	if currentTrack and currentTrack.IsPlaying then
+	local animationId = getSitAnimationId()
+	if currentTrack and currentAnimationId == animationId then
+		if not currentTrack.IsPlaying then
+			currentTrack:Play(0.1)
+		end
 		return
 	end
 
 	stopCurrentTrack()
 
-	local sitAnimation = getSitAnimation()
-	local track = animator:LoadAnimation(sitAnimation)
-	track.Name = "SitOnlyAnimation"
+	local animation = Instance.new("Animation")
+	animation.Name = "KartSitAnimation"
+	animation.AnimationId = animationId
+
+	local track = getAnimator():LoadAnimation(animation)
+	track.Name = "KartSitAnimation"
 	track.Priority = Enum.AnimationPriority.Action
 	track.Looped = true
 	track:Play(0.1)
+
+	currentAnimation = animation
+	currentAnimationId = animationId
 	currentTrack = track
 end
 
 local function updateAnimation()
+	if not alive then
+		return
+	end
+
 	if Humanoid.Health <= 0 then
 		stopCurrentTrack()
 		return
@@ -55,10 +105,22 @@ local function updateAnimation()
 	playSitAnimation()
 end
 
-Humanoid.Died:Connect(stopCurrentTrack)
-Humanoid:GetPropertyChangedSignal("Sit"):Connect(updateAnimation)
-Humanoid.StateChanged:Connect(function()
-	updateAnimation()
-end)
+local function cleanup()
+	if not alive then
+		return
+	end
 
+	alive = false
+	disconnectConnections()
+	stopCurrentTrack()
+end
+
+table.insert(connections, Player:GetAttributeChangedSignal("Kart_Equipped"):Connect(updateAnimation))
+table.insert(connections, Humanoid.Died:Connect(stopCurrentTrack))
+table.insert(connections, Humanoid:GetPropertyChangedSignal("Sit"):Connect(updateAnimation))
+table.insert(connections, Humanoid.StateChanged:Connect(function()
+	updateAnimation()
+end))
+
+script.Destroying:Connect(cleanup)
 updateAnimation()

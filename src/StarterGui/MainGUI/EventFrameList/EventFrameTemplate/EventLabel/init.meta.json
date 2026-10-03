@@ -1,7 +1,11 @@
 {
   "className": "TextLabel",
   "properties": {
+    "Active": true,
     "AnchorPoint": [0.5, 0.5],
+    "Attributes": {
+      "isHover": false
+    },
     "BackgroundTransparency": 1,
     "BorderSizePixel": 0,
     "FontFace": {

@@ -1,4 +1,3 @@
---!strict
 --[=[
 	Enhanced Frame Rate Manager Module
 	Provides dual-mode frame rate management for optimal game performance.
@@ -31,7 +30,7 @@ local FrameRateManager = {}
 -- Dependencies
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CoreConfig = require(script.Parent.Config.CoreConfig)
+local CoreConfig = require(script.Parent.Shared.CoreConfig_Client)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 
 -- Module state

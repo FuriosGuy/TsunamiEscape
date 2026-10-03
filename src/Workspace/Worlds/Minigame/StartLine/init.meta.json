@@ -6,6 +6,7 @@
     "CanCollide": false,
     "CFrame": [-4095.5, 4.25, -533.4728, 0, 0, -1, 0, 1, 0, 1, 0, 0],
     "Color": [205, 205, 205],
+    "Locked": true,
     "MaterialVariant": "Studs",
     "Size": [1, 8.5, 134.9998],
     "TopSurface": "Smooth"

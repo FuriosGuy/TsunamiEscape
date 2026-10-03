@@ -1,5 +1,3 @@
---!strict
-
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,25 +5,29 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Config = Modules:WaitForChild("Config")
+local SharedFolder = Modules:WaitForChild("Shared")
 local UI = Modules:WaitForChild("UI")
 
-local CoreConfig = require(Config:WaitForChild("CoreConfig"))
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Client"))
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local ProductService = require(Modules:WaitForChild("ProductService"))
+local PlayerHandler = require(Modules:WaitForChild("Shared"):WaitForChild("PlayerHandler_Client"))
+local ProductService = require(Modules:WaitForChild("Shared"):WaitForChild("ProductService_Client"))
 local RewardedVideoClient = require(Modules:WaitForChild("RewardedVideoClient"))
 local VisualFunctions = require(UI:WaitForChild("VisualFunctions"))
+local TweenConfig = require(UI:WaitForChild("TweenConfig"))
 
 local PromptBuyProductsUI = {}
 PromptBuyProductsUI.__index = PromptBuyProductsUI
 
 local MODULE_NAME = "PromptBuyProductsUI"
-local DEFAULT_VISIBLE_POSITION = UDim2.new(0.873, 0, 0.874, 0)
-local DEFAULT_HIDDEN_POSITION = UDim2.new(2, 0, 0.874, 0)
-local DEFAULT_PROMPT_DURATION_SECONDS = 15
+local DEFAULT_VISIBLE_POSITION = UDim2.new(0.897, 0, 0.21, 0)
+local DEFAULT_HIDDEN_POSITION = UDim2.new(2, 0, 0.21, 0)
+local DEFAULT_PROMPT_DURATION_SECONDS = 10
 local PROMPT_BLOCKING_FRAMES = {
+	"LoadingFrame",
+	"NotificationFrame",
+	"MinigameNotificationFrame",
 	"SpinWheelFrame",
 	"DailyRewardFrame",
 	"RebirthFrame",
@@ -35,7 +37,7 @@ local PROMPT_BLOCKING_FRAMES = {
 	"TrollFrame",
 }
 
-type ProductKind = "DevProduct" | "GamePass"
+type ProductKind = "DevProduct" | "GamePass" | "Premium"
 
 type ProductInfo = {
 	[string]: any,
@@ -55,6 +57,7 @@ type PromptBuyProductsUIObject = {
 	player: Player,
 	frame: Frame,
 	productImage: ImageLabel?,
+	priceIcon: ImageLabel?,
 	countdownLabel: TextLabel,
 	priceLabel: TextLabel,
 	productTitleLabel: TextLabel,
@@ -77,6 +80,7 @@ type PromptBuyProductsUIObject = {
 	timeTriggerReady: boolean,
 	nextTimeTriggerAt: number,
 	currentProduct: ProductCandidate?,
+	premiumPromptActive: boolean,
 	rewardedVideoInFlight: boolean,
 	activeTween: Tween?,
 	studioPromptReady: boolean,
@@ -87,39 +91,71 @@ type PromptBuyProductsUIObject = {
 type PromptBuyProductsUIType = PromptBuyProductsUIObject
 
 local promptConfig: any = CoreConfig.promptBuy or {}
+local premiumPromptConfig: any = promptConfig.premiumPrompt or {}
 local STUDIO_ALWAYS_SHOW = RunService:IsStudio() and promptConfig.studioAlwaysShow == true
 local STUDIO_SHOW_OWNED_PRODUCTS = RunService:IsStudio() and promptConfig.studioShowOwnedProducts == true
 local MIN_DEATHS = math.max(1, math.floor(tonumber(promptConfig.minDeaths) or 3))
 local MAX_DEATHS = math.max(MIN_DEATHS, math.floor(tonumber(promptConfig.maxDeaths) or 5))
-local MIN_MINUTES = math.max(1, math.floor(tonumber(promptConfig.minMinutes) or 3))
-local MAX_MINUTES = math.max(MIN_MINUTES, math.floor(tonumber(promptConfig.maxMinutes) or 10))
-local TEMPORARY_BOOST_SELECTION_WEIGHT = math.max(
-	1,
-	tonumber(promptConfig.temporaryBoostSelectionWeight) or 3
-)
-local BLOODMOON_KART_SELECTION_WEIGHT = math.max(
-	1,
-	tonumber(promptConfig.bloodmoonKartSelectionWeight) or 2.5
-)
-local PROMPT_DURATION_SECONDS = math.max(
-	1,
-	math.floor(tonumber(promptConfig.displayDurationSeconds) or DEFAULT_PROMPT_DURATION_SECONDS)
-)
+local MIN_MINUTES = math.max(1, math.floor(tonumber(promptConfig.minMinutes) or 2))
+local MAX_MINUTES = math.max(MIN_MINUTES, math.floor(tonumber(promptConfig.maxMinutes) or 5))
+local SHORT_INTERVAL_SELECTION_WEIGHT =
+	math.max(1, math.floor(tonumber(promptConfig.shortIntervalSelectionWeight) or 2))
+local TEMPORARY_BOOST_SELECTION_WEIGHT = math.max(1, tonumber(promptConfig.temporaryBoostSelectionWeight) or 3)
+local BLOODMOON_KART_SELECTION_WEIGHT = math.max(1, tonumber(promptConfig.bloodmoonKartSelectionWeight) or 2.5)
+local PREMIUM_PROMPT_SELECTION_WEIGHT = math.max(1, tonumber(promptConfig.premiumPromptSelectionWeight) or 1)
+local PROMPT_DURATION_SECONDS =
+	math.max(1, math.floor(tonumber(promptConfig.displayDurationSeconds) or DEFAULT_PROMPT_DURATION_SECONDS))
 local VISIBLE_POSITION = if typeof(promptConfig.visiblePosition) == "UDim2"
 	then promptConfig.visiblePosition
 	else DEFAULT_VISIBLE_POSITION
 local HIDDEN_POSITION = if typeof(promptConfig.hiddenPosition) == "UDim2"
 	then promptConfig.hiddenPosition
 	else DEFAULT_HIDDEN_POSITION
+local PREMIUM_PROMPT_IMAGE = tostring(premiumPromptConfig.productImage or "rbxassetid://106963890821116")
+local PREMIUM_PROMPT_TITLE = tostring(premiumPromptConfig.title or "ROBLOX PLUS")
+local PREMIUM_PROMPT_DESCRIPTION = tostring(
+	premiumPromptConfig.description or "Get permanent 1.25x XP Speed and Wins multipliers with Roblox Plus."
+)
+local DEFAULT_BUY_BUTTON_TEXT = "BUY"
+local PREMIUM_BUY_BUTTON_TEXT = "SUBSCRIBE"
 
 local function findRequiredChild(root: Instance, name: string, className: string): Instance
 	local child = root:FindFirstChild(name, true)
-	assert(child and child.ClassName == className, string.format("%s.%s must be a %s", root:GetFullName(), name, className))
+	assert(
+		child and child.ClassName == className,
+		string.format("%s.%s must be a %s", root:GetFullName(), name, className)
+	)
 	return child
 end
 
 local function getRandomInteger(random: Random, minimum: number, maximum: number): number
 	return random:NextInteger(minimum, maximum)
+end
+
+local function getPromptIntervalMinutes(random: Random): number
+	if MIN_MINUTES >= MAX_MINUTES or SHORT_INTERVAL_SELECTION_WEIGHT <= 1 then
+		return getRandomInteger(random, MIN_MINUTES, MAX_MINUTES)
+	end
+
+	local totalWeight = 0
+	for minute = MIN_MINUTES, MAX_MINUTES do
+		if minute >= 2 and minute <= 3 then
+			totalWeight += SHORT_INTERVAL_SELECTION_WEIGHT
+		else
+			totalWeight += 1
+		end
+	end
+
+	local roll = random:NextInteger(1, totalWeight)
+	for minute = MIN_MINUTES, MAX_MINUTES do
+		local weight = if minute >= 2 and minute <= 3 then SHORT_INTERVAL_SELECTION_WEIGHT else 1
+		if roll <= weight then
+			return minute
+		end
+		roll -= weight
+	end
+
+	return MAX_MINUTES
 end
 
 local function formatCountdown(seconds: number): string
@@ -136,7 +172,7 @@ local function getRewardedVideoPlacement(productKey: string): string?
 	return nil
 end
 
-local function isBloodmoonActive(): boolean
+local function isLiveEventActive(eventName: string): boolean
 	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
 	if not liveEventState or not liveEventState:IsA("Folder") then
 		return false
@@ -144,15 +180,74 @@ local function isBloodmoonActive(): boolean
 
 	local activeEventIds = liveEventState:GetAttribute("ActiveEventIds")
 	return typeof(activeEventIds) == "string"
-		and string.find("," .. activeEventIds .. ",", ",Bloodmoon,", 1, true) ~= nil
+		and string.find("," .. activeEventIds .. ",", "," .. eventName .. ",", 1, true) ~= nil
+end
+
+local function getConfiguredProductEvent(productKey: string): string?
+	local gatedPrefixes = promptConfig.gatedDevProductKeyPrefixes
+	if typeof(gatedPrefixes) ~= "table" then
+		return nil
+	end
+
+	for prefix, eventName in pairs(gatedPrefixes) do
+		if
+			typeof(prefix) == "string"
+			and prefix ~= ""
+			and typeof(eventName) == "string"
+			and string.sub(productKey, 1, #prefix) == prefix
+		then
+			return eventName
+		end
+	end
+
+	return nil
+end
+
+local function getEventKartProduct(productKey: string): { [string]: any }?
+	local eventKartProducts = ProductService.EventKartProducts
+	if typeof(eventKartProducts) ~= "table" then
+		return nil
+	end
+
+	for _, eventProducts in pairs(eventKartProducts) do
+		if typeof(eventProducts) == "table" and typeof(eventProducts[productKey]) == "table" then
+			return eventProducts[productKey]
+		end
+	end
+
+	return nil
+end
+
+local function isEventProductAvailable(productKey: string): boolean
+	local configuredEvent = getConfiguredProductEvent(productKey)
+	if configuredEvent then
+		return isLiveEventActive(configuredEvent)
+	end
+
+	local eventKartProducts = ProductService.EventKartProducts
+	if typeof(eventKartProducts) ~= "table" then
+		return true
+	end
+
+	for eventName, eventProducts in pairs(eventKartProducts) do
+		if typeof(eventProducts) == "table" and eventProducts[productKey] ~= nil then
+			return isLiveEventActive(tostring(eventName))
+		end
+	end
+
+	return true
 end
 
 local function getSelectionWeight(candidate: ProductCandidate): number
+	if candidate.kind == "Premium" then
+		return PREMIUM_PROMPT_SELECTION_WEIGHT
+	end
+
 	if candidate.category == "TemporaryBoost" then
 		return TEMPORARY_BOOST_SELECTION_WEIGHT
 	end
 
-	if ProductService.BloodmoonKartProducts[candidate.key] ~= nil and isBloodmoonActive() then
+	if getEventKartProduct(candidate.key) ~= nil and isEventProductAvailable(candidate.key) then
 		return BLOODMOON_KART_SELECTION_WEIGHT
 	end
 
@@ -170,12 +265,14 @@ end
 local function getCategory(productKey: string): string
 	if string.find(productKey, "Trail", 1, true) then
 		return "Trail"
-	elseif ProductService.BloodmoonKartProducts[productKey] ~= nil then
+	elseif getEventKartProduct(productKey) ~= nil then
 		return "Kart"
-	elseif string.find(productKey, "Kart", 1, true)
+	elseif
+		string.find(productKey, "Kart", 1, true)
 		or productKey == "AdvancedTank"
 		or productKey == "ShoppingKart"
-		or productKey == "FormulaCar" then
+		or productKey == "FormulaCar"
+	then
 		return "Kart"
 	elseif productKey == "StarterPack" then
 		return "Utility"
@@ -189,11 +286,9 @@ local function getCategory(productKey: string): string
 		return "Speed"
 	elseif productKey == "+1000" or productKey == "+5000" or productKey == "+10000" then
 		return "Wins"
-	elseif string.find(productKey, "Wins", 1, true)
-		or string.find(productKey, "Win", 1, true) then
+	elseif string.find(productKey, "Wins", 1, true) or string.find(productKey, "Win", 1, true) then
 		return "Wins"
-	elseif string.find(productKey, "Speed", 1, true)
-		or string.find(productKey, "x", 1, true) then
+	elseif string.find(productKey, "Speed", 1, true) or string.find(productKey, "x", 1, true) then
 		return "Speed"
 	end
 
@@ -215,8 +310,7 @@ local function getDescription(random: Random, category: string): string
 end
 
 local function isExcludedDevProduct(productKey: string): boolean
-	-- Keep this safety check local to the selector so config drift cannot expose
-	-- the strict ReturnToStage offer through the generic purchase prompt.
+	-- Keep strict offer paths excluded even if shared prompt config drifts.
 	if productKey == "ReturnToStage" or productKey == "Teleport" then
 		return true
 	end
@@ -225,7 +319,6 @@ local function isExcludedDevProduct(productKey: string): boolean
 	if typeof(excludedKeys) == "table" and excludedKeys[productKey] == true then
 		return true
 	end
-
 	for _, multiplierProductKey in pairs(ProductService.MULTIPLIER_TO_PRODUCT) do
 		if multiplierProductKey == productKey then
 			return true
@@ -249,6 +342,7 @@ function PromptBuyProductsUI.new(screenGui: Instance): PromptBuyProductsUIType
 		player = Players.LocalPlayer,
 		frame = frame,
 		productImage = bodyFrame:FindFirstChild("ProductImage", true) :: ImageLabel?,
+		priceIcon = frame:FindFirstChild("Image") :: ImageLabel?,
 		countdownLabel = findRequiredChild(frame, "CountdownLabel", "TextLabel") :: TextLabel,
 		priceLabel = findRequiredChild(frame, "PriceLabel", "TextLabel") :: TextLabel,
 		productTitleLabel = findRequiredChild(frame, "ProductTitleLabel", "TextLabel") :: TextLabel,
@@ -271,6 +365,7 @@ function PromptBuyProductsUI.new(screenGui: Instance): PromptBuyProductsUIType
 		timeTriggerReady = false,
 		nextTimeTriggerAt = 0,
 		currentProduct = nil,
+		premiumPromptActive = false,
 		rewardedVideoInFlight = false,
 		activeTween = nil,
 		studioPromptReady = true,
@@ -336,9 +431,9 @@ function PromptBuyProductsUI._isPermanentProductOwned(
 		return PlayerHandler.OwnsKart(self.player, productKey)
 	end
 
-	local bloodmoonKartProduct = ProductService.BloodmoonKartProducts[productKey]
-	if typeof(bloodmoonKartProduct) == "table" and typeof(bloodmoonKartProduct.KartName) == "string" then
-		return PlayerHandler.OwnsKart(self.player, bloodmoonKartProduct.KartName)
+	local eventKartProduct = getEventKartProduct(productKey)
+	if typeof(eventKartProduct) == "table" and typeof(eventKartProduct.KartName) == "string" then
+		return PlayerHandler.OwnsKart(self.player, eventKartProduct.KartName)
 	end
 
 	return false
@@ -348,12 +443,11 @@ function PromptBuyProductsUI._collectEligibleProducts(self: PromptBuyProductsUIT
 	local candidates: { ProductCandidate } = {}
 
 	for productKey, rawId in pairs(ProductService.DevProducts) do
-		local isBloodmoonKartProduct = ProductService.BloodmoonKartProducts[productKey] ~= nil
 		if
 			typeof(productKey) == "string"
 			and typeof(rawId) == "number"
 			and not isExcludedDevProduct(productKey)
-			and (not isBloodmoonKartProduct or isBloodmoonActive())
+			and isEventProductAvailable(productKey)
 			and not self:_isPermanentProductOwned(productKey, "DevProduct", rawId)
 		then
 			local productInfo = self:_getMarketplaceInfo(rawId, Enum.InfoType.Product)
@@ -386,6 +480,20 @@ function PromptBuyProductsUI._collectEligibleProducts(self: PromptBuyProductsUIT
 				end
 			end
 		end
+	end
+
+	if CoreConfig.canShowPremiumPrompt(self.player.MembershipType, RunService:IsStudio()) then
+		table.insert(candidates, {
+			key = "RobloxPlus",
+			id = 0,
+			kind = "Premium",
+			infoType = nil,
+			category = "Premium",
+			info = {
+				Name = PREMIUM_PROMPT_TITLE,
+				Description = PREMIUM_PROMPT_DESCRIPTION,
+			},
+		})
 	end
 
 	return candidates
@@ -438,7 +546,7 @@ function PromptBuyProductsUI._tweenTo(self: PromptBuyProductsUIType, position: U
 	self:_stopActiveTween()
 	local tween = TweenService:Create(
 		self.frame,
-		TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		TweenConfig.ProductPrompt,
 		{ Position = position }
 	)
 	self.activeTween = tween
@@ -451,12 +559,27 @@ function PromptBuyProductsUI._tweenTo(self: PromptBuyProductsUIType, position: U
 	end)
 end
 
+function PromptBuyProductsUI._startCountdown(self: PromptBuyProductsUIType, token: number)
+	task.spawn(function()
+		local expiresAt = os.clock() + PROMPT_DURATION_SECONDS
+		while self.alive and self.promptVisible and self.promptToken == token do
+			local remaining = expiresAt - os.clock()
+			self.countdownLabel.Text = formatCountdown(remaining)
+			if remaining <= 0 then
+				self:_hidePrompt(token)
+				break
+			end
+			task.wait(0.1)
+		end
+	end)
+end
+
 function PromptBuyProductsUI._resetTriggers(self: PromptBuyProductsUIType)
 	self.deathsSincePrompt = 0
 	self.deathTarget = getRandomInteger(self.random, MIN_DEATHS, MAX_DEATHS)
 	self.deathTriggerReady = false
 	self.timeTriggerReady = false
-	local minutes = getRandomInteger(self.random, MIN_MINUTES, MAX_MINUTES)
+	local minutes = getPromptIntervalMinutes(self.random)
 	self.nextTimeTriggerAt = os.clock() + minutes * 60
 end
 
@@ -481,13 +604,20 @@ function PromptBuyProductsUI._enableInteraction(self: PromptBuyProductsUIType)
 end
 
 function PromptBuyProductsUI._showProduct(self: PromptBuyProductsUIType, product: ProductCandidate)
-	if ProductService.BloodmoonKartProducts[product.key] ~= nil and not isBloodmoonActive() then
+	if product.kind == "Premium" then
+		self:ShowPremiumPrompt()
+		return
+	end
+
+	if not isEventProductAvailable(product.key) then
+		self:_hidePrompt()
 		return
 	end
 
 	self.promptToken += 1
 	local token = self.promptToken
 	self.currentProduct = product
+	self.premiumPromptActive = false
 	self.rewardedVideoInFlight = false
 	self.promptVisible = true
 	self:_enableInteraction()
@@ -495,31 +625,68 @@ function PromptBuyProductsUI._showProduct(self: PromptBuyProductsUIType, product
 		self.studioPromptReady = false
 	end
 	self.countdownLabel.Text = formatCountdown(PROMPT_DURATION_SECONDS)
-	self.priceLabel.Text = tostring(math.max(0, math.floor(tonumber(product.info.PriceInRobux) or 0)))
+	self.buyButton.Text = DEFAULT_BUY_BUTTON_TEXT
+	self.priceLabel.Visible = true
+	if self.priceIcon then
+		self.priceIcon.Visible = true
+	end
+	local isCreatorFree = product.kind == "DevProduct"
+		and product.key ~= "ReturnToStage"
+		and ProductService.IsLocalExperienceCreator(self.player)
+	self.priceLabel.Text = if isCreatorFree
+		then "FREE"
+		else tostring(math.max(0, math.floor(tonumber(product.info.PriceInRobux) or 0)))
 	self.productTitleLabel.Text = string.upper(tostring(product.info.Name or product.key))
 	self.productDescriptionLabel.Text = getDescription(self.random, product.category)
 	self.watchAdFrame.Visible = product.category == "TemporaryBoost" and RewardedVideoClient.IsAvailable()
 
 	local imageId = toAssetId(product.info.IconImageAssetId)
-	if self.productImage and imageId then
-		self.productImage.Image = imageId
+	if self.productImage then
+		self.productImage.Visible = true
+		if imageId then
+			self.productImage.Image = imageId
+		end
 	end
 
 	self.frame.Visible = true
 	self:_tweenTo(VISIBLE_POSITION)
 
-	task.spawn(function()
-		local expiresAt = os.clock() + PROMPT_DURATION_SECONDS
-		while self.alive and self.promptVisible and self.promptToken == token do
-			local remaining = expiresAt - os.clock()
-			self.countdownLabel.Text = formatCountdown(remaining)
-			if remaining <= 0 then
-				self:_hidePrompt(token)
-				break
-			end
-			task.wait(0.1)
-		end
-	end)
+	self:_startCountdown(token)
+end
+
+function PromptBuyProductsUI.ShowPremiumPrompt(self: PromptBuyProductsUIType)
+	if not self.alive then
+		return
+	end
+
+	self.promptToken += 1
+	local token = self.promptToken
+	self.currentProduct = nil
+	self.premiumPromptActive = true
+	self.rewardedVideoInFlight = false
+	self.promptVisible = true
+	self:_enableInteraction()
+	if STUDIO_ALWAYS_SHOW then
+		self.studioPromptReady = false
+	end
+
+	self.countdownLabel.Text = formatCountdown(PROMPT_DURATION_SECONDS)
+	self.buyButton.Text = PREMIUM_BUY_BUTTON_TEXT
+	self.priceLabel.Visible = false
+	if self.priceIcon then
+		self.priceIcon.Visible = false
+	end
+	self.productTitleLabel.Text = PREMIUM_PROMPT_TITLE
+	self.productDescriptionLabel.Text = PREMIUM_PROMPT_DESCRIPTION
+	self.watchAdFrame.Visible = false
+	if self.productImage then
+		self.productImage.Image = PREMIUM_PROMPT_IMAGE
+		self.productImage.Visible = true
+	end
+
+	self.frame.Visible = true
+	self:_tweenTo(VISIBLE_POSITION)
+	self:_startCountdown(token)
 end
 
 function PromptBuyProductsUI._hidePrompt(self: PromptBuyProductsUIType, expectedToken: number?)
@@ -530,8 +697,14 @@ function PromptBuyProductsUI._hidePrompt(self: PromptBuyProductsUIType, expected
 	self.promptToken += 1
 	self.promptVisible = false
 	self.currentProduct = nil
+	self.premiumPromptActive = false
 	self.rewardedVideoInFlight = false
 	self.watchAdFrame.Visible = false
+	self.buyButton.Text = DEFAULT_BUY_BUTTON_TEXT
+	self.priceLabel.Visible = true
+	if self.priceIcon then
+		self.priceIcon.Visible = true
+	end
 	if STUDIO_ALWAYS_SHOW then
 		self.studioPromptReady = true
 	end
@@ -561,17 +734,26 @@ function PromptBuyProductsUI._handlePurchaseFinished(
 end
 
 function PromptBuyProductsUI._tryShowPrompt(self: PromptBuyProductsUIType)
-	if not self.alive
+	if
+		not self.alive
 		or self.promptVisible
 		or self.selectionInFlight
 		or STUDIO_ALWAYS_SHOW and not self.studioPromptReady
-		or self:_isBlockedByOtherUI() then
+		or self:_isBlockedByOtherUI()
+	then
 		return
 	end
 
-	if not STUDIO_ALWAYS_SHOW
-		and (self.player:GetAttribute("TutorialCompleted") ~= true
-			or not self.deathTriggerReady and not self.timeTriggerReady) then
+	if
+		not STUDIO_ALWAYS_SHOW
+		and (
+			self.player:GetAttribute("Data_Loaded") ~= true
+			or self.player:GetAttribute("TutorialCompleted") ~= true
+			or (typeof(self.player:GetAttribute("WinCount")) ~= "number"
+				or (self.player:GetAttribute("WinCount") :: number) < 1)
+			or not self.deathTriggerReady and not self.timeTriggerReady
+		)
+	then
 		return
 	end
 
@@ -630,8 +812,29 @@ function PromptBuyProductsUI.Init(self: PromptBuyProductsUIType)
 	VisualFunctions.SetupFrameClick(self.watchAdFrame, 0.9, -15, 0.8)
 
 	self.maid:GiveTask(self.buyButton.Activated:Connect(function()
+		if not self.alive or not self.promptVisible then
+			return
+		end
+
+		if self.premiumPromptActive then
+			local promptOk, promptError = pcall(function()
+				MarketplaceService:PromptPremiumPurchase(self.player)
+			end)
+			if not promptOk then
+				DebugModule.debugWarn("Premium purchase prompt failed: " .. tostring(promptError), MODULE_NAME)
+				return
+			end
+
+			self:_hidePrompt()
+			return
+		end
+
 		local product = self.currentProduct
-		if not self.alive or not self.promptVisible or not product then
+		if not product then
+			return
+		end
+		if not isEventProductAvailable(product.key) then
+			self:_hidePrompt()
 			return
 		end
 
@@ -671,44 +874,48 @@ function PromptBuyProductsUI.Init(self: PromptBuyProductsUIType)
 		self.watchAdButton.Interactable = false
 	end))
 
-	self.maid:GiveTask(RewardedVideoClient.ConnectResult(function(
-		placementName: string,
-		completed: boolean,
-		_resultName: string
-	)
-		local product = self.currentProduct
-		if not product or getRewardedVideoPlacement(product.key) ~= placementName then
-			return
-		end
+	self.maid:GiveTask(
+		RewardedVideoClient.ConnectResult(function(placementName: string, completed: boolean, _resultName: string)
+			local product = self.currentProduct
+			if not product or getRewardedVideoPlacement(product.key) ~= placementName then
+				return
+			end
 
-		self.rewardedVideoInFlight = false
-		if completed then
-			self:_hidePrompt()
-		else
-			self:_enableInteraction()
-			self.watchAdFrame.Visible = RewardedVideoClient.IsAvailable()
-		end
-	end))
-
-	self.maid:GiveTask(MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(
-		player,
-		productId,
-		wasPurchased
+			self.rewardedVideoInFlight = false
+			if completed then
+				self:_hidePrompt()
+			else
+				self:_enableInteraction()
+				self.watchAdFrame.Visible = RewardedVideoClient.IsAvailable()
+			end
+		end)
 	)
-		if player == self.player then
-			self:_handlePurchaseFinished(productId, wasPurchased)
-		end
-	end))
 
-	self.maid:GiveTask(MarketplaceService.PromptProductPurchaseFinished:Connect(function(
-		userId,
-		productId,
-		wasPurchased
+	self.maid:GiveTask(
+		MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, productId, wasPurchased)
+			if player == self.player then
+				self:_handlePurchaseFinished(productId, wasPurchased)
+			end
+		end)
 	)
-		if userId == self.player.UserId then
-			self:_handlePurchaseFinished(productId, wasPurchased)
-		end
-	end))
+
+	self.maid:GiveTask(
+		MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, wasPurchased)
+			if userId == self.player.UserId then
+				self:_handlePurchaseFinished(productId, wasPurchased)
+			end
+		end)
+	)
+
+	self.maid:GiveTask(
+		ProductService.ConnectCreatorPurchaseFinished(
+			function(purchaseKind: string, productId: number, wasPurchased: boolean, _reason: string)
+				if purchaseKind == "Product" then
+					self:_handlePurchaseFinished(productId, wasPurchased)
+				end
+			end
+		)
+	)
 
 	self.maid:GiveTask(self.player.CharacterAdded:Connect(function(character)
 		self:_bindCharacter(character)
@@ -716,6 +923,7 @@ function PromptBuyProductsUI.Init(self: PromptBuyProductsUIType)
 	if self.player.Character then
 		self:_bindCharacter(self.player.Character)
 	end
+
 	if STUDIO_ALWAYS_SHOW then
 		self:_tryShowPrompt()
 	end
@@ -725,12 +933,9 @@ function PromptBuyProductsUI.Init(self: PromptBuyProductsUIType)
 			return
 		end
 
-		self.maid.BloodmoonState = stateFolder:GetAttributeChangedSignal("ActiveEventIds"):Connect(function()
+		self.maid.LiveEventState = stateFolder:GetAttributeChangedSignal("ActiveEventIds"):Connect(function()
 			local currentProduct = self.currentProduct
-			if currentProduct
-				and ProductService.BloodmoonKartProducts[currentProduct.key] ~= nil
-				and not isBloodmoonActive()
-			then
+			if currentProduct and not isEventProductAvailable(currentProduct.key) then
 				self:_hidePrompt()
 			end
 		end)
@@ -774,6 +979,7 @@ function PromptBuyProductsUI.Destroy(self: PromptBuyProductsUIType)
 	self.promptToken += 1
 	self.promptVisible = false
 	self.currentProduct = nil
+	self.premiumPromptActive = false
 	self.rewardedVideoInFlight = false
 	self.watchAdFrame.Visible = false
 	self:_stopActiveTween()

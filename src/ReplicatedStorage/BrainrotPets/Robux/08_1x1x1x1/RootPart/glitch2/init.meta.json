@@ -1,0 +1,116 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Brightness": 7,
+    "Color": [{
+        "color": [0.2941, 1.0, 0.4353],
+        "time": 0.0
+      }, {
+        "color": [0.2941, 1.0, 0.4353],
+        "time": 1.0
+      }],
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.045, 0.09],
+    "LightEmission": -2,
+    "LockedToPart": true,
+    "Rate": 15,
+    "Size": [{
+        "envelope": 0.713,
+        "time": 0.0,
+        "value": 0.713
+      }, {
+        "envelope": 0.713,
+        "time": 0.002,
+        "value": 0.8178
+      }, {
+        "envelope": 0.713,
+        "time": 0.0082,
+        "value": 0.9224
+      }, {
+        "envelope": 0.713,
+        "time": 0.0191,
+        "value": 1.0265
+      }, {
+        "envelope": 0.713,
+        "time": 0.0349,
+        "value": 1.1298
+      }, {
+        "envelope": 0.713,
+        "time": 0.0563,
+        "value": 1.232
+      }, {
+        "envelope": 0.713,
+        "time": 0.0836,
+        "value": 1.3325
+      }, {
+        "envelope": 0.713,
+        "time": 0.1172,
+        "value": 1.4307
+      }, {
+        "envelope": 0.713,
+        "time": 0.1575,
+        "value": 1.5259
+      }, {
+        "envelope": 0.713,
+        "time": 0.2048,
+        "value": 1.6173
+      }, {
+        "envelope": 0.713,
+        "time": 0.2591,
+        "value": 1.704
+      }, {
+        "envelope": 0.713,
+        "time": 0.3205,
+        "value": 1.7849
+      }, {
+        "envelope": 0.713,
+        "time": 0.3886,
+        "value": 1.8592
+      }, {
+        "envelope": 0.713,
+        "time": 0.463,
+        "value": 1.926
+      }, {
+        "envelope": 0.713,
+        "time": 0.543,
+        "value": 1.9847
+      }, {
+        "envelope": 0.713,
+        "time": 0.628,
+        "value": 2.0346
+      }, {
+        "envelope": 0.713,
+        "time": 0.7171,
+        "value": 2.0753
+      }, {
+        "envelope": 0.713,
+        "time": 0.8093,
+        "value": 2.1065
+      }, {
+        "envelope": 0.713,
+        "time": 0.9039,
+        "value": 2.1279
+      }, {
+        "envelope": 0.713,
+        "time": 1.0,
+        "value": 2.1391
+      }],
+    "Speed": [0.0012, 0.0012],
+    "Squash": [{
+        "envelope": 1.0,
+        "time": 0.0,
+        "value": 0.0
+      }, {
+        "envelope": 1.0,
+        "time": 0.5,
+        "value": 0.0
+      }, {
+        "envelope": 1.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Texture": "rbxassetid://103320631160808",
+    "ZOffset": -0.251
+  }
+}

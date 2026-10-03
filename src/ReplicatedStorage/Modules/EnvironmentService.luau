@@ -1,12 +1,11 @@
---!strict
-
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local DebugModule = require(ReplicatedStorage.Modules:WaitForChild("DebugModule"))
 local Maid = require(ReplicatedStorage.Modules:WaitForChild("Maid"))
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
+local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 
 local EnvironmentService = {}
 
@@ -15,15 +14,15 @@ local OWNED_EFFECT_ATTRIBUTE = "EnvironmentServiceOwned"
 local TRANSITION_COMPLETE_ATTRIBUTE = "EnvironmentTransitionComplete"
 local environmentConfig = CoreConfig.environment
 local transitionDurationSeconds = if typeof(environmentConfig) == "table"
-	and typeof(environmentConfig.transitionDurationSeconds) == "number"
+		and typeof(environmentConfig.transitionDurationSeconds) == "number"
 	then math.max(0, environmentConfig.transitionDurationSeconds)
 	else 2
 local atmosphereLeadSeconds = if typeof(environmentConfig) == "table"
-	and typeof(environmentConfig.atmosphereLeadSeconds) == "number"
+		and typeof(environmentConfig.atmosphereLeadSeconds) == "number"
 	then math.max(0, environmentConfig.atmosphereLeadSeconds)
 	else 0.5
-local transitionTweenInfo = TweenInfo.new(transitionDurationSeconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
-local atmosphereLeadTweenInfo = TweenInfo.new(atmosphereLeadSeconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+local transitionTweenInfo = TweenConfig.WithDuration(transitionDurationSeconds, TweenConfig.EnvironmentTransition)
+local atmosphereLeadTweenInfo = TweenConfig.WithDuration(atmosphereLeadSeconds, TweenConfig.EnvironmentTransition)
 
 local LIGHTING_PROPERTIES = {
 	"Ambient",
@@ -103,10 +102,7 @@ local function setLightingProperty(propertyName: string, value: any)
 	end)
 	if not ok then
 		DebugModule.debugWarn(
-			"Failed to apply lighting property | property="
-				.. propertyName
-				.. " | error="
-				.. tostring(errorMessage),
+			"Failed to apply lighting property | property=" .. propertyName .. " | error=" .. tostring(errorMessage),
 			MODULE_NAME
 		)
 	end
@@ -127,11 +123,8 @@ local function scheduleTransitionComplete()
 
 	local completionAnchor = Instance.new("NumberValue")
 	completionAnchor.Value = 0
-	local completionTween = TweenService:Create(
-		completionAnchor,
-		TweenInfo.new(totalDuration, Enum.EasingStyle.Linear),
-		{ Value = 1 }
-	)
+	local completionTween =
+		TweenService:Create(completionAnchor, TweenConfig.WithDuration(totalDuration, TweenConfig.EnvironmentLinear), { Value = 1 })
 	transitionMaid:GiveTask(completionAnchor)
 	transitionMaid:GiveTask(completionTween)
 	transitionMaid:GiveTask(completionTween.Completed:Connect(function(playbackState: Enum.PlaybackState)
@@ -167,10 +160,7 @@ local function applyClockTimeProperty(value: number, context: string, animate: b
 	if not ok then
 		clockTimeAnchor:Destroy()
 		DebugModule.debugWarn(
-			"Failed to create ClockTime tween | target="
-				.. context
-				.. " | error="
-				.. tostring(tweenOrError),
+			"Failed to create ClockTime tween | target=" .. context .. " | error=" .. tostring(tweenOrError),
 			MODULE_NAME
 		)
 		return false
@@ -365,11 +355,8 @@ local function applyEnvironment(environmentName: string, animate: boolean?)
 		else
 			local atmosphereLeadAnchor = Instance.new("NumberValue")
 			atmosphereLeadAnchor.Value = 0
-			local atmosphereLeadTween = TweenService:Create(
-				atmosphereLeadAnchor,
-				atmosphereLeadTweenInfo,
-				{ Value = 1 }
-			)
+			local atmosphereLeadTween =
+				TweenService:Create(atmosphereLeadAnchor, atmosphereLeadTweenInfo, { Value = 1 })
 			transitionMaid:GiveTask(atmosphereLeadAnchor)
 			transitionMaid:GiveTask(atmosphereLeadTween)
 			transitionMaid:GiveTask(atmosphereLeadTween.Completed:Connect(function(playbackState: Enum.PlaybackState)
@@ -395,10 +382,7 @@ local function refreshFromState(animate: boolean)
 	end
 
 	local environmentName = stateFolder:GetAttribute("EnvironmentName")
-	applyEnvironment(
-		if typeof(environmentName) == "string" then environmentName else "Default",
-		animate
-	)
+	applyEnvironment(if typeof(environmentName) == "string" then environmentName else "Default", animate)
 end
 
 local function bindStateFolder(folder: Folder)
@@ -436,6 +420,15 @@ function EnvironmentService.SetGlobalShadowsOverride(value: boolean?)
 	elseif initialized then
 		applyEnvironment(currentEnvironmentName)
 	end
+end
+
+function EnvironmentService.ApplyForStudio(environmentName: string)
+	if typeof(environmentName) ~= "string" or environmentName == "" then
+		DebugModule.debugWarn("Studio environment request was empty", MODULE_NAME)
+		return
+	end
+
+	applyEnvironment(environmentName, false)
 end
 
 function EnvironmentService.Stop()

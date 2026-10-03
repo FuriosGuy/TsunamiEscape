@@ -1,5 +1,3 @@
---!strict
-
 local LevelDisplayController = {}
 LevelDisplayController.__index = LevelDisplayController
 

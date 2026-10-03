@@ -5,7 +5,6 @@
     "BottomSurface": "Smooth",
     "CFrame": [-147.5, 20.25, 41.4999, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Color": [17, 17, 17],
-    "Locked": true,
     "MaterialVariant": "Weld",
     "Size": [9, 0.5, 9],
     "TopSurface": "Smooth"

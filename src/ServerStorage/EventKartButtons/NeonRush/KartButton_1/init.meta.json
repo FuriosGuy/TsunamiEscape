@@ -1,0 +1,11 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "EventName": "NeonRush",
+      "KartName": "1_SparkBuggy",
+      "WinsRequired": 20
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

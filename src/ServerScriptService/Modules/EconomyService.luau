@@ -1,15 +1,15 @@
---!strict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local ProductService = require(Modules:WaitForChild("ProductService"))
-local FunnelAnalytics = require(Modules:WaitForChild("FunnelAnalytics"))
+local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
+local FunnelAnalytics =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("FunnelAnalytics_Server"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 local EconomyAnalytics = require(script.Parent:WaitForChild("EconomyAnalytics"))
 
 local EconomyService = {}
@@ -63,19 +63,25 @@ function EconomyService.SyncTrailState(player: Player)
 end
 
 function EconomyService.SyncGamePassAttributes(player: Player)
+	-- Initial gamepass hydration can add owned karts after datastore load. Keep
+	-- the client badge in baseline mode until that authoritative sync completes.
+	if player:GetAttribute("GamePassOwnershipSyncComplete") ~= true then
+		player:SetAttribute("GamePassOwnershipSyncComplete", false)
+	end
+
 	-- Wins GamePass
 	local winsId = ProductService.Gamepasses["2xWins"]
-    local targetWinMult = if ProductService.userOwnsGamePass(player, winsId) then 2 else 1
-    if player:GetAttribute("WinMultiplier") ~= targetWinMult then
-	    player:SetAttribute("WinMultiplier", targetWinMult)
-    end
+	local targetWinMult = if ProductService.userOwnsGamePass(player, winsId) then 2 else 1
+	if player:GetAttribute("WinMultiplier") ~= targetWinMult then
+		player:SetAttribute("WinMultiplier", targetWinMult)
+	end
 
 	-- VIP GamePass
 	local vipId = ProductService.Gamepasses["VIP"]
-    local targetVIP = ProductService.userOwnsGamePass(player, vipId)
-    if player:GetAttribute("HasVIPPass") ~= targetVIP then
-	    player:SetAttribute("HasVIPPass", targetVIP)
-    end
+	local targetVIP = ProductService.userOwnsGamePass(player, vipId)
+	if player:GetAttribute("HasVIPPass") ~= targetVIP then
+		player:SetAttribute("HasVIPPass", targetVIP)
+	end
 
 	-- Kart GamePasses
 	local karts = { "AdvancedTank", "ShoppingKart", "FormulaCar" }
@@ -85,12 +91,16 @@ function EconomyService.SyncGamePassAttributes(player: Player)
 			PlayerHandler.AddOwnedKart(player, kartName)
 		end
 	end
-    
-    -- Validate currently equipped kart
-    local equipped = player:GetAttribute("Kart_Equipped")
-    if typeof(equipped) == "string" and table.find(karts, equipped) and not PlayerHandler.OwnsKart(player, equipped) then
-        player:SetAttribute("Kart_Equipped", "1_Default")
-    end
+
+	-- Validate currently equipped kart
+	local equipped = player:GetAttribute("Kart_Equipped")
+	if
+		typeof(equipped) == "string"
+		and table.find(karts, equipped)
+		and not PlayerHandler.OwnsKart(player, equipped)
+	then
+		player:SetAttribute("Kart_Equipped", "1_Default")
+	end
 
 	-- Treadmill multiplier is runtime state and should only be set by treadmill touch flow.
 	-- Owning a treadmill pass grants access to treadmill parts, not passive XP on join.
@@ -106,6 +116,7 @@ function EconomyService.SyncGamePassAttributes(player: Player)
 	end
 
 	EconomyService.GrantStarterPackIfEligible(player)
+	player:SetAttribute("GamePassOwnershipSyncComplete", true)
 end
 
 function EconomyService.GrantStarterPackIfEligible(player: Player): boolean
@@ -123,25 +134,13 @@ function EconomyService.GrantStarterPackIfEligible(player: Player): boolean
 
 	local sessionId = starterPackFunnelSessions[player]
 	if sessionId then
-		FunnelAnalytics.LogRecurringStep(
-			player,
-			STARTER_PACK_FUNNEL_NAME,
-			sessionId,
-			2,
-			"Starter Pack Owned",
-			{
-				customField01 = "Owned",
-			}
-		)
+		FunnelAnalytics.LogRecurringStep(player, STARTER_PACK_FUNNEL_NAME, sessionId, 2, "Starter Pack Owned", {
+			customField01 = "Owned",
+		})
 	else
-		sessionId = FunnelAnalytics.OpenRecurringFunnel(
-			player,
-			STARTER_PACK_FUNNEL_NAME,
-			"Starter Pack Owned",
-			{
-				customField01 = "OwnedOutsidePrompt",
-			}
-		)
+		sessionId = FunnelAnalytics.OpenRecurringFunnel(player, STARTER_PACK_FUNNEL_NAME, "Starter Pack Owned", {
+			customField01 = "OwnedOutsidePrompt",
+		})
 	end
 
 	local awardedWins = PlayerHandler.AddExactWins(player, STARTER_PACK_WIN_REWARD)
@@ -183,12 +182,7 @@ function EconomyService.GrantStarterPackIfEligible(player: Player): boolean
 	starterPackFunnelSessions[player] = nil
 
 	DebugModule.debugInfo(
-		string.format(
-			"Starter pack granted | player=%s | wins=%d | xp=%d",
-			player.Name,
-			awardedWins,
-			awardedXP
-		),
+		string.format("Starter pack granted | player=%s | wins=%d | xp=%d", player.Name, awardedWins, awardedXP),
 		MODULE_NAME
 	)
 
@@ -196,7 +190,9 @@ function EconomyService.GrantStarterPackIfEligible(player: Player): boolean
 end
 
 function EconomyService.OnSpeedAction(player: Player, requestedSpeed: number)
-	if typeof(requestedSpeed) ~= "number" then return end
+	if typeof(requestedSpeed) ~= "number" then
+		return
+	end
 	local maxSpeed = player:GetAttribute("Max_Player_Speed") or DEFAULT_MAX_PLAYER_SPEED
 	local liveEventMultiplier = PlayerHandler.GetLiveEventWalkSpeedMultiplier(player)
 	local canonicalRequestedSpeed = if liveEventMultiplier > 0
@@ -207,13 +203,22 @@ function EconomyService.OnSpeedAction(player: Player, requestedSpeed: number)
 end
 
 function EconomyService.OnTrailAction(player: Player, action: string, trailName: string)
-	if typeof(action) ~= "string" or typeof(trailName) ~= "string" then return end
+	if typeof(action) ~= "string" or typeof(trailName) ~= "string" then
+		return
+	end
 	local config = PlayerHandler.GetTrailConfig(trailName)
-	if not config then return end
+	if not config then
+		return
+	end
 
 	if config.EventOnly == true and not PlayerHandler.OwnsTrail(player, trailName) then
 		DebugModule.debugInfo(
-			string.format("Rejected locked event trail action | player=%s | action=%s | trail=%s", player.Name, action, trailName),
+			string.format(
+				"Rejected locked event trail action | player=%s | action=%s | trail=%s",
+				player.Name,
+				action,
+				trailName
+			),
 			MODULE_NAME
 		)
 		ShowNotification:FireClient(player, "EVENT TRAIL LOCKED!", "Red")
@@ -246,18 +251,16 @@ function EconomyService.OnTrailAction(player: Player, action: string, trailName:
 end
 
 function EconomyService.Init()
-	if isInitialized then return end
+	if isInitialized then
+		return
+	end
 	isInitialized = true
 
 	FunnelAnalytics.RegisterClientAction("StarterPackPromptOpened", function(player: Player, payload: { [string]: any })
-		local sessionId = FunnelAnalytics.OpenRecurringFunnel(
-			player,
-			STARTER_PACK_FUNNEL_NAME,
-			"Starter Pack Prompt Opened",
-			{
+		local sessionId =
+			FunnelAnalytics.OpenRecurringFunnel(player, STARTER_PACK_FUNNEL_NAME, "Starter Pack Prompt Opened", {
 				customField01 = tostring(payload.source or "Client"),
-			}
-		)
+			})
 		if sessionId then
 			starterPackFunnelSessions[player] = sessionId
 		end

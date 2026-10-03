@@ -1,0 +1,12 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "DisplayName": "Igloo Kart",
+      "EventName": "FrostbiteRally",
+      "KartName": "3_IglooKart",
+      "ProductKey": "IglooKart"
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

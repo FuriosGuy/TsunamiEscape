@@ -1,5 +1,3 @@
---!strict
-
 local DebugModule = require(game:GetService("ReplicatedStorage").Modules.DebugModule)
 
 local HudDisplayController = {}
@@ -55,10 +53,7 @@ function HudDisplayController:UpdateXPProductLabels()
 	end
 
 	local devMultiplier = getNumberAttribute(self.player, "DevProduct_XPSpeedMultiplier", 1)
-	DebugModule.debugPrint(
-		string.format("updateXPProductLabels - DevMult=%.1f", devMultiplier),
-		"MainOrchestrator"
-	)
+	DebugModule.debugPrint(string.format("updateXPProductLabels - DevMult=%.1f", devMultiplier), "MainOrchestrator")
 
 	local mappings = {
 		{ label = self.visualFunctions.Labels.Xp100KValueLabel, value = 100000, name = "100K" },
@@ -147,9 +142,7 @@ function HudDisplayController:UpdateUI()
 	if customSpeedTextBox then
 		customSpeedTextBox.PlaceholderText = tostring(maxSpeed)
 		if not customSpeedTextBox:IsFocused() then
-			customSpeedTextBox.Text = tostring(
-				self.playerHandler.GetEffectiveWalkSpeed(self.player)
-			)
+			customSpeedTextBox.Text = tostring(self.playerHandler.GetEffectiveWalkSpeed(self.player))
 		end
 	end
 
@@ -161,9 +154,7 @@ function HudDisplayController:UpdateUI()
 		maxLevel,
 		nextStats.NextMaxLevel
 	)
-	self.winDisplayController:SetDisplayedWinCount(
-		getNumberAttribute(self.player, "WinCount", 0)
-	)
+	self.winDisplayController:SetDisplayedWinCount(getNumberAttribute(self.player, "WinCount", 0))
 end
 
 function HudDisplayController:UpdateAllXPDisplay()

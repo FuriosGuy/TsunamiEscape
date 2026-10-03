@@ -1,6 +1,7 @@
 --!strict
 
 local CoreConfig = require(script.Parent:WaitForChild("CoreConfig_Shared"))
+local PetConfig = require(game:GetService("ReplicatedStorage").Modules.Config.PetConfig)
 local spinWheelConfig = CoreConfig.spinWheel or {}
 local rewardedAdMaxSpins = if typeof(spinWheelConfig.rewardedAdMaxSpins) == "number"
 	then math.max(1, math.floor(spinWheelConfig.rewardedAdMaxSpins))
@@ -23,13 +24,28 @@ PlayerDataConfig.DEFAULT_ATTRIBUTES = {
 	OwnedKarts = "1_Default",
 	Kart_Equipped = "1_Default",
 	Current_World = "World1",
+	MusicEnabled = true,
+	HapticsEnabled = true,
 	CurrentStage = 0,
 	MinigameRaceWins = 0,
 	BloodmoonWins = 0,
 	BloodmoonWinsCycleUnix = 0,
+	NeonRushWins = 0,
+	NeonRushWinsCycleUnix = 0,
+	FrostbiteRallyWins = 0,
+	FrostbiteRallyWinsCycleUnix = 0,
+	Pet_EquipSlotCapacity = PetConfig.Equip.startingSlots,
+	Pet_BackpackCapacity = PetConfig.Storage.startingCapacity,
+	Pet_LuckMultiplier = PetConfig.Upgrades.luckMultiplier.startingMultiplier,
+	Pet_LuckyBlockFastOpenEnabled = true,
+	Pet_Inventory = "[]",
+	Pet_OverflowClaims = "[]",
+	Pet_PaidRandomItemsRestricted = true,
+	Pet_RandomItemPolicyLoaded = false,
 
 	WinCount = 0,
 	WinMultiplier = 1,
+	WinStreakCount = 0,
 	HasVIPPass = false,
 	VerifyRewardClaimed = false,
 	VerifyRewardNextClaimUnix = 0,
@@ -44,8 +60,12 @@ PlayerDataConfig.DEFAULT_ATTRIBUTES = {
 	DailyRewardCurrentDay = 1,
 	DailyRewardNextClaimUnix = 0,
 	DailyRewardCycleCount = 0,
+	DailyRewardLastClaimDayKey = 0,
+	DailyRewardTimezoneOffsetMinutes = 0,
+	DailyRewardTimezoneInitialized = false,
 	SpinWheelSpins = 0,
-	SpinWheelNextFreeSpinUnix = 0,
+	SpinWheelNextFreeSpinUnix = 0, -- Legacy cooldown field; migrated and cleared on join.
+	SpinWheelNextFreeSpinPlaytimeSeconds = 0,
 	SpinWheelFreeSpinInitialized = false,
 	SpinWheelProcessedReceiptIds = "",
 	SpinWheelRewardedAdSpinsRemaining = rewardedAdMaxSpins,
@@ -66,6 +86,8 @@ PlayerDataConfig.DEFAULT_ATTRIBUTES = {
 	Movement_XPGainRate = 10,
 	Movement_XPGainInterval = 0.25,
 }
+
+PlayerDataConfig.PREMIUM_MULTIPLIER = 1.25
 
 local socialConfig = CoreConfig.social
 PlayerDataConfig.FRIEND_INVITE_MULTIPLIER_STEP = if socialConfig

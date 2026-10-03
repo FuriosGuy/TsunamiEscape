@@ -2,112 +2,112 @@
   "className": "ParticleEmitter",
   "properties": {
     "Attributes": {
+      "EmitDelay": 0,
       "LifetimeSequence": {
         "NumberSequence": {
           "keypoints": [{
+              "envelope": 0.0,
               "time": 0.0,
-              "value": 0.0,
-              "envelope": 0.0
+              "value": 0.0
             }, {
+              "envelope": 0.0,
               "time": 0.0313,
-              "value": 286.8939,
-              "envelope": 0.0
+              "value": 286.8939
             }, {
+              "envelope": 0.0,
               "time": 0.0625,
-              "value": 1123.1592,
-              "envelope": 0.0
+              "value": 1123.1592
             }, {
+              "envelope": 0.0,
               "time": 0.0938,
-              "value": 2472.171,
-              "envelope": 0.0
+              "value": 2472.1709
             }, {
+              "envelope": 0.0,
               "time": 0.125,
-              "value": 4297.3047,
-              "envelope": 0.0
+              "value": 4297.3047
             }, {
+              "envelope": 0.0,
               "time": 0.1875,
-              "value": 9229.438,
-              "envelope": 0.0
+              "value": 9229.4385
             }, {
+              "envelope": 0.0,
               "time": 0.25,
-              "value": 15626.563,
-              "envelope": 0.0
+              "value": 15626.5635
             }, {
+              "envelope": 0.0,
               "time": 0.3125,
-              "value": 23195.68,
-              "envelope": 0.0
+              "value": 23195.6797
             }, {
+              "envelope": 0.0,
               "time": 0.375,
-              "value": 31643.79,
-              "envelope": 0.0
+              "value": 31643.7891
             }, {
+              "envelope": 0.0,
               "time": 0.5,
-              "value": 50005.0,
-              "envelope": 0.0
+              "value": 50005.0
             }, {
+              "envelope": 0.0,
               "time": 0.625,
-              "value": 68366.21,
-              "envelope": 0.0
+              "value": 68366.2109
             }, {
+              "envelope": 0.0,
               "time": 0.6875,
-              "value": 76814.32,
-              "envelope": 0.0
+              "value": 76814.3203
             }, {
+              "envelope": 0.0,
               "time": 0.75,
-              "value": 84383.44,
-              "envelope": 0.0
+              "value": 84383.4375
             }, {
+              "envelope": 0.0,
               "time": 0.8125,
-              "value": 90780.56,
-              "envelope": 0.0
+              "value": 90780.5625
             }, {
+              "envelope": 0.0,
               "time": 0.8438,
-              "value": 93448.06,
-              "envelope": 0.0
+              "value": 93448.0625
             }, {
+              "envelope": 0.0,
               "time": 0.875,
-              "value": 95712.695,
-              "envelope": 0.0
+              "value": 95712.6953
             }, {
+              "envelope": 0.0,
               "time": 0.9063,
-              "value": 97537.83,
-              "envelope": 0.0
+              "value": 97537.8281
             }, {
+              "envelope": 0.0,
               "time": 0.9375,
-              "value": 98886.84,
-              "envelope": 0.0
+              "value": 98886.8438
             }, {
+              "envelope": 0.0,
               "time": 0.9688,
-              "value": 99723.11,
-              "envelope": 0.0
+              "value": 99723.1094
             }, {
+              "envelope": 0.0,
               "time": 1.0,
-              "value": 100010.0,
-              "envelope": 0.0
+              "value": 100010.0
             }]
         }
-      },
-      "EmitDelay": 0
+      }
     },
     "Color": [{
-        "time": 0.0,
-        "color": [0.0353, 0.5373, 0.8118]
+        "color": [0.0353, 0.5373, 0.8118],
+        "time": 0.0
       }, {
-        "time": 1.0,
-        "color": [0.0353, 0.5373, 0.8118]
+        "color": [0.0353, 0.5373, 0.8118],
+        "time": 1.0
       }],
     "EmissionDirection": "Right",
     "Lifetime": [0, 1.5],
     "LightInfluence": 1,
     "Rate": 25,
     "Size": [{
+        "envelope": 0.0,
         "time": 0.0,
-        "value": 3.9392,
-        "envelope": 0.0
+        "value": 3.9392
       }, {
+        "envelope": 0.0,
         "time": 1.0,
-        "value": 0.7162,
-        "envelope": 0.0
+        "value": 0.7162
       }],
     "Speed": [7.1622, 7.1622],
     "SpreadAngle": [5, 5],

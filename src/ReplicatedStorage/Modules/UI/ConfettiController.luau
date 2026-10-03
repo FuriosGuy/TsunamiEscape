@@ -1,5 +1,3 @@
---!strict
-
 local Workspace = game:GetService("Workspace")
 
 export type ConfettiController = {

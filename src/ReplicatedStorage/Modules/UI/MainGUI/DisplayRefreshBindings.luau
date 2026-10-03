@@ -1,7 +1,5 @@
---!strict
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local PlayerHandler = require(ReplicatedStorage.Modules.PlayerHandler)
+local PlayerHandler = require(ReplicatedStorage.Modules.Shared:WaitForChild("PlayerHandler_Client"))
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 
 local DisplayRefreshBindings = {}

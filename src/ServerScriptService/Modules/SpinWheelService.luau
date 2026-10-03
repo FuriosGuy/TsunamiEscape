@@ -1,18 +1,17 @@
---!strict
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
-local SpinWheelConfig = require(ConfigFolder:WaitForChild("SpinWheelConfig"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
+local ReplicatedConfigFolder = Modules:WaitForChild("Config")
+local ServerSharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(ServerSharedFolder:WaitForChild("CoreConfig_Server"))
+local SpinWheelConfig = require(ReplicatedConfigFolder:WaitForChild("SpinWheelConfig"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local ProductService = require(Modules:WaitForChild("ProductService"))
+local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
+local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
 local ProductServerService = require(script.Parent:WaitForChild("ProductServerService"))
 local LevelingService = require(script.Parent:WaitForChild("LevelingService"))
 local EconomyAnalytics = require(script.Parent:WaitForChild("EconomyAnalytics"))
@@ -21,7 +20,9 @@ local SpinWheelService = {}
 
 local MODULE_NAME = "SpinWheelService"
 local SPINS_ATTRIBUTE = "SpinWheelSpins"
-local NEXT_FREE_SPIN_ATTRIBUTE = "SpinWheelNextFreeSpinUnix"
+local LEGACY_NEXT_FREE_SPIN_UNIX_ATTRIBUTE = "SpinWheelNextFreeSpinUnix"
+local NEXT_FREE_SPIN_PLAYTIME_ATTRIBUTE = "SpinWheelNextFreeSpinPlaytimeSeconds"
+local TOTAL_PLAYTIME_ATTRIBUTE = "TotalPlaytimeSeconds"
 local REWARDED_AD_NEXT_AVAILABLE_ATTRIBUTE = "SpinWheelRewardedAdNextAvailableUnix"
 local REWARDED_AD_RESET_ATTRIBUTE = "SpinWheelRewardedAdResetUnix"
 local INITIALIZED_ATTRIBUTE = "SpinWheelFreeSpinInitialized"
@@ -34,9 +35,9 @@ local SPIN_ANIMATION_DURATION_SECONDS = if typeof(spinWheelConfig.spinRotationDu
 	else 4
 local PENDING_SPIN_TIMEOUT_SECONDS = SPIN_ANIMATION_DURATION_SECONDS + 10
 
-local FREE_SPIN_COOLDOWN_SECONDS = if typeof(spinWheelConfig.freeSpinCooldownSeconds) == "number"
-	then math.max(1, math.floor(spinWheelConfig.freeSpinCooldownSeconds))
-	else 24 * 60 * 60
+local FREE_SPIN_PLAYTIME_SECONDS = if typeof(spinWheelConfig.freeSpinPlaytimeSeconds) == "number"
+	then math.max(1, math.floor(spinWheelConfig.freeSpinPlaytimeSeconds))
+	else 15 * 60
 local REWARDED_AD_COOLDOWN_SECONDS = if typeof(spinWheelConfig.rewardedAdCooldownSeconds) == "number"
 	then math.max(1, math.floor(spinWheelConfig.rewardedAdCooldownSeconds))
 	else 5 * 60
@@ -45,13 +46,14 @@ local DEBUG_FREE_SPIN_READY_IN_STUDIO = spinWheelConfig.debugFreeSpinReadyInStud
 local requestInFlight: { [Player]: boolean } = {}
 local lastRequestTimes: { [Player]: number } = {}
 local processedReceipts: { [Player]: { [string]: boolean } } = {}
+local playtimeConnections: { [Player]: RBXScriptConnection } = {}
 local serviceMaid = Maid.new()
 
 type PendingSpin = {
 	token: string,
 	reward: SpinWheelConfig.RewardDefinition,
 	previousSpinCount: number,
-	previousNextFreeSpinUnix: number,
+	previousNextFreeSpinPlaytimeSeconds: number,
 	startedAt: number,
 	expiresAt: number,
 	status: "Started" | "Ready",
@@ -141,39 +143,60 @@ local function rememberReceipt(player: Player, receiptId: string): boolean
 	return true
 end
 
-local function getNextFreeSpinUnix(player: Player): number
-	return math.max(0, math.floor(getNumberAttribute(player, NEXT_FREE_SPIN_ATTRIBUTE, 0)))
+local function getTotalPlaytimeSeconds(player: Player): number
+	return math.max(0, math.floor(getNumberAttribute(player, TOTAL_PLAYTIME_ATTRIBUTE, 0)))
+end
+
+local function getNextFreeSpinPlaytimeSeconds(player: Player): number
+	return math.max(0, math.floor(getNumberAttribute(player, NEXT_FREE_SPIN_PLAYTIME_ATTRIBUTE, 0)))
+end
+
+local function setNextFreeSpinPlaytimeSeconds(player: Player, seconds: number)
+	player:SetAttribute(NEXT_FREE_SPIN_PLAYTIME_ATTRIBUTE, math.max(0, math.floor(seconds)))
+	player:SetAttribute(LEGACY_NEXT_FREE_SPIN_UNIX_ATTRIBUTE, 0)
+end
+
+local function tryGrantFreeSpinIfDue(player: Player, fromSpinRequest: boolean): boolean
+	if player:GetAttribute("Data_Loaded") ~= true
+		or isStudioFreeSpinDebugEnabled()
+		or pendingSpins[player] ~= nil
+		or (requestInFlight[player] == true and not fromSpinRequest)
+		or getSpinCount(player) > 0
+	then
+		return false
+	end
+
+	local targetPlaytime = getNextFreeSpinPlaytimeSeconds(player)
+	if targetPlaytime <= 0 or getTotalPlaytimeSeconds(player) < targetPlaytime then
+		return false
+	end
+
+	addSpins(player, 1)
+	setNextFreeSpinPlaytimeSeconds(player, getTotalPlaytimeSeconds(player) + FREE_SPIN_PLAYTIME_SECONDS)
+	return true
 end
 
 local function makeFreeSpinReadyIfDue(player: Player): boolean
-	local spins = getSpinCount(player)
-	if spins > 0 then
+	if getSpinCount(player) > 0 then
 		return true
 	end
 
 	if isStudioFreeSpinDebugEnabled() then
 		addSpins(player, 1)
-		player:SetAttribute(NEXT_FREE_SPIN_ATTRIBUTE, 0)
+		setNextFreeSpinPlaytimeSeconds(player, 0)
 		return true
 	end
 
-	local now = os.time()
-	local nextFreeSpinUnix = getNextFreeSpinUnix(player)
-	local hasInitialized = player:GetAttribute(INITIALIZED_ATTRIBUTE) == true
-	if not hasInitialized then
+	if player:GetAttribute(INITIALIZED_ATTRIBUTE) ~= true then
 		player:SetAttribute(INITIALIZED_ATTRIBUTE, true)
-		addSpins(player, 1)
-		player:SetAttribute(NEXT_FREE_SPIN_ATTRIBUTE, 0)
-		return true
+		if getNumberAttribute(player, LEGACY_NEXT_FREE_SPIN_UNIX_ATTRIBUTE, 0) <= 0 then
+			addSpins(player, 1)
+			return true
+		end
+		setNextFreeSpinPlaytimeSeconds(player, getTotalPlaytimeSeconds(player) + FREE_SPIN_PLAYTIME_SECONDS)
 	end
 
-	if nextFreeSpinUnix > 0 and now >= nextFreeSpinUnix then
-		addSpins(player, 1)
-		player:SetAttribute(NEXT_FREE_SPIN_ATTRIBUTE, now + FREE_SPIN_COOLDOWN_SECONDS)
-		return true
-	end
-
-	return false
+	return tryGrantFreeSpinIfDue(player, true)
 end
 
 local function chooseReward(): SpinWheelConfig.RewardDefinition
@@ -291,7 +314,7 @@ local function restorePendingSpin(player: Player): boolean
 	end
 
 	setSpinCount(player, pending.previousSpinCount)
-	player:SetAttribute(NEXT_FREE_SPIN_ATTRIBUTE, pending.previousNextFreeSpinUnix)
+	setNextFreeSpinPlaytimeSeconds(player, pending.previousNextFreeSpinPlaytimeSeconds)
 	pendingSpins[player] = nil
 	return true
 end
@@ -327,14 +350,16 @@ local function handleSpinRequest(player: Player)
 	end
 
 	local previousSpinCount = getSpinCount(player)
-	local previousNextFreeSpinUnix = getNextFreeSpinUnix(player)
+	local previousNextFreeSpinPlaytimeSeconds = getNextFreeSpinPlaytimeSeconds(player)
 	setSpinCount(player, previousSpinCount - 1)
-	local nextFreeSpinUnix = getNextFreeSpinUnix(player)
 	if isStudioFreeSpinDebugEnabled() and getSpinCount(player) <= 0 then
 		addSpins(player, 1)
-		player:SetAttribute(NEXT_FREE_SPIN_ATTRIBUTE, 0)
-	elseif nextFreeSpinUnix <= os.time() then
-		player:SetAttribute(NEXT_FREE_SPIN_ATTRIBUTE, os.time() + FREE_SPIN_COOLDOWN_SECONDS)
+		setNextFreeSpinPlaytimeSeconds(player, 0)
+	elseif previousNextFreeSpinPlaytimeSeconds <= 0 then
+		setNextFreeSpinPlaytimeSeconds(
+			player,
+			getTotalPlaytimeSeconds(player) + FREE_SPIN_PLAYTIME_SECONDS
+		)
 	end
 
 	local reward = chooseReward()
@@ -343,7 +368,7 @@ local function handleSpinRequest(player: Player)
 		token = token,
 		reward = reward,
 		previousSpinCount = previousSpinCount,
-		previousNextFreeSpinUnix = previousNextFreeSpinUnix,
+		previousNextFreeSpinPlaytimeSeconds = previousNextFreeSpinPlaytimeSeconds,
 		startedAt = os.clock(),
 		expiresAt = os.clock() + PENDING_SPIN_TIMEOUT_SECONDS,
 		status = "Started",
@@ -411,6 +436,7 @@ local function handleSpinGrant(player: Player, token: any)
 	end
 
 	pendingSpins[player] = nil
+	tryGrantFreeSpinIfDue(player, false)
 	result.phase = "Granted"
 	result.token = token
 	result.remainingSpins = getSpinCount(player)
@@ -434,13 +460,7 @@ local function registerPurchaseCallbacks()
 			)
 			ProductServerService.SetProductCallback(
 				productId,
-				function(
-					player: Player,
-					_: number,
-					bought: boolean,
-					purchaseId: string?,
-					purchaseChannel: EnumItem?
-				)
+				function(player: Player, _: number, bought: boolean, purchaseId: string?, purchaseChannel: EnumItem?)
 					if not bought then
 						return
 					end
@@ -473,17 +493,44 @@ local function registerPurchaseCallbacks()
 end
 
 function SpinWheelService.OnPlayerAdded(player: Player)
-	if player:GetAttribute(INITIALIZED_ATTRIBUTE) ~= true then
-		player:SetAttribute(INITIALIZED_ATTRIBUTE, true)
-		if getSpinCount(player) <= 0 then
+	local existingSpins = getSpinCount(player)
+	local nextFreeSpinPlaytime = getNextFreeSpinPlaytimeSeconds(player)
+	local legacyNextFreeSpinUnix = math.max(
+		0,
+		math.floor(getNumberAttribute(player, LEGACY_NEXT_FREE_SPIN_UNIX_ATTRIBUTE, 0))
+	)
+	local wasInitialized = player:GetAttribute(INITIALIZED_ATTRIBUTE) == true
+
+	if nextFreeSpinPlaytime <= 0 then
+		if not wasInitialized and existingSpins <= 0 and legacyNextFreeSpinUnix <= 0 then
 			addSpins(player, 1)
+		elseif not wasInitialized or legacyNextFreeSpinUnix > 0 or existingSpins <= 0 then
+			setNextFreeSpinPlaytimeSeconds(
+				player,
+				getTotalPlaytimeSeconds(player) + FREE_SPIN_PLAYTIME_SECONDS
+			)
 		end
-		player:SetAttribute(NEXT_FREE_SPIN_ATTRIBUTE, 0)
 	end
+
+	player:SetAttribute(INITIALIZED_ATTRIBUTE, true)
+	player:SetAttribute(LEGACY_NEXT_FREE_SPIN_UNIX_ATTRIBUTE, 0)
+	local previousPlaytimeConnection = playtimeConnections[player]
+	if previousPlaytimeConnection then
+		previousPlaytimeConnection:Disconnect()
+	end
+	playtimeConnections[player] = player:GetAttributeChangedSignal(TOTAL_PLAYTIME_ATTRIBUTE):Connect(function()
+		tryGrantFreeSpinIfDue(player, false)
+	end)
+	tryGrantFreeSpinIfDue(player, false)
 	readReceiptHistory(player)
 end
 
 function SpinWheelService.CleanupPlayer(player: Player)
+	local playtimeConnection = playtimeConnections[player]
+	if playtimeConnection then
+		playtimeConnection:Disconnect()
+		playtimeConnections[player] = nil
+	end
 	if pendingSpins[player] then
 		restorePendingSpin(player)
 	end
@@ -509,10 +556,14 @@ function SpinWheelService.Shutdown()
 	for player in pairs(table.clone(pendingSpins)) do
 		restorePendingSpin(player)
 	end
+	for _, playtimeConnection in pairs(playtimeConnections) do
+		playtimeConnection:Disconnect()
+	end
 	serviceMaid:DoCleaning()
 	table.clear(requestInFlight)
 	table.clear(lastRequestTimes)
 	table.clear(processedReceipts)
+	table.clear(playtimeConnections)
 	table.clear(pendingSpins)
 	initialized = false
 end

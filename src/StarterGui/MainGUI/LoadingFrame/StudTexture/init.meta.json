@@ -8,10 +8,10 @@
     "BorderSizePixel": 0,
     "ClipsDescendants": true,
     "ImageContent": "rbxassetid://121692853485740",
-    "ImageTransparency": 0.9,
+    "ImageTransparency": 0.8,
     "Position": [[0.5, 0.0], [0.5, 0.0]],
     "ScaleType": "Tile",
     "Size": [[1.0, 0.0], [1.0, 0.0]],
-    "TileSize": [[0.0, 200.0], [0.0, 200.0]]
+    "TileSize": [[0.0, 150.0], [0.0, 150.0]]
   }
 }

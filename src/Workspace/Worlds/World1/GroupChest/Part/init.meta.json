@@ -4,7 +4,7 @@
     "Anchored": true,
     "BackSurface": "Studs",
     "BottomSurface": "Studs",
-    "CFrame": [-13.9097, 22.1991, 77.1974, 1, 0, 0, 0, -0.5, -0.866, 0, 0.866, -0.5],
+    "CFrame": [-13.9097, 18.685, 79.2263, 1, 0, 0, 0, -1, 0, 0, 0, -1],
     "Color": [239, 184, 56],
     "FrontSurface": "Studs",
     "LeftSurface": "Studs",

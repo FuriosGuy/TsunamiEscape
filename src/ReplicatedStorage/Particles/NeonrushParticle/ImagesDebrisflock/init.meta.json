@@ -1,0 +1,33 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/Debrisflock",
+  "properties": {
+    "Attributes": {
+      "EmitDelay": 0
+    },
+    "Color": [{
+        "color": [0.0, 0.7647, 1.0],
+        "time": 0.0
+      }, {
+        "color": [0.0, 0.7647, 1.0],
+        "time": 1.0
+      }],
+    "FlipbookMode": "OneShot",
+    "Lifetime": [3, 5],
+    "LightEmission": 1,
+    "Rate": 25,
+    "Rotation": [-360, 360],
+    "RotSpeed": [90, 90],
+    "Size": [{
+        "envelope": 1.0,
+        "time": 0.0,
+        "value": 4.0
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 2.0
+      }],
+    "Speed": [50, 50],
+    "Texture": "rbxassetid://18450596124"
+  }
+}

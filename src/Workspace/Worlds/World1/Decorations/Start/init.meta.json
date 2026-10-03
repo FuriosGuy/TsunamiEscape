@@ -3,10 +3,10 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [-24.0098, 31.75, -155.5056, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "CanCollide": false,
     "CanQuery": false,
     "CastShadow": false,
+    "CFrame": [-24.0098, 31.75, -155.5056, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Locked": true,
     "Material": "SmoothPlastic",
     "Size": [175.9805, 48.5, 0.0103],

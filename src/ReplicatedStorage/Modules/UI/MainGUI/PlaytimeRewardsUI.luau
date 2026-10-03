@@ -8,8 +8,10 @@ local PlayerHandler = require(Modules:WaitForChild("Shared"):WaitForChild("Playe
 local UIFolder = Modules:WaitForChild("UI")
 local VisualFunctions = require(UIFolder:WaitForChild("VisualFunctions"))
 local SharedFolder = Modules:WaitForChild("Shared")
+local NumberFormatting = require(SharedFolder:WaitForChild("NumberFormatting"))
 local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Client"))
 local PlaytimeRewardsConfig = require(Modules:WaitForChild("Shared"):WaitForChild("PlaytimeRewardsConfig"))
+local ColorConfig = require(Modules:WaitForChild("Config"):WaitForChild("ColorConfig"))
 
 local PlaytimeRewardsUI = {}
 PlaytimeRewardsUI.__index = PlaytimeRewardsUI
@@ -19,9 +21,7 @@ local PLAYTIME_ELAPSED_ATTRIBUTE = "PlaytimeRewardElapsed"
 local PLAYTIME_CLAIMED_ATTRIBUTE = "PlaytimeRewardsClaimed"
 local COUNTDOWN_UPDATE_INTERVAL = 0.2
 local COMPACT_NUMBER_THRESHOLD_LENGTH = 20
-local READY_TEXT_COLOR = Color3.fromRGB(0, 255, 0)
-local READY_GRADIENT_TOP = Color3.fromRGB(255, 255, 255)
-local READY_GRADIENT_BOTTOM = Color3.fromRGB(0, 130, 15)
+local READY_TEXT_STYLE = ColorConfig.UI.PlaytimeRewards.ReadyTextStyle
 local playtimeConfig = if CoreConfig.clientDebug and CoreConfig.clientDebug.playtimeRewards
 	then CoreConfig.clientDebug.playtimeRewards
 	else nil
@@ -56,69 +56,11 @@ type ControllerOptions = {
 }
 
 local function formatWithCommasOnly(value: number): string
-	local rounded = math.round(value)
-	local formatted = tostring(rounded)
-	local count = 0
-
-	repeat
-		local updated
-		updated, count = string.gsub(formatted, "^(-?%d+)(%d%d%d)", "%1,%2")
-		formatted = updated
-	until count == 0
-
-	return formatted
+	return NumberFormatting.FormatWithCommas(value)
 end
 
 local function formatCompactNumber(value: number): string
-	local suffixes = {
-		"",
-		"K",
-		"M",
-		"B",
-		"T",
-		"Qd",
-		"Qi",
-		"Sx",
-		"Sp",
-		"Oc",
-		"No",
-		"Dc",
-		"Ud",
-		"Dd",
-		"Td",
-		"Qad",
-		"Qid",
-		"Sxd",
-		"Spd",
-	}
-	local magnitude = math.abs(value)
-	local suffixIndex = 1
-	local compactValue = value
-
-	while math.abs(compactValue) >= 1000 and suffixIndex < #suffixes do
-		compactValue /= 1000
-		suffixIndex += 1
-	end
-
-	if suffixIndex == 1 then
-		return formatWithCommasOnly(value)
-	end
-
-	if magnitude >= 1000 then
-		if math.abs(compactValue) >= 100 then
-			return string.format("%.0f%s", compactValue, suffixes[suffixIndex])
-		elseif math.abs(compactValue) >= 10 then
-			local compactText = string.format("%.1f%s", compactValue, suffixes[suffixIndex])
-			compactText = string.gsub(compactText, "%.0", "")
-			return compactText
-		end
-		local compactText = string.format("%.2f%s", compactValue, suffixes[suffixIndex])
-		compactText = string.gsub(compactText, "%.00", "")
-		compactText = string.gsub(compactText, "(%..-)0", "%1")
-		return compactText
-	end
-
-	return formatWithCommasOnly(value)
+	return NumberFormatting.FormatCompactNumber(value)
 end
 
 local function formatNumber(value: number): string
@@ -513,7 +455,7 @@ function PlaytimeRewardsUI:ApplyLockedState(entry: RewardEntry, remainingSeconds
 	else
 		entry.countdownLabel.Text = formatCountdown(remainingSeconds)
 	end
-	entry.countdownLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	entry.countdownLabel.TextColor3 = ColorConfig.Colors.White.Color
 	if entry.textGradient then
 		entry.textGradient.Enabled = false
 	end
@@ -533,14 +475,11 @@ function PlaytimeRewardsUI:ApplyReadyState(entry: RewardEntry)
 	entry.root.BackgroundColor3 = entry.baseBackgroundColor
 	entry.root.Interactable = true
 	entry.countdownLabel.Text = "CLAIM"
-	entry.countdownLabel.TextColor3 = READY_TEXT_COLOR
+	entry.countdownLabel.TextColor3 = READY_TEXT_STYLE.TextColor
 	if entry.textGradient then
 		entry.textGradient.Enabled = true
 		entry.textGradient.Rotation = 90
-		entry.textGradient.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, READY_GRADIENT_TOP),
-			ColorSequenceKeypoint.new(1, READY_GRADIENT_BOTTOM),
-		})
+		entry.textGradient.Color = READY_TEXT_STYLE.Gradient
 	end
 	entry.rewardLabel.Visible = false
 	entry.rotateImage.Image = getTierIconImage(entry.tier)
@@ -558,14 +497,11 @@ function PlaytimeRewardsUI:ApplyClaimingState(entry: RewardEntry)
 	entry.root.BackgroundColor3 = entry.baseBackgroundColor
 	entry.root.Interactable = false
 	entry.countdownLabel.Text = "CLAIMING..."
-	entry.countdownLabel.TextColor3 = READY_TEXT_COLOR
+	entry.countdownLabel.TextColor3 = READY_TEXT_STYLE.TextColor
 	if entry.textGradient then
 		entry.textGradient.Enabled = true
 		entry.textGradient.Rotation = 90
-		entry.textGradient.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, READY_GRADIENT_TOP),
-			ColorSequenceKeypoint.new(1, READY_GRADIENT_BOTTOM),
-		})
+		entry.textGradient.Color = READY_TEXT_STYLE.Gradient
 	end
 	entry.rewardLabel.Visible = false
 	entry.rotateImage.Image = getTierIconImage(entry.tier)
@@ -583,7 +519,7 @@ function PlaytimeRewardsUI:ApplyClaimedState(entry: RewardEntry)
 	entry.root.BackgroundColor3 = entry.claimedBackgroundColor
 	entry.root.Interactable = false
 	entry.countdownLabel.Text = "CLAIMED"
-	entry.countdownLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	entry.countdownLabel.TextColor3 = ColorConfig.Colors.White.Color
 	if entry.textGradient then
 		entry.textGradient.Enabled = false
 	end
@@ -624,6 +560,14 @@ function PlaytimeRewardsUI:Refresh()
 	local elapsedAttribute = self.player:GetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE)
 	local elapsedSeconds = if typeof(elapsedAttribute) == "number" then elapsedAttribute else 0
 	local claimedSet = parseClaimedTiers(self.player:GetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE))
+	local isFreshCycle = next(claimedSet) == nil and elapsedSeconds <= 0
+	if isFreshCycle then
+		-- The server clears both attributes after the final cycle claim. Clear
+		-- any local pending state immediately so the new cycle is responsive.
+		for _, entry in pairs(self.entries) do
+			entry.inFlight = false
+		end
+	end
 	local expectedTierIndex = if DEBUG_SEQUENTIAL_CLAIM_MODE then getFirstUnclaimedTierIndex(claimedSet) else nil
 	local claimableCount = 0
 

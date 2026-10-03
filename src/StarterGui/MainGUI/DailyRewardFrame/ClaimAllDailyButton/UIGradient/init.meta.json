@@ -2,11 +2,11 @@
   "className": "UIGradient",
   "properties": {
     "Color": [{
-        "time": 0.0,
-        "color": [1.0, 1.0, 1.0]
+        "color": [1.0, 1.0, 1.0],
+        "time": 0.0
       }, {
-        "time": 1.0,
-        "color": [0.2902, 0.0118, 1.0]
+        "color": [0.2902, 0.0118, 1.0],
+        "time": 1.0
       }],
     "Offset": [0, 0.1],
     "Rotation": 90

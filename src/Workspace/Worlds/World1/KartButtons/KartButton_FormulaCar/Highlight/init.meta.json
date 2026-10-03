@@ -7,7 +7,6 @@
     "CanQuery": false,
     "CFrame": [-77.4869, 12.2669, -101.0001, 0, 0, 1, 1, 0, 0, 0, 1, 0],
     "Color": [213, 115, 61],
-    "Locked": true,
     "Material": "Neon",
     "Shape": "Cylinder",
     "Size": [4.7095, 12.1892, 13.2973],

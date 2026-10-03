@@ -1,0 +1,12 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-32.2044, 9.1394, 49.3652, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [153, 154, 159],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Stud",
+    "Size": [1.1394, 1.1394, 1.2692]
+  }
+}

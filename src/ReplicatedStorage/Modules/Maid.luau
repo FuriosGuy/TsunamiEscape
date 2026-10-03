@@ -43,6 +43,14 @@ function Maid.new()
 	}, Maid)
 end
 
+local function cancelThread(thread)
+	if coroutine.status(thread) == "dead" then
+		return
+	end
+
+	pcall(task.cancel, thread)
+end
+
 --[=[
 	Returns true if the class is a maid, and false otherwise.
 
@@ -118,7 +126,7 @@ function Maid:__newindex(index, newTask)
 		if type(oldTask) == "function" then
 			oldTask()
 		elseif type(oldTask) == "thread" then
-			task.cancel(oldTask)
+			cancelThread(oldTask)
 		elseif typeof(oldTask) == "RBXScriptConnection" then
 			oldTask:Disconnect()
 		elseif oldTask.Destroy then
@@ -223,7 +231,7 @@ function Maid:DoCleaning()
 		if type(job) == "function" then
 			job()
 		elseif type(job) == "thread" then
-			task.cancel(job)
+			cancelThread(job)
 		elseif typeof(job) == "RBXScriptConnection" then
 			job:Disconnect()
 		elseif job.Destroy then

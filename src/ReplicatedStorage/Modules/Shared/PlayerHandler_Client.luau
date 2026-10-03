@@ -16,6 +16,9 @@ PlayerHandler.MOVEMENT_CONFIG = PlayerDataConfig.MOVEMENT_CONFIG
 
 local DEFAULT_PLAYER_SPEED = PlayerDataConfig.DEFAULT_PLAYER_SPEED
 local DEFAULT_MAX_PLAYER_SPEED = PlayerDataConfig.DEFAULT_MAX_PLAYER_SPEED
+local PREMIUM_MULTIPLIER = if typeof(PlayerDataConfig.PREMIUM_MULTIPLIER) == "number"
+	then math.max(1, PlayerDataConfig.PREMIUM_MULTIPLIER)
+	else 1.25
 
 local function getNumericAttribute(player: Player, attributeName: string, fallback: number): number
 	local value = player:GetAttribute(attributeName)
@@ -24,6 +27,14 @@ local function getNumericAttribute(player: Player, attributeName: string, fallba
 	end
 
 	return fallback
+end
+
+local function getPremiumMultiplier(player: Player): number
+	return if player.MembershipType == Enum.MembershipType.Premium then PREMIUM_MULTIPLIER else 1
+end
+
+local function combineWinMultipliers(winMultiplier: number, premiumMultiplier: number): number
+	return 1 + math.max(0, winMultiplier - 1) + math.max(0, premiumMultiplier - 1)
 end
 
 local function parseOwned(value: any): { [string]: boolean }
@@ -113,7 +124,8 @@ function PlayerHandler.CalculatePlaytimeWinsAward(player: Player, amount: number
 	local miscMultiplier = getNumericAttribute(player, "Misc_XPSpeedMultiplier", 1)
 	local devMultiplier = getNumericAttribute(player, "DevProduct_XPSpeedMultiplier", 1)
 	local reducedDevMultiplier = 1 + math.max(0, devMultiplier - 1) * 0.1
-	return math.max(0, math.round(amount * rebirthMultiplier * winMultiplier * miscMultiplier * reducedDevMultiplier))
+	local combinedWinMultiplier = combineWinMultipliers(winMultiplier, getPremiumMultiplier(player))
+	return math.max(0, math.round(amount * rebirthMultiplier * combinedWinMultiplier * miscMultiplier * reducedDevMultiplier))
 end
 
 function PlayerHandler.GetNextRebirthStats(player: Player): { NextMaxLevel: number, NextMultiplier: number }

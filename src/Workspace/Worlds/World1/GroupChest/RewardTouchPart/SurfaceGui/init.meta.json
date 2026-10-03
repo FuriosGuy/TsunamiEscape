@@ -2,7 +2,7 @@
   "className": "SurfaceGui",
   "properties": {
     "ClipsDescendants": true,
-    "Face": "Left",
+    "Face": "Back",
     "MaxDistance": 1000,
     "PixelsPerStud": 50.0006,
     "SizingMode": "PixelsPerStud",

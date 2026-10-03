@@ -2,8 +2,8 @@
   "className": "Model",
   "properties": {
     "Attributes": {
-      "EventName": "Bloodmoon",
-      "DisableClientCulling": true
+      "DisableClientCulling": true,
+      "EventName": "Bloodmoon"
     }
   }
 }

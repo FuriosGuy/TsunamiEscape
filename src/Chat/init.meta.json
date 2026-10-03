@@ -1,7 +1,7 @@
 {
   "className": "Chat",
+  "keepUnknowns": true,
   "properties": {
     "BubbleChatEnabled": true
-  },
-  "keepUnknowns": true
+  }
 }

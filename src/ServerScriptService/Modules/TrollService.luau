@@ -1,13 +1,12 @@
---!strict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Maid = require(Modules:WaitForChild("Maid"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 
 local TrollService = {}
 

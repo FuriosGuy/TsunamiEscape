@@ -1,5 +1,3 @@
---!strict
-
 local AUDIT_INTERVAL_SECONDS = 10
 local SUMMARY_INTERVAL_SECONDS = 5
 local MODULE_NAME = "UISizeAdjuster"
@@ -25,7 +23,7 @@ local playerGui = player:WaitForChild("PlayerGui", 100)
 
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
 
 type TextObject = TextLabel | TextButton | TextBox
 type TileObject = ImageLabel | ImageButton
@@ -57,6 +55,30 @@ local coverageCounters: CoverageCounters = {
 	skippedTotal = 0,
 	skipByReason = {},
 }
+
+local function clearTrackedInstance(instance: Instance)
+	if instance:IsA("UIStroke") then
+		screenStrokes[instance] = nil
+	elseif instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+		screenTexts[instance] = nil
+	elseif instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+		screenTiles[instance] = nil
+	elseif instance:IsA("UITextSizeConstraint") then
+		screenTextConstraints[instance] = nil
+	elseif instance:IsA("UIPadding") then
+		screenPaddings[instance] = nil
+	elseif instance:IsA("UISizeConstraint") then
+		screenSizeConstraints[instance] = nil
+	elseif instance:IsA("UICorner") then
+		screenCorners[instance] = nil
+	end
+end
+
+local function clearTrackedDescendants(root: Instance)
+	for _, descendant in root:GetDescendants() do
+		clearTrackedInstance(descendant)
+	end
+end
 
 local uiAdjusterConfig = CoreConfig.uiAdjuster or {}
 local REFERENCE_VIEWPORT = if typeof(uiAdjusterConfig.referenceViewport) == "Vector2"
@@ -251,7 +273,11 @@ local function tagScreenGuiTree(screenGui: ScreenGui)
 	screenGuiMaid:GiveTask(screenGui.DescendantAdded:Connect(function(descendant)
 		tryTagEligible(descendant)
 	end))
+	screenGuiMaid:GiveTask(screenGui.DescendantRemoving:Connect(function(descendant)
+		clearTrackedInstance(descendant)
+	end))
 	screenGuiMaid:GiveTask(screenGui.Destroying:Connect(function()
+		clearTrackedDescendants(screenGui)
 		local maid = screenGuiMaids[screenGui]
 		if maid then
 			maid:DoCleaning()
@@ -263,6 +289,7 @@ local function tagScreenGuiTree(screenGui: ScreenGui)
 			return
 		end
 
+		clearTrackedDescendants(screenGui)
 		local maid = screenGuiMaids[screenGui]
 		if maid then
 			maid:DoCleaning()
@@ -330,14 +357,8 @@ local function updateScreenGuiStrokesAndTextSize()
 			screenSizeConstraints[sizeConstraint] = nil
 			addSkip("destroyed_before_scale")
 		else
-			sizeConstraint.MinSize = Vector2.new(
-				originalValues.minSize.X * ratio,
-				originalValues.minSize.Y * ratio
-			)
-			sizeConstraint.MaxSize = Vector2.new(
-				originalValues.maxSize.X * ratio,
-				originalValues.maxSize.Y * ratio
-			)
+			sizeConstraint.MinSize = Vector2.new(originalValues.minSize.X * ratio, originalValues.minSize.Y * ratio)
+			sizeConstraint.MaxSize = Vector2.new(originalValues.maxSize.X * ratio, originalValues.maxSize.Y * ratio)
 		end
 	end
 
@@ -357,7 +378,8 @@ local function bindToCameraViewport(camera: Camera)
 		cameraViewportConnection = nil
 	end
 
-	cameraViewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScreenGuiStrokesAndTextSize)
+	cameraViewportConnection =
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScreenGuiStrokesAndTextSize)
 	uiStrokeAdjusterMaid:GiveTask(cameraViewportConnection)
 end
 
@@ -506,25 +528,23 @@ uiStrokeAdjusterMaid:GiveTask(CollectionService:GetInstanceAddedSignal(TEXT_TAG)
 	addScaled()
 end))
 
-uiStrokeAdjusterMaid:GiveTask(
-	CollectionService:GetInstanceAddedSignal(TILE_TAG):Connect(function(instance: Instance)
-		if not (instance:IsA("ImageLabel") or instance:IsA("ImageButton")) then
-			addSkip("tile_wrong_class")
-			return
-		end
+uiStrokeAdjusterMaid:GiveTask(CollectionService:GetInstanceAddedSignal(TILE_TAG):Connect(function(instance: Instance)
+	if not (instance:IsA("ImageLabel") or instance:IsA("ImageButton")) then
+		addSkip("tile_wrong_class")
+		return
+	end
 
-		local imageObject: TileObject = instance
-		if imageObject.ScaleType ~= Enum.ScaleType.Tile then
-			addSkip("image_not_tile")
-			return
-		end
+	local imageObject: TileObject = instance
+	if imageObject.ScaleType ~= Enum.ScaleType.Tile then
+		addSkip("image_not_tile")
+		return
+	end
 
-		local originalTileSize = getOriginalTileSize(imageObject)
-		screenTiles[imageObject] = originalTileSize
-		imageObject.TileSize = makeTileSizeSafe(originalTileSize, getScreenRatio())
-		addScaled()
-	end)
-)
+	local originalTileSize = getOriginalTileSize(imageObject)
+	screenTiles[imageObject] = originalTileSize
+	imageObject.TileSize = makeTileSizeSafe(originalTileSize, getScreenRatio())
+	addScaled()
+end))
 
 uiStrokeAdjusterMaid:GiveTask(
 	CollectionService:GetInstanceAddedSignal(TEXT_CONSTRAINT_TAG):Connect(function(instance: Instance)
@@ -546,27 +566,25 @@ uiStrokeAdjusterMaid:GiveTask(
 	end)
 )
 
-uiStrokeAdjusterMaid:GiveTask(
-	CollectionService:GetInstanceAddedSignal(PADDING_TAG):Connect(function(instance: Instance)
-		if not instance:IsA("UIPadding") then
-			addSkip("padding_wrong_class")
-			return
-		end
+uiStrokeAdjusterMaid:GiveTask(CollectionService:GetInstanceAddedSignal(PADDING_TAG):Connect(function(instance: Instance)
+	if not instance:IsA("UIPadding") then
+		addSkip("padding_wrong_class")
+		return
+	end
 
-		screenPaddings[instance] = {
-			left = instance.PaddingLeft,
-			right = instance.PaddingRight,
-			top = instance.PaddingTop,
-			bottom = instance.PaddingBottom,
-		}
-		local ratio = getScreenRatio()
-		instance.PaddingLeft = UDim.new(instance.PaddingLeft.Scale, instance.PaddingLeft.Offset * ratio)
-		instance.PaddingRight = UDim.new(instance.PaddingRight.Scale, instance.PaddingRight.Offset * ratio)
-		instance.PaddingTop = UDim.new(instance.PaddingTop.Scale, instance.PaddingTop.Offset * ratio)
-		instance.PaddingBottom = UDim.new(instance.PaddingBottom.Scale, instance.PaddingBottom.Offset * ratio)
-		addScaled()
-	end)
-)
+	screenPaddings[instance] = {
+		left = instance.PaddingLeft,
+		right = instance.PaddingRight,
+		top = instance.PaddingTop,
+		bottom = instance.PaddingBottom,
+	}
+	local ratio = getScreenRatio()
+	instance.PaddingLeft = UDim.new(instance.PaddingLeft.Scale, instance.PaddingLeft.Offset * ratio)
+	instance.PaddingRight = UDim.new(instance.PaddingRight.Scale, instance.PaddingRight.Offset * ratio)
+	instance.PaddingTop = UDim.new(instance.PaddingTop.Scale, instance.PaddingTop.Offset * ratio)
+	instance.PaddingBottom = UDim.new(instance.PaddingBottom.Scale, instance.PaddingBottom.Offset * ratio)
+	addScaled()
+end))
 
 uiStrokeAdjusterMaid:GiveTask(
 	CollectionService:GetInstanceAddedSignal(SIZE_CONSTRAINT_TAG):Connect(function(instance: Instance)
@@ -586,19 +604,17 @@ uiStrokeAdjusterMaid:GiveTask(
 	end)
 )
 
-uiStrokeAdjusterMaid:GiveTask(
-	CollectionService:GetInstanceAddedSignal(CORNER_TAG):Connect(function(instance: Instance)
-		if not instance:IsA("UICorner") then
-			addSkip("corner_wrong_class")
-			return
-		end
+uiStrokeAdjusterMaid:GiveTask(CollectionService:GetInstanceAddedSignal(CORNER_TAG):Connect(function(instance: Instance)
+	if not instance:IsA("UICorner") then
+		addSkip("corner_wrong_class")
+		return
+	end
 
-		screenCorners[instance] = instance.CornerRadius
-		local cornerRadius = instance.CornerRadius
-		instance.CornerRadius = UDim.new(cornerRadius.Scale, cornerRadius.Offset * getScreenRatio())
-		addScaled()
-	end)
-)
+	screenCorners[instance] = instance.CornerRadius
+	local cornerRadius = instance.CornerRadius
+	instance.CornerRadius = UDim.new(cornerRadius.Scale, cornerRadius.Offset * getScreenRatio())
+	addScaled()
+end))
 
 uiStrokeAdjusterMaid:GiveTask(workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(refreshCameraBinding))
 refreshCameraBinding()
@@ -631,9 +647,17 @@ local function cleanupAdjuster()
 
 	scriptAlive = false
 	for screenGui, screenGuiMaid in pairs(screenGuiMaids) do
+		clearTrackedDescendants(screenGui)
 		screenGuiMaid:DoCleaning()
 		screenGuiMaids[screenGui] = nil
 	end
+	table.clear(screenStrokes)
+	table.clear(screenTexts)
+	table.clear(screenTiles)
+	table.clear(screenTextConstraints)
+	table.clear(screenPaddings)
+	table.clear(screenSizeConstraints)
+	table.clear(screenCorners)
 	uiStrokeAdjusterMaid:DoCleaning()
 end
 

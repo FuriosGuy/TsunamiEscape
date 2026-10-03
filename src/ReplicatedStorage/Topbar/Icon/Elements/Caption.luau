@@ -1,5 +1,7 @@
 local CAPTION_COLOR = Color3.fromRGB(39, 41, 48)
 local TEXT_SIZE = 15
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 return function(icon)
 
 	-- Credit to lolmansReturn and Canary Software for
@@ -185,10 +187,8 @@ return function(icon)
 	end
 	caption:GetAttributeChangedSignal("CaptionText"):Connect(updateHotkey)
 
-	local EASING_STYLE = Enum.EasingStyle.Quad
-	local TWEEN_SPEED = 0.2
-	local TWEEN_INFO_IN = TweenInfo.new(TWEEN_SPEED, EASING_STYLE, Enum.EasingDirection.In)
-	local TWEEN_INFO_OUT = TweenInfo.new(TWEEN_SPEED, EASING_STYLE, Enum.EasingDirection.Out)
+	local TWEEN_INFO_IN = TweenConfig.TopbarCaptionIn
+	local TWEEN_INFO_OUT = TweenConfig.TopbarCaptionOut
 	local TweenService = game:GetService("TweenService")
 	local RunService = game:GetService("RunService")
 	local function getCaptionPosition(customEnabled)

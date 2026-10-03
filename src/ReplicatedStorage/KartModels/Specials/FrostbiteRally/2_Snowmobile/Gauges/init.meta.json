@@ -1,0 +1,17 @@
+{
+  "className": "Part",
+  "properties": {
+    "BackSurface": "SmoothNoOutlines",
+    "BottomSurface": "SmoothNoOutlines",
+    "CFrame": [-24.1498, 12.0417, -49.1586, -0.9995, -0.0284, -0.0137, -0.0315, 0.9059, 0.4223, 0.0004, 0.4225, -0.9063],
+    "Color": [151, 0, 0],
+    "EnableFluidForces": false,
+    "FrontSurface": "SmoothNoOutlines",
+    "LeftSurface": "SmoothNoOutlines",
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "RightSurface": "SmoothNoOutlines",
+    "Size": [1.0147, 0.289, 0.4676],
+    "TopSurface": "SmoothNoOutlines"
+  }
+}

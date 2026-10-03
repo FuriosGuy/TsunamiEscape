@@ -1,5 +1,3 @@
---!strict
-
 local SpinWheelConfig = {}
 
 export type RewardId = "SpeedSmall" | "SpeedLarge" | "Wins" | "Rebirth" | "FlameTrail" | "FlameKart"

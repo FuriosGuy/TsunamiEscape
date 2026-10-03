@@ -6,13 +6,13 @@
     "CanQuery": false,
     "CanTouch": false,
     "CastShadow": false,
-    "CFrame": [-4222.7012, 92.8423, -4898.9429, -0.6918, 0, -0.7221, 0, 1, 0, 0.7221, 0, -0.6918],
+    "CFrame": [-4214.6113, 74.9407, -3980.5061, -0.5931, 0, -0.8052, 0, 1, 0, 0.8052, 0, -0.5931],
     "Color": [44, 101, 29],
     "InitialSize": [42.705, 46.0162, 43.705],
     "Locked": true,
     "Material": "SmoothPlastic",
     "MaterialVariant": "GrassMeadow",
     "MeshContent": "rbxassetid://15964164709",
-    "Size": [29.3637, 41.1017, 28.0887]
+    "Size": [21.2767, 29.7818, 20.3527]
   }
 }

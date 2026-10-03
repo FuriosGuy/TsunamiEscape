@@ -1,0 +1,15 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "CFrame": [62.3845, 187.5838, 163.2861, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "CollisionGroup": "Brainrots",
+    "CollisionGroupId": -1,
+    "InitialSize": [817.0885, 1190.3369, 580.3599],
+    "Massless": true,
+    "MeshContent": "rbxassetid://137108822293648",
+    "PivotOffset": [0.0, -1.4081, -0.0001, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Size": [4.4598, 6.497, 3.1677],
+    "Tags": ["BrainrotSetup"],
+    "TextureContent": "rbxassetid://119074324981551"
+  }
+}

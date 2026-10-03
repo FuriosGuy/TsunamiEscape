@@ -1,6 +1,3 @@
 {
-  "className": "Model",
-  "properties": {
-    "LevelOfDetail": "Disabled"
-  }
+  "className": "Model"
 }

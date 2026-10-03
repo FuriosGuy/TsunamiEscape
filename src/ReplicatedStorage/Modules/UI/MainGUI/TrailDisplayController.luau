@@ -1,5 +1,3 @@
---!strict
-
 local TrailDisplayController = {}
 
 export type RefreshCallback = () -> ()

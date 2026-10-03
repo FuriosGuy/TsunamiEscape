@@ -1,10 +1,9 @@
---!strict
 local Players = game:GetService("Players")
 local SocialService = game:GetService("SocialService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
@@ -80,6 +79,7 @@ local rsvpInProgress = false
 local eventBoardConfig = if typeof(CoreConfig.eventBoard) == "table" then CoreConfig.eventBoard else {}
 local scheduleSelectedEventBoundaryRefresh: ((EventDictionary?) -> ())? = nil
 local lastThumbnailDiagnosticKey = ""
+local notifiedUpcomingEventIds: { [string]: boolean } = {}
 
 local function getCharacterRootPart(): BasePart?
 	local character = localPlayer.Character
@@ -595,10 +595,7 @@ local function logThumbnailDiagnostics(eventData: EventDictionary)
 		"EventBoard"
 	)
 	DebugModule.debugInfo(
-		"Event thumbnail field shapes | eventId="
-			.. eventId
-			.. " | fields="
-			.. getThumbnailFieldDiagnostics(eventData),
+		"Event thumbnail field shapes | eventId=" .. eventId .. " | fields=" .. getThumbnailFieldDiagnostics(eventData),
 		"EventBoard"
 	)
 
@@ -665,10 +662,7 @@ local function fetchEventById(eventId: string): (EventDictionary?, boolean)
 	end
 
 	if typeof(result) ~= "table" then
-		DebugModule.debugWarn(
-			"GetExperienceEventAsync returned no event table | eventId=" .. eventId,
-			"EventBoard"
-		)
+		DebugModule.debugWarn("GetExperienceEventAsync returned no event table | eventId=" .. eventId, "EventBoard")
 		return nil, true
 	end
 
@@ -726,10 +720,94 @@ local function applyBoardState(boardState: EventBoardGuiState)
 	end
 end
 
+local function maybeNotifyUpcomingEvent(): ()
+	local eventData = selectedEvent
+	if
+		localPlayer.Parent == nil
+		or localPlayer:GetAttribute("Data_Loaded") ~= true
+		or localPlayer:GetAttribute("TutorialCompleted") ~= true
+		or not isRsvpEligibleEvent(eventData)
+	then
+		return
+	end
+
+	local eventId = getEventId(eventData)
+	if eventId == "" or notifiedUpcomingEventIds[eventId] then
+		return
+	end
+
+	-- Mark event handled before any yielding work so refreshes and RSVP changes cannot duplicate it.
+	notifiedUpcomingEventIds[eventId] = true
+	if eventData.UserRsvpStatus == Enum.RsvpStatus.Going or eventData.UserRsvpStatus == "Going" then
+		DebugModule.debugInfo(
+			"Upcoming-event notification skipped; player already RSVP'd | eventId=" .. eventId,
+			"EventBoard"
+		)
+		return
+	end
+
+	local rawTitle = eventData.DisplayTitle or eventData.Title
+	local title = if typeof(rawTitle) == "string" and rawTitle ~= "" then rawTitle else "UPCOMING EVENT"
+	local message = "UPCOMING EVENT: " .. string.upper(title) .. "! RSVP AT THE EVENT BOARD."
+	local theme = VisualFunctions.NotificationThemes.Gold
+	scriptMaid:GiveSpawnTask(task.spawn(function()
+		for _ = 1, 50 do
+			if isCleanedUp or not isRunning or localPlayer.Parent == nil then
+				return
+			end
+			local currentEvent = selectedEvent
+			if
+				not isRsvpEligibleEvent(currentEvent)
+				or getEventId(currentEvent) ~= eventId
+				or currentEvent.UserRsvpStatus == Enum.RsvpStatus.Going
+				or currentEvent.UserRsvpStatus == "Going"
+			then
+				return
+			end
+
+			local notificationFrame = VisualFunctions.HUD.NotificationFrame
+			local notificationLabel = VisualFunctions.Labels.NotificationTextLabel
+			if
+				notificationFrame
+				and notificationFrame.Parent
+				and notificationLabel
+				and notificationLabel.Parent
+				and notificationLabel:IsDescendantOf(notificationFrame)
+			then
+				local notificationSuccess, notificationError = pcall(function()
+					VisualFunctions.ShowNotification(
+						message,
+						theme.textColor,
+						theme.gradientBottomColor,
+						"UpcomingEvent_" .. eventId
+					)
+				end)
+				if not notificationSuccess then
+					DebugModule.debugWarn(
+						"Upcoming-event notification failed | eventId="
+							.. eventId
+							.. " | error="
+							.. tostring(notificationError),
+						"EventBoard"
+					)
+				end
+				return
+			end
+
+			task.wait(0.1)
+		end
+		DebugModule.debugWarn(
+			"Upcoming-event notification UI was not ready | eventId=" .. eventId,
+			"EventBoard"
+		)
+	end))
+end
+
 local function applyAllBoards()
 	for _, boardState in ipairs(eventBoards) do
 		applyBoardState(boardState)
 	end
+	maybeNotifyUpcomingEvent()
 end
 
 local function normalizeEventTitle(value: any): string
@@ -859,12 +937,12 @@ local function enrichEventDetails(eventData: EventDictionary): EventDictionary
 	end)
 	if not success or typeof(result) ~= "table" then
 		if not success then
-			DebugModule.debugWarn("Failed to load event details for " .. eventId .. ": " .. tostring(result), "EventBoard")
-		else
 			DebugModule.debugWarn(
-				"Event detail response was nil or malformed | eventId=" .. eventId,
+				"Failed to load event details for " .. eventId .. ": " .. tostring(result),
 				"EventBoard"
 			)
+		else
+			DebugModule.debugWarn("Event detail response was nil or malformed | eventId=" .. eventId, "EventBoard")
 		end
 		return eventData
 	end
@@ -981,9 +1059,12 @@ local function refreshCurrentEvent(force: boolean?)
 			else
 				setSelectedEvent(nil)
 				startupFetchAttemptCount += 1
-				nextFetchTime = now + (if startupFetchAttemptCount <= EVENT_STARTUP_RETRY_COUNT
-					then EVENT_STARTUP_RETRY_INTERVAL
-					else EVENT_ERROR_RETRY_INTERVAL)
+				nextFetchTime = now
+					+ (
+						if startupFetchAttemptCount <= EVENT_STARTUP_RETRY_COUNT
+							then EVENT_STARTUP_RETRY_INTERVAL
+							else EVENT_ERROR_RETRY_INTERVAL
+					)
 			end
 		end
 		applyAllBoards()
@@ -1035,9 +1116,12 @@ local function refreshCurrentEvent(force: boolean?)
 		else
 			setSelectedEvent(nil)
 			startupFetchAttemptCount += 1
-			nextFetchTime = now + (if startupFetchAttemptCount <= EVENT_STARTUP_RETRY_COUNT
-				then EVENT_STARTUP_RETRY_INTERVAL
-				else EVENT_EMPTY_RETRY_INTERVAL)
+			nextFetchTime = now
+				+ (
+					if startupFetchAttemptCount <= EVENT_STARTUP_RETRY_COUNT
+						then EVENT_STARTUP_RETRY_INTERVAL
+						else EVENT_EMPTY_RETRY_INTERVAL
+				)
 		end
 	end
 
@@ -1066,8 +1150,7 @@ scheduleSelectedEventBoundaryRefresh = function(eventData: EventDictionary?)
 	local endTimestamp = getEventEndUnixTimestamp(eventData)
 	local nextBoundary = if startTimestamp and startTimestamp > nowTimestamp
 		then startTimestamp
-		elseif endTimestamp and endTimestamp > nowTimestamp
-		then endTimestamp
+		elseif endTimestamp and endTimestamp > nowTimestamp then endTimestamp
 		else nil
 	if not nextBoundary then
 		return
@@ -1109,7 +1192,8 @@ local function showRsvpNotification(eventId: string, rsvpStatus: any)
 		local notificationFrame = VisualFunctions.HUD.NotificationFrame
 		local notificationLabel = VisualFunctions.Labels.NotificationTextLabel
 
-		if notificationFrame
+		if
+			notificationFrame
 			and notificationFrame.Parent
 			and notificationLabel
 			and notificationLabel.Parent
@@ -1135,10 +1219,7 @@ local function showRsvpNotification(eventId: string, rsvpStatus: any)
 		task.wait(0.1)
 	end
 
-	DebugModule.debugWarn(
-		"RSVP succeeded but NotificationFrame was not ready | eventId=" .. eventId,
-		"EventBoard"
-	)
+	DebugModule.debugWarn("RSVP succeeded but NotificationFrame was not ready | eventId=" .. eventId, "EventBoard")
 end
 
 local function promptSelectedEvent(boardState: EventBoardGuiState)
@@ -1170,10 +1251,7 @@ local function promptSelectedEvent(boardState: EventBoardGuiState)
 
 	local now = os.clock()
 	if now - boardState.lastTouchTime < EVENT_TOUCH_DEBOUNCE then
-		DebugModule.debugInfo(
-			"RSVP ignored by debounce | board=" .. boardState.model:GetFullName(),
-			"EventBoard"
-		)
+		DebugModule.debugInfo("RSVP ignored by debounce | board=" .. boardState.model:GetFullName(), "EventBoard")
 		return
 	end
 
@@ -1192,7 +1270,7 @@ local function promptSelectedEvent(boardState: EventBoardGuiState)
 		"EventBoard"
 	)
 
-		scriptMaid:GiveSpawnTask(task.spawn(function()
+	scriptMaid:GiveSpawnTask(task.spawn(function()
 		local success, rsvpStatus = pcall(function()
 			return SocialService:PromptRsvpToEventAsync(eventId)
 		end)
@@ -1221,10 +1299,7 @@ local function promptSelectedEvent(boardState: EventBoardGuiState)
 			)
 		else
 			DebugModule.debugInfo(
-				"RSVP prompt closed without Going status | eventId="
-					.. eventId
-					.. " | status="
-					.. tostring(rsvpStatus),
+				"RSVP prompt closed without Going status | eventId=" .. eventId .. " | status=" .. tostring(rsvpStatus),
 				"EventBoard"
 			)
 		end
@@ -1338,10 +1413,7 @@ local function connectBoardTouch(boardState: EventBoardGuiState, touchPart: Base
 	)
 	boardMaid:GiveTask(rsvpPrompt.PromptShown:Connect(function(inputType: Enum.ProximityPromptInputType)
 		DebugModule.debugInfo(
-			"RSVP prompt shown | inputType="
-				.. tostring(inputType)
-				.. " | eventId="
-				.. getEventId(selectedEvent),
+			"RSVP prompt shown | inputType=" .. tostring(inputType) .. " | eventId=" .. getEventId(selectedEvent),
 			"EventBoard"
 		)
 	end))
@@ -1352,10 +1424,7 @@ local function connectBoardTouch(boardState: EventBoardGuiState, touchPart: Base
 		-- This is a LocalScript, so the prompt event is already local to this client.
 		-- Do not reject the trigger when a runtime omits the Player argument.
 		DebugModule.debugInfo(
-			"RSVP prompt triggered | path="
-				.. rsvpPrompt:GetFullName()
-				.. " | eventId="
-				.. getEventId(selectedEvent),
+			"RSVP prompt triggered | path=" .. rsvpPrompt:GetFullName() .. " | eventId=" .. getEventId(selectedEvent),
 			"EventBoard"
 		)
 		promptSelectedEvent(boardState)
@@ -1436,12 +1505,14 @@ local function registerBoard(boardModel: Model)
 		connectBoardTouch(boardState, boardState.touchPart, boardMaid)
 	end
 	boardMaid:GiveTask(boardModel.DescendantAdded:Connect(function(descendant)
-	if boardState.touchPart == nil and descendant.Name == "TouchPart" and descendant:IsA("BasePart") then
+		if boardState.touchPart == nil and descendant.Name == "TouchPart" and descendant:IsA("BasePart") then
 			connectBoardTouch(boardState, descendant, boardMaid)
 		end
-		if boardState.touchPart == nil
+		if
+			boardState.touchPart == nil
 			and (descendant.Name == "InteractionPart" or descendant.Name == "Thumbnail")
-			and descendant:IsA("BasePart") then
+			and descendant:IsA("BasePart")
+		then
 			connectBoardTouch(boardState, descendant, boardMaid)
 		end
 
@@ -1545,14 +1616,14 @@ local function scheduleBoardStartupScan()
 				return
 			end
 
-			DebugModule.debugInfo(
-				"Board startup rescan | attempt=" .. tostring(attempt),
-				"EventBoard"
-			)
+			DebugModule.debugInfo("Board startup rescan | attempt=" .. tostring(attempt), "EventBoard")
 			scanForBoards()
 		end
 	end))
 end
+
+scriptMaid:GiveTask(localPlayer:GetAttributeChangedSignal("Data_Loaded"):Connect(maybeNotifyUpcomingEvent))
+scriptMaid:GiveTask(localPlayer:GetAttributeChangedSignal("TutorialCompleted"):Connect(maybeNotifyUpcomingEvent))
 
 scanForBoards()
 DebugModule.debugInfo(
@@ -1628,6 +1699,7 @@ local function cleanupScript()
 	table.clear(registeredBoards)
 	table.clear(pendingBoards)
 	table.clear(unregisteringBoards)
+	table.clear(notifiedUpcomingEventIds)
 
 	scriptMaid:DoCleaning()
 end

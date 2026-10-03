@@ -1,6 +1,8 @@
---!strict
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ProductService = require(ReplicatedStorage.Modules.Shared:WaitForChild("ProductService_Client"))
 
 type MaidLike = {
 	GiveTask: (self: MaidLike, task: any) -> any,
@@ -12,9 +14,10 @@ export type BindContext = {
 	localPlayer: Player,
 	onXPGainAwarded: (amount: number) -> (),
 	onWinAwarded: (amount: number, source: string?) -> (),
+	onEventWinAwarded: (eventName: string, amount: number) -> (),
 	onVerifyRewardResult: (success: boolean, nextClaimUnix: number?) -> (),
 	onRebirthResult: () -> (),
-	onShowNotification: (message: string, themeName: string?, notificationStyle: string?) -> (),
+	onShowNotification: (message: string, themeName: string?, notificationStyle: string?, notificationCooldownEnd: number?) -> (),
 	onReturnToStageOffer: (shouldShow: boolean, stage: number?, duration: number?) -> (),
 	onOpenVerifyFrameRequested: () -> (),
 	onTriggerJumpscare: () -> (),
@@ -32,7 +35,7 @@ function RemoteBindings.Bind(context: BindContext)
 	local sessionMaid = context.sessionMaid
 
 	local winRemote = remotes:WaitForChild("WinButtonPressed") :: RemoteEvent
-	local bloodmoonWinRemote = remotes:WaitForChild("BloodmoonWinAwarded") :: RemoteEvent
+	local eventWinRemote = remotes:WaitForChild("EventWinAwarded") :: RemoteEvent
 	local xpRemote = remotes:WaitForChild("XPGainAwarded") :: RemoteEvent
 	local verifyResultRemote = remotes:WaitForChild("VerifyRewardResult") :: RemoteEvent
 	local rebirthResultRemote = remotes:WaitForChild("RebirthResult") :: RemoteEvent
@@ -43,8 +46,11 @@ function RemoteBindings.Bind(context: BindContext)
 
 	sessionMaid:GiveTask(xpRemote.OnClientEvent:Connect(context.onXPGainAwarded))
 	sessionMaid:GiveTask(winRemote.OnClientEvent:Connect(context.onWinAwarded))
-	sessionMaid:GiveTask(bloodmoonWinRemote.OnClientEvent:Connect(function(amount: number)
-		context.onWinAwarded(amount, "BloodmoonWin")
+	sessionMaid:GiveTask(eventWinRemote.OnClientEvent:Connect(function(eventName: string, amount: number)
+		if typeof(eventName) ~= "string" or typeof(amount) ~= "number" then
+			return
+		end
+		context.onEventWinAwarded(eventName, amount)
 	end))
 	sessionMaid:GiveTask(verifyResultRemote.OnClientEvent:Connect(context.onVerifyRewardResult))
 	sessionMaid:GiveTask(rebirthResultRemote.OnClientEvent:Connect(context.onRebirthResult))
@@ -60,6 +66,15 @@ function RemoteBindings.Bind(context: BindContext)
 	sessionMaid:GiveTask(MarketplaceService.PromptProductPurchaseFinished:Connect(function(_, productId, wasPurchased)
 		context.onPromptProductPurchaseFinished(productId, wasPurchased)
 	end))
+	sessionMaid:GiveTask(
+		ProductService.ConnectCreatorPurchaseFinished(
+			function(purchaseKind: string, productId: number, wasPurchased: boolean, _reason: string)
+				if purchaseKind == "Product" then
+					context.onPromptProductPurchaseFinished(productId, wasPurchased)
+				end
+			end
+		)
+	)
 	sessionMaid:GiveTask(MarketplaceService.PromptProductPurchaseFinished:Connect(function(_, productId, wasPurchased)
 		context.onPromptReturnToStageDeclined(productId, wasPurchased)
 	end))

@@ -1,0 +1,27 @@
+{
+  "className": "TextLabel",
+  "properties": {
+    "BackgroundColor3": [1, 1, 1],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "FontFace": {
+      "cachedFaceId": null,
+      "family": "rbxasset://fonts/families/FredokaOne.json",
+      "style": "Normal",
+      "weight": "Regular"
+    },
+    "Interactable": false,
+    "Position": [[0.0238, 0.0], [0.2305, 0.0]],
+    "RichText": true,
+    "Size": [[0.9635, 0.0], [0.4059, 0.0]],
+    "Text": "We could not load your saved data. Try rejoining first; resetting will create a new profile and cannot be undone.\n",
+    "TextColor3": [1, 1, 1],
+    "TextScaled": true,
+    "TextSize": 28,
+    "TextWrapped": true,
+    "TextXAlignment": "Left",
+    "TextYAlignment": "Top",
+    "ZIndex": 3
+  }
+}

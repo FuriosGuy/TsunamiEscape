@@ -1,5 +1,3 @@
---!strict
-
 local Players = game:GetService("Players")
 local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,9 +6,14 @@ local Workspace = game:GetService("Workspace")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
+local NotificationLayoutController = require(ReplicatedStorage.Modules.UI.MainGUI.NotificationLayoutController)
 
 local MinigameUI = {}
 MinigameUI.__index = MinigameUI
+
+type ProgressFrameVisibilityControllerLike = {
+	SetRaceParticipant: (self: ProgressFrameVisibilityControllerLike, isParticipant: boolean) -> (),
+}
 
 type MinigameUIObject = {
 	screenGui: ScreenGui,
@@ -44,11 +47,11 @@ type MinigameUIObject = {
 	countdownThread: thread?,
 	messageThread: thread?,
 	messageToken: number,
-	stageProgressHidden: boolean,
-	stageProgressVisibleBeforeRace: boolean?,
+	visibilityController: ProgressFrameVisibilityControllerLike?,
 	runtimeBound: boolean,
 	joinPending: boolean,
 	joinAttemptToken: number,
+	lastParticipant: boolean,
 	initialized: boolean,
 }
 
@@ -68,7 +71,10 @@ local function findMinigameWorld(): Instance?
 	return worldsFolder and worldsFolder:FindFirstChild("Minigame")
 end
 
-function MinigameUI.new(screenGui: ScreenGui): MinigameUIObject
+function MinigameUI.new(
+	screenGui: ScreenGui,
+	visibilityController: ProgressFrameVisibilityControllerLike?
+): MinigameUIObject
 	local root = screenGui:FindFirstChild("MinigameNotificationFrame")
 	local rootFrame = if root and root:IsA("Frame") then root else nil
 	local requiredPlayers = rootFrame and rootFrame:FindFirstChild("RequiredPlayers")
@@ -88,14 +94,22 @@ function MinigameUI.new(screenGui: ScreenGui): MinigameUIObject
 		screenGui = screenGui,
 		root = rootFrame,
 		requiredPlayersLabel = if requiredPlayers and requiredPlayers:IsA("TextLabel") then requiredPlayers else nil,
-		requiredPlayersOriginalVisible = if requiredPlayers and requiredPlayers:IsA("GuiObject") then requiredPlayers.Visible else nil,
+		requiredPlayersOriginalVisible = if requiredPlayers and requiredPlayers:IsA("GuiObject")
+			then requiredPlayers.Visible
+			else nil,
 		startingLabel = if startingLabel and startingLabel:IsA("TextLabel") then startingLabel else nil,
 		messageLabel = if messageLabel and messageLabel:IsA("TextLabel") then messageLabel else nil,
 		joinFrame = if joinFrame and joinFrame:IsA("GuiObject") then joinFrame else nil,
 		joinButton = if joinButton and joinButton:IsA("TextButton") then joinButton else nil,
-		stageProgressFrame = if stageProgressFrame and stageProgressFrame:IsA("GuiObject") then stageProgressFrame else nil,
-		startingLabelOriginalVisible = if startingLabel and startingLabel:IsA("GuiObject") then startingLabel.Visible else nil,
-		messageLabelOriginalVisible = if messageLabel and messageLabel:IsA("GuiObject") then messageLabel.Visible else nil,
+		stageProgressFrame = if stageProgressFrame and stageProgressFrame:IsA("GuiObject")
+			then stageProgressFrame
+			else nil,
+		startingLabelOriginalVisible = if startingLabel and startingLabel:IsA("GuiObject")
+			then startingLabel.Visible
+			else nil,
+		messageLabelOriginalVisible = if messageLabel and messageLabel:IsA("GuiObject")
+			then messageLabel.Visible
+			else nil,
 		startSurfaceGui = nil,
 		countdownSurfaceGui = nil,
 		countdownSurfaceLabel = nil,
@@ -116,11 +130,11 @@ function MinigameUI.new(screenGui: ScreenGui): MinigameUIObject
 		countdownThread = nil,
 		messageThread = nil,
 		messageToken = 0,
-		stageProgressHidden = false,
-		stageProgressVisibleBeforeRace = nil,
+		visibilityController = visibilityController,
 		runtimeBound = false,
 		joinPending = false,
 		joinAttemptToken = 0,
+		lastParticipant = false,
 		initialized = false,
 	}, MinigameUI)
 end
@@ -196,9 +210,6 @@ function MinigameUI:setMessage(message: string, duration: number)
 
 	self:cancelMessage()
 	self.messageLabel.Text = message
-	if self.root then
-		self.root.Visible = true
-	end
 	local token = self.messageToken
 	self.messageThread = task.spawn(function()
 		task.wait(duration)
@@ -208,6 +219,8 @@ function MinigameUI:setMessage(message: string, duration: number)
 		self.messageThread = nil
 		self:refresh()
 	end)
+	-- Reconcile parent and child visibility after message state becomes active.
+	self:refresh(false)
 end
 
 function MinigameUI:updateCountdownLoop()
@@ -222,7 +235,11 @@ function MinigameUI:updateCountdownLoop()
 	end
 
 	self.countdownThread = task.spawn(function()
-		while self.initialized and self.world and (self.world:GetAttribute("RaceState") == "Grace" or self.world:GetAttribute("RaceState") == "Countdown") do
+		while
+			self.initialized
+			and self.world
+			and (self.world:GetAttribute("RaceState") == "Grace" or self.world:GetAttribute("RaceState") == "Countdown")
+		do
 			local state = self.world:GetAttribute("RaceState")
 			local deadlineAttribute = if state == "Grace"
 				then self.world:GetAttribute("GraceEndsAt")
@@ -235,10 +252,8 @@ function MinigameUI:updateCountdownLoop()
 			if state == "Countdown" then
 				local countdownNumber = if remaining > 3
 					then 3
-					elseif remaining > 2
-					then 2
-					elseif remaining > 1
-					then 1
+					elseif remaining > 2 then 2
+					elseif remaining > 1 then 1
 					else 0
 				startingText = if countdownNumber > 0
 					then "STARTING IN " .. tostring(countdownNumber) .. " SECONDS"
@@ -246,9 +261,7 @@ function MinigameUI:updateCountdownLoop()
 				surfaceText = if countdownNumber > 0 then tostring(countdownNumber) else "START!"
 			else
 				local seconds = formatSeconds(remaining)
-				startingText = if seconds > 0
-					then "STARTING IN " .. tostring(seconds) .. " SECONDS"
-					else "STARTING!"
+				startingText = if seconds > 0 then "STARTING IN " .. tostring(seconds) .. " SECONDS" else "STARTING!"
 			end
 
 			if self.startingLabel then
@@ -263,17 +276,24 @@ function MinigameUI:updateCountdownLoop()
 	end)
 end
 
-function MinigameUI:refresh(restartCountdown: boolean?)
+function MinigameUI:refresh(restartCountdown: boolean?, departingPlayer: Player?)
 	local root = self.root
 	local world = self.world
 	if not root then
+		if self.visibilityController then
+			self.visibilityController:SetRaceParticipant(false)
+		end
 		return
 	end
 	if not world or not self.runtimeBound then
+		if self.visibilityController then
+			self.visibilityController:SetRaceParticipant(false)
+		end
 		root.Visible = false
 		if self.joinFrame then
 			self.joinFrame.Visible = false
 		end
+		NotificationLayoutController.Refresh()
 		return
 	end
 	self:bindRaceSurfaceObjects()
@@ -282,7 +302,17 @@ function MinigameUI:refresh(restartCountdown: boolean?)
 	local state = if typeof(stateValue) == "string" then stateValue else "Cooldown"
 	local inWorld1 = LOCAL_PLAYER:GetAttribute("Current_World") == "World1"
 	local participant = LOCAL_PLAYER:GetAttribute("MinigameParticipant") == true
-	local surfaceGuisVisible = state ~= "Racing"
+	local hasTemporaryMessage = self.messageThread ~= nil
+	local requiredPlayersValue = world:GetAttribute("RaceRequiredPlayers")
+	local requiredPlayers = if typeof(requiredPlayersValue) == "number"
+		then math.max(1, math.floor(requiredPlayersValue))
+		else nil
+	local serverPlayerCount = #Players:GetPlayers()
+	if departingPlayer and departingPlayer.Parent == Players then
+		serverPlayerCount = math.max(0, serverPlayerCount - 1)
+	end
+	local meetsMinimumServerPopulation = requiredPlayers ~= nil and serverPlayerCount >= requiredPlayers
+	local surfaceGuisVisible = state ~= "Racing" and meetsMinimumServerPopulation
 	if self.startSurfaceGui then
 		self.startSurfaceGui.Enabled = surfaceGuisVisible
 	end
@@ -290,43 +320,30 @@ function MinigameUI:refresh(restartCountdown: boolean?)
 		self.countdownSurfaceGui.Enabled = surfaceGuisVisible
 	end
 	local visible = inWorld1
-		and ((not participant and (state == "Open" or state == "Grace"))
+		and meetsMinimumServerPopulation
+		and (
+			(not participant and (state == "Open" or state == "Grace"))
 			or (participant and ACTIVE_STATES[state] == true)
-			or (participant and self.messageThread ~= nil))
+			or hasTemporaryMessage
+		)
 	root.Visible = visible
 
 	if self.requiredPlayersLabel then
 		local playerCountValue = world:GetAttribute("RacePlayerCount")
-		local requiredPlayersValue = world:GetAttribute("RaceRequiredPlayers")
 		local playerCount = if typeof(playerCountValue) == "number"
 			then math.max(0, math.floor(playerCountValue))
 			else 0
-		local requiredPlayers = if typeof(requiredPlayersValue) == "number"
-			then math.max(1, math.floor(requiredPlayersValue))
-			else 5
-		local raceLabelState = state == "Grace"
-			or state == "Starting"
-			or state == "Countdown"
-			or state == "Racing"
+		local raceLabelState = state == "Grace" or state == "Starting" or state == "Countdown" or state == "Racing"
 		self.requiredPlayersLabel.Text = if state == "Racing"
 			then "RACE TO THE FINISH!"
-			else string.format("REQUIRED PLAYERS: %d/%d", playerCount, requiredPlayers)
-		self.requiredPlayersLabel.Visible = visible
-			and raceLabelState
+			else string.format("REQUIRED PLAYERS: %d/%d", playerCount, requiredPlayers or 5)
+		self.requiredPlayersLabel.Visible = visible and raceLabelState
 	end
 
-	if self.stageProgressFrame then
-		if participant and not self.stageProgressHidden then
-			self.stageProgressVisibleBeforeRace = self.stageProgressFrame.Visible
-			self.stageProgressFrame.Visible = false
-			self.stageProgressHidden = true
-		elseif not participant and self.stageProgressHidden then
-			if self.stageProgressVisibleBeforeRace ~= nil then
-				self.stageProgressFrame.Visible = self.stageProgressVisibleBeforeRace
-			end
-			self.stageProgressVisibleBeforeRace = nil
-			self.stageProgressHidden = false
-		end
+	if self.visibilityController then
+		self.visibilityController:SetRaceParticipant(participant)
+	elseif self.stageProgressFrame then
+		self.stageProgressFrame.Visible = not participant
 	end
 	if self.joinButton then
 		local joinable = visible and (state == "Open" or state == "Grace") and not participant and not self.joinPending
@@ -334,24 +351,22 @@ function MinigameUI:refresh(restartCountdown: boolean?)
 		self.joinButton.AutoButtonColor = self.joinButton.Active
 		self.joinButton.Text = if self.joinPending
 			then "JOINING..."
-			elseif participant
-			then "JOINED"
-			elseif state == "Racing"
-			then "RACING"
+			elseif participant then "JOINED"
+			elseif state == "Racing" then "RACING"
 			else "JOIN"
 		if self.joinFrame then
 			self.joinFrame.Visible = joinable
 		end
 	end
 
-	local startingLabelVisible = visible
-		and (state == "Grace" or state == "Starting" or state == "Countdown")
+	local startingLabelVisible = visible and (state == "Grace" or state == "Starting" or state == "Countdown")
 	local raceLabelsVisible = visible and state ~= "Racing"
 	if self.startingLabel then
 		self.startingLabel.Visible = startingLabelVisible
 	end
 	if self.messageLabel then
-		self.messageLabel.Visible = raceLabelsVisible and (self.messageLabelOriginalVisible ~= false)
+		self.messageLabel.Visible = visible
+			and (hasTemporaryMessage or (raceLabelsVisible and self.messageLabelOriginalVisible ~= false))
 	end
 
 	if self.startingLabel then
@@ -379,6 +394,8 @@ function MinigameUI:refresh(restartCountdown: boolean?)
 	if restartCountdown ~= false then
 		self:updateCountdownLoop()
 	end
+
+	NotificationLayoutController.Refresh()
 end
 
 function MinigameUI:onRaceNotification(
@@ -413,7 +430,14 @@ local function getJoinFailureMessage(reason: string): string
 end
 
 function MinigameUI:tryBindRuntime(): boolean
-	if self.runtimeBound and self.world and self.world.Parent and self.joinRequest and self.joinResult and self.raceNotification then
+	if
+		self.runtimeBound
+		and self.world
+		and self.world.Parent
+		and self.joinRequest
+		and self.joinResult
+		and self.raceNotification
+	then
 		return true
 	end
 
@@ -422,14 +446,16 @@ function MinigameUI:tryBindRuntime(): boolean
 	local joinRequest = remotes and remotes:FindFirstChild("MinigameJoinRequest")
 	local joinResult = remotes and remotes:FindFirstChild("MinigameJoinResult")
 	local raceNotification = remotes and remotes:FindFirstChild("MinigameRaceNotification")
-	if not self.root
+	if
+		not self.root
 		or not world
 		or not joinRequest
 		or not joinRequest:IsA("RemoteEvent")
 		or not joinResult
 		or not joinResult:IsA("RemoteEvent")
 		or not raceNotification
-		or not raceNotification:IsA("RemoteEvent") then
+		or not raceNotification:IsA("RemoteEvent")
+	then
 		self.runtimeBound = false
 		self.world = nil
 		self.joinRequest = nil
@@ -501,11 +527,13 @@ function MinigameUI:tryBindRuntime(): boolean
 		self:updateCountdownLoop()
 	end)
 	self.runtimeMaid.SurfaceDescendantAdded = world.DescendantAdded:Connect(function(descendant: Instance)
-		if descendant.Name == "CooldownStart"
+		if
+			descendant.Name == "CooldownStart"
 			or descendant.Name == "SurfaceGui1"
 			or descendant.Name == "SurfaceGui2"
 			or descendant.Name == "Frame"
-			or descendant.Name == "CountdownLabel" then
+			or descendant.Name == "CountdownLabel"
+		then
 			if self:bindRaceSurfaceObjects() then
 				self:refresh(false)
 			end
@@ -536,9 +564,11 @@ function MinigameUI:bindDiscoveryListeners()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	if remotes then
 		self.maid.MinigameRemoteAdded = remotes.ChildAdded:Connect(function(child: Instance)
-			if child.Name == "MinigameJoinRequest"
+			if
+				child.Name == "MinigameJoinRequest"
 				or child.Name == "MinigameJoinResult"
-				or child.Name == "MinigameRaceNotification" then
+				or child.Name == "MinigameRaceNotification"
+			then
 				self:tryBindRuntime()
 			end
 		end)
@@ -550,6 +580,7 @@ function MinigameUI:Init()
 		return
 	end
 	self.initialized = true
+	self.lastParticipant = LOCAL_PLAYER:GetAttribute("MinigameParticipant") == true
 	self.preloadThread = task.spawn(function()
 		local success, errorMessage = pcall(function()
 			if self.countdownSound then
@@ -562,11 +593,13 @@ function MinigameUI:Init()
 	end)
 
 	if self.requiredPlayersLabel then
-		self.maid.RequiredPlayersVisibility = self.requiredPlayersLabel:GetPropertyChangedSignal("Visible"):Connect(function()
-			if self.initialized then
-				self:refresh(false)
-			end
-		end)
+		self.maid.RequiredPlayersVisibility = self.requiredPlayersLabel
+			:GetPropertyChangedSignal("Visible")
+			:Connect(function()
+				if self.initialized then
+					self:refresh(false)
+				end
+			end)
 	end
 	if self.startingLabel then
 		self.maid.StartingLabelVisibility = self.startingLabel:GetPropertyChangedSignal("Visible"):Connect(function()
@@ -578,12 +611,26 @@ function MinigameUI:Init()
 	self.maid.WorldChanged = LOCAL_PLAYER:GetAttributeChangedSignal("Current_World"):Connect(function()
 		self:refresh()
 	end)
+	self.maid.ServerPlayerAdded = Players.PlayerAdded:Connect(function()
+		self:refresh(false)
+	end)
+	self.maid.ServerPlayerRemoving = Players.PlayerRemoving:Connect(function(player: Player)
+		self:refresh(false, player)
+	end)
 	self.maid.ParticipantChanged = LOCAL_PLAYER:GetAttributeChangedSignal("MinigameParticipant"):Connect(function()
-		if LOCAL_PLAYER:GetAttribute("MinigameParticipant") ~= true then
+		local isParticipant = LOCAL_PLAYER:GetAttribute("MinigameParticipant") == true
+		local leftRace = self.lastParticipant and not isParticipant
+		self.lastParticipant = isParticipant
+		if not isParticipant then
 			self:cancelMessage()
 		end
 		self.joinPending = false
 		self:refresh()
+
+		local raceState = self.world and self.world:GetAttribute("RaceState")
+		if leftRace and (raceState == "Open" or raceState == "Grace") then
+			self:setMessage("JOIN THE RACE!", 3)
+		end
 	end)
 	self.maid.WorkspaceChildAdded = Workspace.ChildAdded:Connect(function(child: Instance)
 		if child.Name == "Worlds" then
@@ -639,8 +686,10 @@ function MinigameUI:Destroy()
 	if self.countdownSurfaceLabel and self.countdownSurfaceLabelOriginalText ~= nil then
 		self.countdownSurfaceLabel.Text = self.countdownSurfaceLabelOriginalText
 	end
-	if self.stageProgressFrame and self.stageProgressHidden and self.stageProgressVisibleBeforeRace ~= nil then
-		self.stageProgressFrame.Visible = self.stageProgressVisibleBeforeRace
+	if self.visibilityController then
+		self.visibilityController:SetRaceParticipant(false)
+	elseif self.stageProgressFrame then
+		self.stageProgressFrame.Visible = true
 	end
 	if self.root and self.originalRootVisible ~= nil then
 		self.root.Visible = self.originalRootVisible

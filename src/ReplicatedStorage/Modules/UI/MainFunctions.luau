@@ -1,10 +1,9 @@
---!strict
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local PlayerHandler = require(ReplicatedStorage.Modules.PlayerHandler)
+local PlayerHandler = require(ReplicatedStorage.Modules.Shared:WaitForChild("PlayerHandler_Client"))
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 
 local MainFunctions = {}
@@ -14,6 +13,7 @@ local lastFrameToggleTimes: { [string]: number } = {}
 local TROLL_HUD_HIDE_KEYS = {
 	"LevelsBarFrame",
 	"SpeedMultiFrame",
+	"BottomRightGridFrame",
 	"SpeedBuyFrame",
 	"RightSideButtonsFrame",
 }

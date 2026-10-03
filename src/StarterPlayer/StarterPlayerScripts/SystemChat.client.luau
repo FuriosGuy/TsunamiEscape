@@ -1,7 +1,6 @@
---!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local SystemChatService = require(ReplicatedStorage.Modules.SystemChatService)
+local SystemChatService = require(ReplicatedStorage.Modules.Shared.SystemChatService_Client)
 
 SystemChatService.InitClient()
 

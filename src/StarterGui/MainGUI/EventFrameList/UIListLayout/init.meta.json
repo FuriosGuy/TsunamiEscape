@@ -1,6 +1,7 @@
 {
   "className": "UIListLayout",
   "properties": {
-    "SortOrder": "LayoutOrder"
+    "SortOrder": "LayoutOrder",
+    "Wraps": true
   }
 }

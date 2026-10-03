@@ -1,6 +1,5 @@
---!strict
 local MarketplaceService = game:GetService("MarketplaceService")
-local GroupService = game:GetService("GroupService")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -8,29 +7,38 @@ local ContentProvider = game:GetService("ContentProvider")
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
+local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
 local Players = game:GetService("Players")
-local PlayerHandler = require(ReplicatedStorage.Modules.PlayerHandler)
-local ProductService = require(ReplicatedStorage.Modules.ProductService)
+local PlayerHandler = require(ReplicatedStorage.Modules.Shared:WaitForChild("PlayerHandler_Client"))
+local ProductService = require(ReplicatedStorage.Modules.Shared:WaitForChild("ProductService_Client"))
 local KartCatalog = require(ReplicatedStorage.Modules.KartCatalog)
-local VerifyRewardCalculator = require(ReplicatedStorage.Modules.VerifyRewardCalculator)
+local VerifyRewardCalculator = require(ReplicatedStorage.Modules.Shared.VerifyRewardCalculator)
 local MainFunctions = require(ReplicatedStorage.Modules.UI.MainFunctions)
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
 local SpinWheelConfig = require(ReplicatedStorage.Modules.Config.SpinWheelConfig)
+local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
 local FavoriteGamePrompt = require(ReplicatedStorage.Modules.FavoriteGamePrompt)
 local TutorialNotificationSystem = require(script.Parent:WaitForChild("TutorialNotificationSystem"))
 local PlaytimeRewardsUI = require(script.Parent:WaitForChild("PlaytimeRewardsUI"))
 local DailyRewardsUI = require(script.Parent:WaitForChild("DailyRewardsUI"))
 local DailyRewardPromptController = require(script.Parent:WaitForChild("DailyRewardPromptController"))
+local VerifyGroupController = require(script.Parent:WaitForChild("VerifyGroupController"))
 local RewardCelebrationController = require(script.Parent:WaitForChild("RewardCelebrationController"))
 local WinDisplayController = require(script.Parent:WaitForChild("WinDisplayController"))
 local LevelDisplayController = require(script.Parent:WaitForChild("LevelDisplayController"))
 local HudDisplayController = require(script.Parent:WaitForChild("HudDisplayController"))
 local TrailDisplayController = require(script.Parent:WaitForChild("TrailDisplayController"))
+local TrailShopController = require(script.Parent:WaitForChild("TrailShopController"))
+local PlayerAttributeBindings = require(script.Parent:WaitForChild("PlayerAttributeBindings"))
 local StageProgressBindings = require(script.Parent:WaitForChild("StageProgressBindings"))
 local RemoteBindings = require(script.Parent:WaitForChild("RemoteBindings"))
 local DisplayRefreshBindings = require(script.Parent:WaitForChild("DisplayRefreshBindings"))
+local KartShopController = require(script.Parent:WaitForChild("KartShopController"))
 local RewardedVideoClient = require(ReplicatedStorage.Modules.RewardedVideoClient)
+local MenuOpenController = require(script.Parent:WaitForChild("MenuOpenController"))
+local WinStreakUI = require(script.Parent:WaitForChild("WinStreakUI"))
+local WinCountShopShortcut = require(script.Parent:WaitForChild("WinCountShopShortcut"))
 local DEFAULT_PLAYER_SPEED = if typeof(PlayerHandler.DEFAULT_ATTRIBUTES.Player_Speed) == "number"
 	then PlayerHandler.DEFAULT_ATTRIBUTES.Player_Speed
 	else 16
@@ -41,16 +49,55 @@ local DEFAULT_MAX_PLAYER_SPEED = if typeof(PlayerHandler.DEFAULT_ATTRIBUTES.Max_
 local MainOrchestrator = {}
 local DEBUG_TROLL_FRAME_ONLY_FOR_ME = false -- Enabled to allow self-testing as requested
 local DEBUG_LOADING_DETAILS = false
+local STARTUP_LOADING_ENABLED = true
 local hasCompletedStartupLoading = false
-local VERIFY_GROUP_ID = if CoreConfig.social and typeof(CoreConfig.social.verifyGroupId) == "number"
-	then CoreConfig.social.verifyGroupId
-	else 13706307
 local verifyRewardConfig = VerifyRewardCalculator.GetConfig(CoreConfig)
 local VERIFY_REWARD_CLAIM_COUNT_ATTRIBUTE = verifyRewardConfig.claimCountAttribute
 local VERIFY_REWARD_NEXT_CLAIM_ATTRIBUTE = "VerifyRewardNextClaimUnix"
 local VERIFY_REWARD_COUNTDOWN_UPDATE_INTERVAL = 1
+local RETURN_TO_STAGE_BUTTON_SPLIT_POSITION = UDim2.new(0.261, 0, 0.484, 0)
+local RETURN_TO_STAGE_BUTTON_CENTER_POSITION = UDim2.new(0.5, 0, 0.484, 0)
+local WHEEL_STYLE = ColorConfig.UI.ButtonStyles.Wheel
+local EQUIP_STYLE = ColorConfig.UI.ButtonStyles.Equip
+local DISABLE_WAVE_PURCHASE_WATCHDOG_SECONDS = 30
+local DISABLE_WAVE_NOTIFICATION_KEY = "DisableWavesCooldown"
+local DISABLE_WAVE_NOTIFICATION_MESSAGE = "WAVES DISABLED!"
+local PET_INTERACTION_FRAME_NAMES: { [string]: boolean } = table.freeze({
+	AddButton = true,
+	DeleteButton = true,
+	DeleteSelectedButton = true,
+	EquipButton = true,
+	EquipBestButton = true,
+	UnequipAllButton = true,
+	MergeButton = true,
+	ConfirmButton = true,
+	CancelButton = true,
+})
 
-local function isBloodmoonEventActive(): boolean
+local function applyReturnToStageAdLayout(frame: Frame, adAvailable: boolean)
+	local paidButton = frame:FindFirstChild("ReturnToStageButton", true)
+	if paidButton and paidButton:IsA("GuiObject") then
+		paidButton.Position = if adAvailable
+			then RETURN_TO_STAGE_BUTTON_SPLIT_POSITION
+			else RETURN_TO_STAGE_BUTTON_CENTER_POSITION
+	end
+
+	local watchAdFrame = frame:FindFirstChild("WatchAdButton", true)
+	if watchAdFrame and watchAdFrame:IsA("GuiObject") then
+		watchAdFrame.Visible = adAvailable
+	end
+
+	local orLabel = frame:FindFirstChild("TextLabel")
+	if orLabel and orLabel:IsA("TextLabel") then
+		orLabel.Visible = adAvailable
+	end
+end
+
+local function isLiveEventActive(eventId: string?): boolean
+	if typeof(eventId) ~= "string" or eventId == "" then
+		return false
+	end
+
 	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
 	if not liveEventState then
 		return false
@@ -58,18 +105,205 @@ local function isBloodmoonEventActive(): boolean
 
 	local activeEventIds = liveEventState:GetAttribute("ActiveEventIds")
 	return typeof(activeEventIds) == "string"
-		and string.find("," .. activeEventIds .. ",", ",Bloodmoon,", 1, true) ~= nil
+		and string.find("," .. activeEventIds .. ",", "," .. eventId .. ",", 1, true) ~= nil
 end
 
-local function isBloodmoonKartConfig(config: { [string]: any }): boolean
-	return config.bloodmoonKart == true or config.sourceSubfolder == "Bloodmoon"
+local function getKartEventId(config: { [string]: any }): string?
+	local eventId = config.eventId
+	if typeof(eventId) ~= "string" or eventId == "" then
+		eventId = config.sourceSubfolder
+	end
+	return if typeof(eventId) == "string" and eventId ~= "" then eventId else nil
 end
 
-local function canBuyBloodmoonProduct(config: { [string]: any }, isOwned: boolean): boolean
+local function isEventKartConfig(config: { [string]: any }): boolean
+	return getKartEventId(config) ~= nil
+end
+
+local function canBuyEventProduct(config: { [string]: any }, isOwned: boolean): boolean
+	local eventId = getKartEventId(config)
 	return not isOwned
-		and isBloodmoonKartConfig(config)
+		and eventId ~= nil
 		and typeof(config.productKey) == "string"
-		and isBloodmoonEventActive()
+		and isLiveEventActive(eventId)
+end
+
+local function formatTrailMultiplier(multiplier: number): string
+	local text = string.format("%.2f", multiplier)
+	text = text:gsub("%.00$", "")
+	text = text:gsub("(%..-)0$", "%1")
+	return text
+end
+
+local function getOrCreateEquipButton(entryFrame: Frame): Frame?
+	local existing = entryFrame:FindFirstChild("EquipButton")
+	if existing and existing:IsA("Frame") then
+		return existing
+	end
+
+	local buyButton = entryFrame:FindFirstChild("BuyButton")
+	if not buyButton or not buyButton:IsA("Frame") then
+		return nil
+	end
+
+	local equipButton = buyButton:Clone()
+	equipButton.Name = "EquipButton"
+	equipButton.Parent = entryFrame
+
+	local textButton = equipButton:FindFirstChild("TextButton", true)
+	if textButton and textButton:IsA("TextButton") then
+		textButton.Text = "EQUIP"
+	end
+
+	return equipButton
+end
+
+local function applyGradientStyle(frame: Frame, style: ColorConfig.GradientStyle)
+	frame.BackgroundColor3 = style.BackgroundColor
+	local gradient = frame:FindFirstChildOfClass("UIGradient")
+	if not gradient then
+		gradient = Instance.new("UIGradient")
+		gradient.Parent = frame
+	end
+	gradient.Rotation = 90
+	gradient.Color = style.Gradient
+	VisualFunctions.RefreshFrameInteractionColors(frame)
+end
+
+local function applyWheelStyle(frame: Frame)
+	frame:SetAttribute("OriginalDisabledBaseColor", nil)
+	applyGradientStyle(frame, WHEEL_STYLE)
+end
+
+local function applyEquipStyle(frame: Frame)
+	applyGradientStyle(frame, EQUIP_STYLE)
+end
+
+local function openSpinWheelFromShop(player: Player)
+	MainFunctions.SetFrameVisibleSimple("TrailFrame", false)
+	MainFunctions.SetFrameVisibleSimple("KartFrame", false)
+	local requestId = player:GetAttribute("SpinWheelOpenRequested")
+	local nextRequestId = if typeof(requestId) == "number" then requestId + 1 else 1
+	player:SetAttribute("SpinWheelOpenRequested", nextRequestId)
+end
+
+local function bindPetInventoryNotifications(
+	root: Instance,
+	player: Player,
+	updateBadge: (any, boolean, string, string) -> ()
+): () -> ()
+	local maid = Maid.new()
+	local badgeState = {
+		buttonFrame = nil :: GuiObject?,
+		template = nil :: GuiObject?,
+		badge = nil :: GuiObject?,
+		refresh = nil :: (() -> ())?,
+	}
+	local petFrame: Frame? = nil
+	local baselineReady = false
+	local knownPetUids: { [string]: boolean } = {}
+	local unreadPetUids: { [string]: boolean } = {}
+
+	local function refreshBadge(): ()
+		local unreadCount = 0
+		for _ in pairs(unreadPetUids) do
+			unreadCount += 1
+		end
+		updateBadge(badgeState, unreadCount > 0, "NewPetsNotification", tostring(unreadCount))
+	end
+
+	local function readPetUids(): { [string]: boolean }?
+		local encodedInventory = player:GetAttribute("Pet_Inventory")
+		if typeof(encodedInventory) ~= "string" then
+			return nil
+		end
+
+		local ok, decodedInventory = pcall(HttpService.JSONDecode, HttpService, encodedInventory)
+		if not ok or typeof(decodedInventory) ~= "table" then
+			return nil
+		end
+
+		local petUids: { [string]: boolean } = {}
+		for _, petRecord in ipairs(decodedInventory) do
+			if typeof(petRecord) == "table" and typeof(petRecord.uid) == "string" then
+				petUids[petRecord.uid] = true
+			end
+		end
+		return petUids
+	end
+
+	local function updateFromAttribute(): ()
+		if player:GetAttribute("Data_Loaded") ~= true then
+			return
+		end
+
+		local currentPetUids = readPetUids()
+		if not currentPetUids then
+			return
+		end
+
+		if not baselineReady then
+			knownPetUids = currentPetUids
+			baselineReady = true
+			refreshBadge()
+			return
+		end
+
+		local inventoryOpen = petFrame ~= nil and petFrame.Visible
+		for petUid in pairs(currentPetUids) do
+			if not knownPetUids[petUid] and not inventoryOpen then
+				unreadPetUids[petUid] = true
+			end
+		end
+
+		for petUid in pairs(unreadPetUids) do
+			if not currentPetUids[petUid] then
+				unreadPetUids[petUid] = nil
+			end
+		end
+
+		knownPetUids = currentPetUids
+		refreshBadge()
+	end
+
+	local function bindInstance(instance: Instance): ()
+		if not instance:IsA("GuiObject") then
+			return
+		end
+
+		if instance.Name == "NotifShow_Template" then
+			badgeState.template = instance
+			refreshBadge()
+		elseif instance.Name == "PetsButtonFrame" then
+			badgeState.buttonFrame = instance
+			refreshBadge()
+		elseif instance.Name == "PetFrame" and instance:IsA("Frame") then
+			petFrame = instance
+			maid:GiveTask(instance:GetPropertyChangedSignal("Visible"):Connect(function()
+				if petFrame == instance and instance.Visible then
+					table.clear(unreadPetUids)
+					refreshBadge()
+				end
+			end))
+		end
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		bindInstance(descendant)
+	end
+	maid:GiveTask(root.DescendantAdded:Connect(bindInstance))
+	maid:GiveTask(player:GetAttributeChangedSignal("Pet_Inventory"):Connect(updateFromAttribute))
+	maid:GiveTask(player:GetAttributeChangedSignal("Data_Loaded"):Connect(updateFromAttribute))
+	updateFromAttribute()
+	refreshBadge()
+
+	return function(): ()
+		maid:DoCleaning()
+		table.clear(knownPetUids)
+		table.clear(unreadPetUids)
+		petFrame = nil
+		updateBadge(badgeState, false, "NewPetsNotification", "0")
+	end
 end
 
 function MainOrchestrator.Init(root: Instance)
@@ -82,14 +316,67 @@ function MainOrchestrator.Init(root: Instance)
 	end
 
 	root:SetAttribute("MainOrchestratorInitialized", true)
+	root:SetAttribute("StartupLoadingComplete", false)
+	root:SetAttribute("PostLoadingStartupComplete", false)
+	hasCompletedStartupLoading = false
 
 	DebugModule.debugPrint("Initializing Main GUI for " .. root.Name, "MainOrchestrator")
 	local sessionMaid = Maid.new()
-	local stageProgressTrackedPlayerMaids: { [Player]: Maid } = {}
-	local stageProgressTrackedRootParts: { [Player]: BasePart } = {}
+	local stageProgressState = {
+		trackedPlayerMaids = {} :: { [Player]: Maid },
+		trackedRootParts = {} :: { [Player]: BasePart },
+		frame = nil :: Frame?,
+		trackFrame = nil :: Frame?,
+		markersFrame = nil :: Frame?,
+		markerTemplate = nil :: GuiObject?,
+		avatarTemplate = nil :: ImageLabel?,
+		currentStageLabel = nil :: TextLabel?,
+		currentWorldLabel = nil :: TextLabel?,
+		markerClones = {} :: { GuiObject },
+		playerMarkers = {} :: { [number]: ImageLabel },
+		playerMarkerMissingUntil = {} :: { [number]: number },
+		avatarCache = {} :: { [number]: string },
+		worldName = nil :: string?,
+		startPosition = nil :: Vector3?,
+		endPosition = nil :: Vector3?,
+		markerMissingGrace = 2,
+		markerUpdateInterval = 0.1,
+		worldStyles = ColorConfig.UI.StageProgressWorlds,
+		markerUpdateAccumulator = 0.1,
+		updatePlayerMarkers = function() end,
+	}
 	local isCleanedUp = false
 	local startupLoadingTask: thread? = nil
 	local disableWaveCountdownTask: thread? = nil
+	local disableWavePurchaseWatchdogTask: thread? = nil
+	local disableWavePurchaseAttempt = 0
+	local disableWavePurchaseInFlight = false
+	local disableWaveNotificationCooldownEnd = 0
+	local disableWaveNotificationTask: thread? = nil
+	local spawnSessionTask: (callback: () -> ()) -> thread
+	local function cancelThread(thread: thread?)
+		if thread and coroutine.status(thread) ~= "dead" then
+			pcall(task.cancel, thread)
+		end
+	end
+	local function cancelDisableWavePurchaseWatchdog()
+		disableWavePurchaseAttempt += 1
+		if disableWavePurchaseWatchdogTask then
+			cancelThread(disableWavePurchaseWatchdogTask)
+			disableWavePurchaseWatchdogTask = nil
+		end
+	end
+	local function updateDisableWaveButtonInteraction()
+		local frame = VisualFunctions.HUD.DisableWaveButtonFrame
+		if not frame then
+			return
+		end
+
+		local rawCooldownEnd = Players.LocalPlayer:GetAttribute("DisableWavesCooldownEnd")
+		local cooldownEnd = if typeof(rawCooldownEnd) == "number" then math.floor(rawCooldownEnd) else 0
+		local isOnCooldown = cooldownEnd > os.time()
+		VisualFunctions.SetFrameInteractableState(frame, not isOnCooldown and not disableWavePurchaseInFlight)
+	end
 
 	if VisualFunctions.ResetRuntimeState then
 		VisualFunctions.ResetRuntimeState()
@@ -102,6 +389,8 @@ function MainOrchestrator.Init(root: Instance)
 
 		isCleanedUp = true
 		root:SetAttribute("MainOrchestratorInitialized", false)
+		root:SetAttribute("StartupLoadingComplete", false)
+		root:SetAttribute("PostLoadingStartupComplete", false)
 		sessionMaid:DoCleaning()
 		if VisualFunctions.ResetRuntimeState then
 			VisualFunctions.ResetRuntimeState()
@@ -119,10 +408,29 @@ function MainOrchestrator.Init(root: Instance)
 	local kartActionRemote = remotes:WaitForChild("KartAction") :: RemoteEvent
 	local returnToStagePromptOpenedRemote = remotes:WaitForChild("ReturnToStagePromptOpened") :: RemoteEvent
 	local trollActionRequestRemote = remotes:WaitForChild("TrollActionRequest") :: RemoteEvent
+	local dataRecoveryRequestRemote = remotes:WaitForChild("DataRecoveryRequest") :: RemoteEvent
+	local dataRecoveryResultRemote = remotes:WaitForChild("DataRecoveryResult") :: RemoteEvent
 	local hideReturnToStageFrame: () -> () = function() end
 	local localPlayer = Players.LocalPlayer
+	local hasShownFavoriteGamePrompt = false
+	local function promptFavoriteGameIfReady()
+		if
+			hasShownFavoriteGamePrompt
+			or not hasCompletedStartupLoading
+			or localPlayer:GetAttribute("Data_Loaded") ~= true
+		then
+			return
+		end
+
+		hasShownFavoriteGamePrompt = true
+		sessionMaid:GiveTask(
+			FavoriteGamePrompt.StartDeferredPrompt(localPlayer, function(): boolean
+				return not isCleanedUp
+			end)
+		)
+	end
 	local canUseTrollFrame = true
-	local allowSelfTargetingInTrollDebug = DEBUG_TROLL_FRAME_ONLY_FOR_ME
+	local allowSelfTargetingInTrollDebug = RunService:IsStudio() and DEBUG_TROLL_FRAME_ONLY_FOR_ME
 
 	local trollFrame: Frame? = nil
 	local trollNameLabel: TextLabel? = nil
@@ -154,12 +462,14 @@ function MainOrchestrator.Init(root: Instance)
 		walkSpeed: number?,
 		jumpHeight: number?,
 		autoRotate: boolean?,
+		onLoadingComplete: () -> (),
 	} =
 		{
 			humanoid = nil,
 			walkSpeed = nil,
 			jumpHeight = nil,
 			autoRotate = nil,
+			onLoadingComplete = function() end,
 		}
 	local loadingFrame: Frame? = nil
 	local loadingImage: ImageLabel? = nil
@@ -171,6 +481,15 @@ function MainOrchestrator.Init(root: Instance)
 	local loadingCurrentLabel: TextLabel? = nil
 	local loadingSkipButtonFrame: GuiObject? = nil
 	local loadingSkipButton: GuiButton? = nil
+	local loadingDataRecoveryFrame: Frame? = nil
+	local loadingDataRecoveryWarningLabel: TextLabel? = nil
+	local loadingDataRecoveryAttemptsLabel: TextLabel? = nil
+	local loadingDataRecoveryRetryButton: GuiButton? = nil
+	local loadingDataRecoveryResetButton: GuiButton? = nil
+	local loadingDataRecoveryPopScale: UIScale? = nil
+	local loadingDataRecoveryPopTween: Tween? = nil
+	local dataRecoveryRequestInFlight = false
+	local runStartupLoading: () -> () = function() end
 	local tutorialSystem: any? = nil
 	local loadingProgressTween: Tween? = nil
 	local loadingCurrentLabelTween: Tween? = nil
@@ -183,36 +502,16 @@ function MainOrchestrator.Init(root: Instance)
 	local verifyRewardXPLabel: TextLabel? = nil
 	local verifyRewardWinsLabel: TextLabel? = nil
 	local refreshVerifyRewardValueLabels: (() -> ())? = nil
-	local stageProgressFrame: Frame? = nil
-	local stageProgressTrackFrame: Frame? = nil
-	local stageProgressMarkersFrame: Frame? = nil
-	local stageProgressMarkerTemplate: GuiObject? = nil
-	local stageProgressAvatarTemplate: ImageLabel? = nil
-	local stageProgressCurrentStageLabel: TextLabel? = nil
-	local stageProgressCurrentWorldLabel: TextLabel? = nil
-	local stageProgressMarkerClones: { GuiObject } = {}
-	local stageProgressPlayerMarkers: { [number]: ImageLabel } = {}
-	local stageProgressPlayerMarkerMissingUntil: { [number]: number } = {}
-	local stageProgressAvatarCache: { [number]: string } = {}
-	local stageProgressWorldName: string? = nil
-	local stageProgressStartPosition: Vector3? = nil
-	local stageProgressEndPosition: Vector3? = nil
-	local STAGE_PROGRESS_MARKER_MISSING_GRACE = 2
-	local STAGE_PROGRESS_MARKER_UPDATE_INTERVAL = 0.1
-	local STAGE_PROGRESS_WORLD_STYLES = {
-		World1 = {
-			backgroundColor = Color3.fromRGB(85, 255, 0),
-		},
-		Fallback = {
-			backgroundColor = Color3.fromRGB(255, 255, 255),
-		},
-	}
+	local verifyGroupController: any = nil
 	local rebirthReadyUIState = {
 		buttonFrame = nil :: GuiObject?,
+		lightRay = nil :: GuiObject?,
 		template = nil :: GuiObject?,
 		badge = nil :: GuiObject?,
 		refresh = nil :: (() -> ())?,
 		wasReady = false,
+		notificationPending = false,
+		skipNotificationUntil = 0,
 	}
 	local kartPurchaseUIState = {
 		buttonFrame = nil :: GuiObject?,
@@ -266,26 +565,32 @@ function MainOrchestrator.Init(root: Instance)
 	}
 
 	sessionMaid:GiveTask(function()
-		for trackedPlayer, trackedPlayerMaid in pairs(stageProgressTrackedPlayerMaids) do
+		for trackedPlayer, trackedPlayerMaid in pairs(stageProgressState.trackedPlayerMaids) do
 			trackedPlayerMaid:DoCleaning()
-			stageProgressTrackedPlayerMaids[trackedPlayer] = nil
+			stageProgressState.trackedPlayerMaids[trackedPlayer] = nil
 		end
 	end)
 	sessionMaid:GiveTask(function()
 		if startupLoadingTask then
-			task.cancel(startupLoadingTask)
+			cancelThread(startupLoadingTask)
 			startupLoadingTask = nil
 		end
 		if disableWaveCountdownTask then
-			task.cancel(disableWaveCountdownTask)
+			cancelThread(disableWaveCountdownTask)
 			disableWaveCountdownTask = nil
 		end
+		cancelDisableWavePurchaseWatchdog()
+		disableWavePurchaseInFlight = false
 		verifyGroupCountdownLabel = nil
 		verifyRewardWhenLabel = nil
 		refreshVerifyCountdownLabel = nil
 		verifyRewardXPLabel = nil
 		verifyRewardWinsLabel = nil
 		refreshVerifyRewardValueLabels = nil
+		if verifyGroupController then
+			verifyGroupController:Destroy()
+			verifyGroupController = nil
+		end
 		verifyClaimableUIState.refresh = nil
 	end)
 	local loadingSystemTasks = {
@@ -395,7 +700,7 @@ function MainOrchestrator.Init(root: Instance)
 
 			loadingProgressTween = TweenService:Create(
 				loadingProgressFrame,
-				TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				TweenConfig.LoadingProgress,
 				{
 					Size = UDim2.new(
 						clampedProgress,
@@ -427,7 +732,7 @@ function MainOrchestrator.Init(root: Instance)
 
 				local fadeOutTween = TweenService:Create(
 					loadingCurrentLabel,
-					TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					TweenConfig.LoadingLabelFade,
 					{
 						TextTransparency = 1,
 					}
@@ -456,7 +761,7 @@ function MainOrchestrator.Init(root: Instance)
 
 					local fadeInTween = TweenService:Create(
 						loadingCurrentLabel,
-						TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						TweenConfig.LoadingLabelFade,
 						{
 							TextTransparency = 0,
 						}
@@ -469,7 +774,7 @@ function MainOrchestrator.Init(root: Instance)
 	end
 
 	local function formatLoadingLabel(baseLabel: string, detail: string?): string
-		if DEBUG_LOADING_DETAILS and detail and detail ~= "" then
+		if RunService:IsStudio() and DEBUG_LOADING_DETAILS and detail and detail ~= "" then
 			return string.format("%s (%s)", baseLabel, detail)
 		end
 
@@ -499,22 +804,98 @@ function MainOrchestrator.Init(root: Instance)
 		message: string,
 		textColor: Color3?,
 		gradientBottomColor: Color3?,
-		notificationStyle: string?
-	)
-		if localPlayer:GetAttribute("SpinWheelModalOpen") == true then
-			return
+		notificationStyle: string?,
+		notificationKey: string?
+	): boolean
+		local modalLockOwner = localPlayer:GetAttribute("ModalLockOwner")
+		if localPlayer:GetAttribute("SpinWheelModalOpen") == true
+			or (modalLockOwner ~= nil and modalLockOwner ~= "LuckyBlock")
+		then
+			return false
+		end
+		if not hasCompletedStartupLoading then
+			return false
 		end
 
 		if tutorialSystem then
-			tutorialSystem:ShowNonTutorialNotification(message, textColor, gradientBottomColor, notificationStyle)
-			return
+			return tutorialSystem:ShowNonTutorialNotification(
+				message,
+				textColor,
+				gradientBottomColor,
+				notificationStyle,
+				notificationKey
+			)
 		end
 
 		if notificationStyle == "QuickFade" then
 			VisualFunctions.ShowQuickFadeNotification(message, textColor, gradientBottomColor)
+			return true
+		end
+		VisualFunctions.ShowNotification(message, textColor, gradientBottomColor, notificationKey)
+		return true
+	end
+
+	local function refreshDisableWaveNotification()
+		if not hasCompletedStartupLoading then
 			return
 		end
-		VisualFunctions.ShowNotification(message, textColor, gradientBottomColor)
+
+		local theme = VisualFunctions.NotificationThemes.Red
+		local wasUpdated = VisualFunctions.UpdateNotification(
+			DISABLE_WAVE_NOTIFICATION_MESSAGE,
+			DISABLE_WAVE_NOTIFICATION_KEY
+		)
+		if not wasUpdated then
+			showNotificationRespectingTutorial(
+				DISABLE_WAVE_NOTIFICATION_MESSAGE,
+				theme.textColor,
+				theme.gradientBottomColor,
+				nil,
+				DISABLE_WAVE_NOTIFICATION_KEY
+			)
+		end
+	end
+
+	local function showDisableWaveNotification(cooldownEnd: number)
+		local resolvedCooldownEnd = math.floor(cooldownEnd)
+		if resolvedCooldownEnd <= os.time() then
+			return
+		end
+
+		local shouldRestartTask = disableWaveNotificationCooldownEnd ~= resolvedCooldownEnd
+		disableWaveNotificationCooldownEnd = resolvedCooldownEnd
+		refreshDisableWaveNotification()
+
+		if not shouldRestartTask then
+			return
+		end
+
+		if disableWaveNotificationTask then
+			cancelThread(disableWaveNotificationTask)
+			disableWaveNotificationTask = nil
+		end
+
+		local trackedCooldownEnd = resolvedCooldownEnd
+		disableWaveNotificationTask = spawnSessionTask(function()
+			while disableWaveNotificationCooldownEnd == trackedCooldownEnd do
+				local remaining = math.max(0, trackedCooldownEnd - os.time())
+				if remaining <= 0 then
+					break
+				end
+
+				refreshDisableWaveNotification()
+				task.wait(1)
+			end
+
+			if disableWaveNotificationCooldownEnd == trackedCooldownEnd then
+				VisualFunctions.HideNotification(DISABLE_WAVE_NOTIFICATION_KEY)
+				disableWaveNotificationCooldownEnd = 0
+			end
+
+			if disableWaveNotificationTask == coroutine.running() then
+				disableWaveNotificationTask = nil
+			end
+		end)
 	end
 
 	local function updateButtonNotificationBadge(
@@ -564,7 +945,7 @@ function MainOrchestrator.Init(root: Instance)
 				local fallback = Instance.new("Frame")
 				fallback.Name = badgeName
 				fallback.AnchorPoint = Vector2.new(0.5, 0.5)
-				fallback.BackgroundColor3 = Color3.fromRGB(255, 79, 79)
+				fallback.BackgroundColor3 = ColorConfig.Colors.UnreadBadge.Color
 				fallback.BorderSizePixel = 0
 				fallback.Position = UDim2.new(0.9924, 0, 0.0152, 0)
 				fallback.Size = UDim2.new(0.3316, 0, 0.2779, 0)
@@ -580,7 +961,7 @@ function MainOrchestrator.Init(root: Instance)
 				label.BackgroundTransparency = 1
 				label.Size = UDim2.fromScale(1, 1)
 				label.Text = countText
-				label.TextColor3 = Color3.fromRGB(255, 255, 255)
+				label.TextColor3 = ColorConfig.Colors.White.Color
 				label.TextScaled = true
 				label.Font = Enum.Font.GothamBold
 				label.ZIndex = 4
@@ -664,7 +1045,7 @@ function MainOrchestrator.Init(root: Instance)
 		local success, tweenOrError = pcall(function()
 			return TweenService:Create(
 				instance,
-				TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				TweenConfig.WithDuration(duration, TweenConfig.LoadingLabelFade),
 				goals
 			)
 		end)
@@ -1003,7 +1384,7 @@ function MainOrchestrator.Init(root: Instance)
 		loadingMovementLockState.autoRotate = nil
 	end
 
-	local function spawnSessionTask(callback: () -> ()): thread
+	spawnSessionTask = function(callback: () -> ()): thread
 		local thread = task.spawn(function()
 			if isCleanedUp then
 				return
@@ -1033,8 +1414,132 @@ function MainOrchestrator.Init(root: Instance)
 	end
 
 	local function bindGuiButton(button: GuiButton, key: string, callback: () -> ())
-		bindGuiSignal(button, key, button.MouseButton1Click:Connect(callback))
+		bindGuiSignal(button, key, button.Activated:Connect(callback))
 	end
+
+	local function updateDataRecoveryAttempts()
+		if not loadingDataRecoveryAttemptsLabel then
+			return
+		end
+
+		local attempts = localPlayer:GetAttribute("DataRecoveryAttempts")
+		local normalizedAttempts = if typeof(attempts) == "number" then math.max(0, math.floor(attempts)) else 0
+		loadingDataRecoveryAttemptsLabel.Text = string.format("ATTEMPTS: %d", normalizedAttempts)
+	end
+
+	local function setDataRecoveryFrameVisible(visible: boolean, shouldPop: boolean?)
+		if not loadingDataRecoveryFrame then
+			return
+		end
+
+		if not visible and loadingDataRecoveryPopTween then
+			loadingDataRecoveryPopTween:Cancel()
+			loadingDataRecoveryPopTween = nil
+		end
+		loadingDataRecoveryFrame.Visible = visible
+		loadingDataRecoveryFrame.Active = visible
+		loadingDataRecoveryFrame.Interactable = visible
+		if visible then
+			updateDataRecoveryAttempts()
+			if shouldPop and loadingDataRecoveryPopScale then
+				loadingDataRecoveryPopScale.Scale = 0.86
+				local popTween = TweenService:Create(
+					loadingDataRecoveryPopScale,
+					TweenConfig.DataRecoveryPop,
+					{ Scale = 1 }
+				)
+				loadingDataRecoveryPopTween = popTween
+				popTween.Completed:Once(function()
+					if loadingDataRecoveryPopTween == popTween then
+						loadingDataRecoveryPopTween = nil
+					end
+				end)
+				popTween:Play()
+			end
+		end
+	end
+
+	local function bindDataRecoveryFrame(frame: Frame?)
+		if not frame then
+			return
+		end
+
+		loadingDataRecoveryFrame = frame
+		loadingDataRecoveryFrame.Visible = false
+		loadingDataRecoveryFrame.Active = false
+		loadingDataRecoveryFrame.Interactable = false
+		local existingPopScale = frame:FindFirstChild("DataRecoveryPopScale")
+		if existingPopScale and existingPopScale:IsA("UIScale") then
+			loadingDataRecoveryPopScale = existingPopScale
+		else
+			local popScale = Instance.new("UIScale")
+			popScale.Name = "DataRecoveryPopScale"
+			popScale.Scale = 1
+			popScale.Parent = frame
+			loadingDataRecoveryPopScale = popScale
+		end
+		loadingDataRecoveryWarningLabel = frame:FindFirstChild("WarningLabel") :: TextLabel?
+		loadingDataRecoveryAttemptsLabel = frame:FindFirstChild("Attempts") :: TextLabel?
+		if loadingDataRecoveryAttemptsLabel then
+			loadingDataRecoveryAttemptsLabel.Text = "ATTEMPTS: 0"
+		end
+
+		local retryButtonFrame = frame:FindFirstChild("RetryButton")
+		loadingDataRecoveryRetryButton = retryButtonFrame
+			and retryButtonFrame:FindFirstChildWhichIsA("GuiButton", true)
+		if loadingDataRecoveryRetryButton then
+			bindGuiButton(loadingDataRecoveryRetryButton, "dataRecoveryRetry", function()
+				if localPlayer:GetAttribute("Data_LoadState") == "RecoveryRequired" then
+					if dataRecoveryRequestInFlight then
+						return
+					end
+					dataRecoveryRequestInFlight = true
+					setDataRecoveryFrameVisible(false)
+					updateLoadingProgress(loadingProgressFloor, "RETRYING DATA LOAD")
+					dataRecoveryRequestRemote:FireServer("Retry")
+				end
+			end)
+		end
+
+		local resetButtonFrame = frame:FindFirstChild("ResetButton")
+		loadingDataRecoveryResetButton = resetButtonFrame
+			and resetButtonFrame:FindFirstChildWhichIsA("GuiButton", true)
+		if loadingDataRecoveryResetButton then
+			bindGuiButton(loadingDataRecoveryResetButton, "dataRecoveryReset", function()
+				if
+					dataRecoveryRequestInFlight
+					or localPlayer:GetAttribute("Data_LoadState") ~= "RecoveryRequired"
+				then
+					return
+				end
+				dataRecoveryRequestInFlight = true
+				dataRecoveryRequestRemote:FireServer("Reset")
+			end)
+		end
+
+		if loadingFrame and loadingFrame.Visible and localPlayer:GetAttribute("Data_LoadState") == "RecoveryRequired" then
+			setDataRecoveryFrameVisible(true, true)
+		end
+	end
+
+	sessionMaid:GiveTask(localPlayer:GetAttributeChangedSignal("DataRecoveryAttempts"):Connect(updateDataRecoveryAttempts))
+	sessionMaid:GiveTask(dataRecoveryResultRemote.OnClientEvent:Connect(function(success: boolean, attempts: number, message: string)
+		dataRecoveryRequestInFlight = false
+		if typeof(attempts) == "number" and loadingDataRecoveryAttemptsLabel then
+			loadingDataRecoveryAttemptsLabel.Text = string.format("ATTEMPTS: %d", math.max(0, math.floor(attempts)))
+		end
+		if success then
+			setDataRecoveryFrameVisible(false)
+			if localPlayer:GetAttribute("Data_Loaded") == true then
+				runStartupLoading()
+			end
+			return
+		end
+		if loadingDataRecoveryWarningLabel and typeof(message) == "string" then
+			loadingDataRecoveryWarningLabel.Text = message
+		end
+		setDataRecoveryFrameVisible(true, true)
+	end))
 
 	local function deferSessionCallback(callback: () -> ())
 		sessionMaid:GiveTask(task.defer(function()
@@ -1057,11 +1562,27 @@ function MainOrchestrator.Init(root: Instance)
 		end
 	end
 
-	local function runStartupLoading()
+	runStartupLoading = function()
+		if not STARTUP_LOADING_ENABLED then
+			hasCompletedStartupLoading = true
+			loadingProgressFloor = 1
+			setDataRecoveryFrameVisible(false)
+			if loadingFrame then
+				loadingFrame.Visible = false
+				loadingFrame.Active = false
+			end
+			startupLoadingTask = nil
+			root:SetAttribute("StartupLoadingComplete", true)
+			return
+		end
+
 		if hasCompletedStartupLoading then
 			if loadingFrame then
 				loadingFrame.Visible = false
+				loadingFrame.Active = false
 			end
+			setDataRecoveryFrameVisible(false)
+			root:SetAttribute("StartupLoadingComplete", true)
 			debugLoading("Startup loading skipped because it has already completed")
 			return
 		end
@@ -1072,309 +1593,93 @@ function MainOrchestrator.Init(root: Instance)
 		end
 
 		loadingFrame.Visible = true
+		loadingFrame.Active = true
+		setDataRecoveryFrameVisible(false)
+		if loadingImage then
+			loadingImage.Position = UDim2.new(0.5, 0, 0.5, 0)
+			loadingImage.Size = UDim2.new(0, 0, 0, 0)
+			loadingImage.ImageTransparency = 0
+			loadingImage.Visible = true
+		end
+		if loadingGameImage then
+			loadingGameImage.Visible = false
+		end
+		if loadingLightRay then
+			loadingLightRay.Visible = false
+		end
+		if loadingLevelsBarFrame then
+			loadingLevelsBarFrame.Visible = false
+		end
+		if loadingSkipButtonFrame then
+			loadingSkipButtonFrame.Visible = false
+			loadingSkipButtonFrame.Active = false
+		end
 		lockLocalMovementForLoading()
-		fetchLoadingGameIcon()
-		debugLoading("Startup loading started")
+		debugLoading("Startup loading started; waiting for Data_Loaded")
 
 		startupLoadingTask = spawnSessionTask(function()
-			local MIN_SECTION_DISPLAY_TIME = 0.25
+			local DATA_WAIT_TIMEOUT = 20
 			local PRE_HIDE_HOLD_TIME = 0.5
 			local STANDARD_FADE_DURATION = 1
-			local ATTRIBUTE_WAIT_TIMEOUT = 20
-			local CAMERA_WAIT_TIMEOUT = 10
-			local preloadTargets: { { instance: Instance, name: string } } = {}
-			if loadingImage then
-				table.insert(preloadTargets, { instance = loadingImage, name = "Image" })
-			end
-			if loadingGameImage then
-				table.insert(preloadTargets, { instance = loadingGameImage, name = "GameImage" })
-			end
-			if loadingLightRay then
-				table.insert(preloadTargets, { instance = loadingLightRay, name = "LightRay" })
-			end
-			if jumpscareImage then
-				table.insert(preloadTargets, { instance = jumpscareImage, name = "JumpscareImage" })
-			end
-
-			local totalSteps = 1
-				+ #loadingRemoteNames
-				+ math.max(1, #preloadTargets)
-				+ 3
-				+ 4
-				+ #loadingSystemTasks
-				+ 1
-				+ #loadingRequiredAttributes
-			local completedSteps = 0
-
-			local function setLoadingStatus(baseLabel: string, detail: string?)
-				local formattedLabel = formatLoadingLabel(baseLabel, detail)
-				updateLoadingProgress(completedSteps / totalSteps, formattedLabel)
-				debugLoading(string.format("Loading status: %s [%d/%d]", formattedLabel, completedSteps, totalSteps))
-			end
-
-			local function markLoadingStep(baseLabel: string, detail: string?)
-				completedSteps += 1
-				local formattedLabel = formatLoadingLabel(baseLabel, detail)
-				updateLoadingProgress(completedSteps / totalSteps, formattedLabel)
-				debugLoading(
-					string.format("Loading step complete: %s [%d/%d]", formattedLabel, completedSteps, totalSteps)
-				)
-			end
-
-			local function jumpToDataLoad()
-				completedSteps = totalSteps - #loadingRequiredAttributes
-				local formattedLabel = formatLoadingLabel("Data Load", "Awaiting Server")
-				loadingProgressFloor = math.max(loadingProgressFloor, completedSteps / totalSteps)
-				hideLoadingSkipButton()
-				updateLoadingProgress(completedSteps / totalSteps, formattedLabel)
-				debugLoading(
-					string.format(
-						"Loading skip requested; jumping to %s [%d/%d]",
-						formattedLabel,
-						completedSteps,
-						totalSteps
+			local waitStarted = os.clock()
+			local delayedWarningShown = false
+			while
+				not isCleanedUp
+				and localPlayer.Parent ~= nil
+				and localPlayer:GetAttribute("Data_Loaded") ~= true
+			do
+				local dataLoadState = localPlayer:GetAttribute("Data_LoadState")
+				if dataLoadState == "Unavailable" or dataLoadState == "RecoveryRequired" then
+					debugLoadingWarn(
+						"Data load entered a terminal state: " .. tostring(dataLoadState) .. "; keeping startup blocked"
 					)
-				)
-			end
-
-			local function finishSection(sectionStartedAt: number)
-				local elapsed = os.clock() - sectionStartedAt
-				local remaining = MIN_SECTION_DISPLAY_TIME - elapsed
-				if remaining > 0 then
-					task.wait(remaining)
-				end
-			end
-
-			local sectionStartedAt = os.clock()
-			setLoadingStatus("Loading UI", "MainGUI")
-			task.wait()
-			markLoadingStep("Loading UI", "MainGUI")
-			finishSection(sectionStartedAt)
-
-			if not loadingSkipRequested then
-				sectionStartedAt = os.clock()
-				for _, remoteName in ipairs(loadingRemoteNames) do
-					if loadingSkipRequested then
-						break
+					if dataLoadState == "RecoveryRequired" then
+						setDataRecoveryFrameVisible(true, true)
+						updateLoadingProgress(loadingProgressFloor, "DATA RECOVERY REQUIRED")
+					else
+						setDataRecoveryFrameVisible(false)
+						updateLoadingProgress(loadingProgressFloor, "DATA LOAD FAILED - PLEASE REJOIN")
 					end
-					setLoadingStatus("Loading Remotes", remoteName)
-					remotes:WaitForChild(remoteName)
-					if loadingSkipRequested then
-						break
-					end
-					markLoadingStep("Loading Remotes", remoteName)
-				end
-				finishSection(sectionStartedAt)
-			else
-				jumpToDataLoad()
-			end
-			if loadingSkipRequested then
-				jumpToDataLoad()
-			end
-
-			if not loadingSkipRequested then
-				sectionStartedAt = os.clock()
-				if #preloadTargets == 0 then
-					markLoadingStep("Loading Core Assets", "None")
-				else
-					for _, preloadTarget in ipairs(preloadTargets) do
-						if loadingSkipRequested then
-							break
-						end
-						setLoadingStatus("Loading Core Assets", preloadTarget.name)
-						pcall(function()
-							ContentProvider:PreloadAsync({ preloadTarget.instance })
-						end)
-						if loadingSkipRequested then
-							break
-						end
-						markLoadingStep("Loading Core Assets", preloadTarget.name)
-					end
-				end
-				finishSection(sectionStartedAt)
-			end
-			if loadingSkipRequested then
-				jumpToDataLoad()
-			end
-
-			if not loadingSkipRequested then
-				sectionStartedAt = os.clock()
-				setLoadingStatus("Loading World", "Worlds")
-				local worldsFolder = workspace:WaitForChild("Worlds")
-				markLoadingStep("Loading World", "Worlds")
-
-				local currentWorld = (localPlayer:GetAttribute("Current_World") or "World1") :: string
-				setLoadingStatus("Loading World", currentWorld)
-				local world = worldsFolder:WaitForChild(currentWorld)
-				markLoadingStep("Loading World", currentWorld)
-
-				setLoadingStatus("Loading World", "LobbyRegion")
-				local lobbyRegionContainer = world:WaitForChild("LobbyRegion_Model")
-				lobbyRegionContainer:WaitForChild("LobbyRegion")
-				markLoadingStep("Loading World", "LobbyRegion")
-				finishSection(sectionStartedAt)
-			end
-			if loadingSkipRequested then
-				jumpToDataLoad()
-			end
-
-			if not loadingSkipRequested then
-				sectionStartedAt = os.clock()
-				setLoadingStatus("Loading Character", "Character")
-				local startupCharacter = localPlayer.Character or localPlayer.CharacterAdded:Wait()
-				markLoadingStep("Loading Character", "Character")
-
-				setLoadingStatus("Loading Character", "Humanoid")
-				startupCharacter:WaitForChild("Humanoid")
-				markLoadingStep("Loading Character", "Humanoid")
-
-				setLoadingStatus("Loading Character", "HumanoidRootPart")
-				startupCharacter:WaitForChild("HumanoidRootPart")
-				markLoadingStep("Loading Character", "HumanoidRootPart")
-
-				setLoadingStatus("Loading Character", "Camera")
-				local cameraWaitStarted = os.clock()
-				while workspace.CurrentCamera == nil and not loadingSkipRequested and not isCleanedUp do
-					local waitedFor = os.clock() - cameraWaitStarted
-					if waitedFor >= CAMERA_WAIT_TIMEOUT then
-						debugLoadingWarn(
-							string.format(
-								"Timed out waiting for CurrentCamera after %.1fs, continuing with fallback",
-								waitedFor
-							)
-						)
-						break
-					end
-					task.wait()
-				end
-				if workspace.CurrentCamera == nil then
-					debugLoadingWarn("CurrentCamera is still nil after timeout; continuing startup flow")
-				end
-				markLoadingStep("Loading Character", "Camera")
-				finishSection(sectionStartedAt)
-			end
-			if loadingSkipRequested then
-				jumpToDataLoad()
-			end
-
-			if not loadingSkipRequested then
-				sectionStartedAt = os.clock()
-				for _, systemTask in ipairs(loadingSystemTasks) do
-					if loadingSkipRequested then
-						break
-					end
-					setLoadingStatus("Loading Systems", systemTask)
-					task.wait()
-					if loadingSkipRequested then
-						break
-					end
-					markLoadingStep("Loading Systems", systemTask)
-				end
-				finishSection(sectionStartedAt)
-			end
-			if loadingSkipRequested then
-				jumpToDataLoad()
-			end
-
-			if not loadingSkipRequested then
-				sectionStartedAt = os.clock()
-				setLoadingStatus("Loading Cosmetics", "Startup")
-				task.wait(0.15)
-				markLoadingStep("Loading Cosmetics", "Startup")
-				finishSection(sectionStartedAt)
-			end
-			if loadingSkipRequested then
-				jumpToDataLoad()
-			end
-
-			sectionStartedAt = os.clock()
-			for _, attributeName in ipairs(loadingRequiredAttributes) do
-				hideLoadingSkipButton()
-				setLoadingStatus("Data Load", attributeName)
-				local waitStarted = os.clock()
-				local hasWarnedLongWait = false
-				local didTimeout = false
-				while not loadingSkipRequested and not isCleanedUp do
-					local attributeValue = localPlayer:GetAttribute(attributeName)
-					if attributeName == "Data_Loaded" then
-						if attributeValue == true then
-							debugLoading("Data load ready: Data_Loaded=true")
-							break
-						end
-					elseif attributeValue ~= nil then
-						debugLoading(string.format("Data load ready: %s=%s", attributeName, tostring(attributeValue)))
-						break
-					end
-
-					local waitedFor = os.clock() - waitStarted
-					if not hasWarnedLongWait and waitedFor >= 3 then
-						hasWarnedLongWait = true
-						debugLoadingWarn(
-							string.format("Still waiting on loading attribute %s after %.1fs", attributeName, waitedFor)
-						)
-					end
-
-					if waitedFor >= ATTRIBUTE_WAIT_TIMEOUT then
-						didTimeout = true
-						debugLoadingWarn(
-							string.format(
-								"Timed out waiting on loading attribute %s after %.1fs, continuing with fallback",
-								attributeName,
-								waitedFor
-							)
-						)
-						break
-					end
-					task.wait(0.1)
-				end
-
-				if isCleanedUp then
 					return
 				end
 
-				if loadingSkipRequested and not didTimeout then
-					break
+				if not delayedWarningShown and os.clock() - waitStarted >= DATA_WAIT_TIMEOUT then
+					delayedWarningShown = true
+					debugLoadingWarn(
+						string.format("Data load is still pending after %.1fs; keeping startup blocked", os.clock() - waitStarted)
+					)
+					updateLoadingProgress(loadingProgressFloor, "DATA LOAD DELAYED - KEEPING DATA SAFE")
 				end
-
-				markLoadingStep("Data Load", attributeName)
-			end
-			finishSection(sectionStartedAt)
-
-			updateLoadingProgress(1, formatLoadingLabel("Data Load", "Complete"))
-			debugLoading("Startup loading reached 100%")
-			hasCompletedStartupLoading = true
-			loadingProgressFloor = 1
-			if loadingProgressTween then
-				loadingProgressTween.Completed:Wait()
+				task.wait(0.1)
 			end
 
-			local fadeDuration = STANDARD_FADE_DURATION
-			if loadingLevelsBarFrame then
-				tweenGuiFadeOut(loadingLevelsBarFrame, fadeDuration)
-			end
-			if loadingSkipButtonFrame then
-				tweenGuiFadeOut(loadingSkipButtonFrame, fadeDuration)
-			end
-			if loadingLightRay then
-				tweenGuiFadeOut(loadingLightRay, fadeDuration)
-			end
-			if loadingGameImage then
-				tweenGuiFadeOut(loadingGameImage, fadeDuration)
+			if isCleanedUp or localPlayer.Parent == nil or localPlayer:GetAttribute("Data_Loaded") ~= true then
+				return
 			end
 
-			task.wait(fadeDuration)
+			updateLoadingProgress(loadingProgressFloor, "DATA LOAD READY")
+			debugLoading("Data load ready; playing final logo reveal")
 
 			if loadingImage then
-				local moveTween = TweenService:Create(
+				local bounceTween = TweenService:Create(
 					loadingImage,
-					TweenInfo.new(STANDARD_FADE_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					TweenConfig.LoadingLogoBounce,
 					{
-						Position = UDim2.new(0.5, 0, 0.5, 0),
+						Size = UDim2.new(0.54, 0, 0.54, 0),
+					}
+				)
+				bounceTween:Play()
+				bounceTween.Completed:Wait()
+
+				local settleTween = TweenService:Create(
+					loadingImage,
+					TweenConfig.LoadingLogoSettle,
+					{
 						Size = UDim2.new(0.5, 0, 0.5, 0),
 					}
 				)
-				moveTween:Play()
-				moveTween.Completed:Wait()
+				settleTween:Play()
+				settleTween.Completed:Wait()
 			end
 
 			task.wait(PRE_HIDE_HOLD_TIME)
@@ -1392,9 +1697,11 @@ function MainOrchestrator.Init(root: Instance)
 				loadingImage.Visible = false
 			end
 			loadingFrame.Visible = false
+			loadingFrame.Active = false
+			hasCompletedStartupLoading = true
+			root:SetAttribute("StartupLoadingComplete", true)
 			unlockLocalMovementForLoading()
 			debugLoading("Startup loading finished and frame hidden")
-			FavoriteGamePrompt.PromptAfterLoadingIfEligible(localPlayer)
 			if startupLoadingTask == coroutine.running() then
 				startupLoadingTask = nil
 			end
@@ -1419,6 +1726,11 @@ function MainOrchestrator.Init(root: Instance)
 			verifyClaimableUIState.template = instance
 		elseif instance.Name == "RebirthButtonFrame" then
 			rebirthReadyUIState.buttonFrame = instance
+			local lightRay = instance:FindFirstChild("LightRay", true)
+			if lightRay and lightRay:IsA("GuiObject") then
+				rebirthReadyUIState.lightRay = lightRay
+				lightRay.Visible = false
+			end
 			if rebirthReadyUIState.refresh then
 				deferSessionCallback(function()
 					if rebirthReadyUIState.refresh then
@@ -1476,11 +1788,21 @@ function MainOrchestrator.Init(root: Instance)
 			VisualFunctions.SetupPulsate(instance, 1.05)
 		elseif instance.Name == "LoadingFrame" and instance:IsA("Frame") then
 			loadingFrame = instance
-			instance.Visible = not hasCompletedStartupLoading
+			instance.Visible = STARTUP_LOADING_ENABLED and not hasCompletedStartupLoading
+			instance.Active = STARTUP_LOADING_ENABLED
 			loadingImage = instance:FindFirstChild("Image") :: ImageLabel?
 			loadingGameImage = instance:FindFirstChild("GameImage", true) :: ImageLabel?
 			loadingLightRay = instance:FindFirstChild("LightRay") :: ImageLabel?
 			loadingLevelsBarFrame = instance:FindFirstChild("LevelsBarFrame") :: Frame?
+			if loadingGameImage then
+				loadingGameImage.Visible = false
+			end
+			if loadingLightRay then
+				loadingLightRay.Visible = false
+			end
+			if loadingLevelsBarFrame then
+				loadingLevelsBarFrame.Visible = false
+			end
 			loadingProgressFrame = loadingLevelsBarFrame
 				and loadingLevelsBarFrame:FindFirstChild("ProgressFrame") :: Frame?
 			loadingProgressLabel = loadingLevelsBarFrame
@@ -1491,6 +1813,10 @@ function MainOrchestrator.Init(root: Instance)
 			loadingCurrentLabel = loadingLevelsBarFrame
 				and loadingLevelsBarFrame:FindFirstChild("CurrentLoadingLabel", true) :: TextLabel?
 			loadingSkipButtonFrame = instance:FindFirstChild("SkipButton")
+			if loadingSkipButtonFrame then
+				loadingSkipButtonFrame.Visible = false
+				loadingSkipButtonFrame.Active = false
+			end
 			loadingSkipButton = loadingSkipButtonFrame
 				and loadingSkipButtonFrame:FindFirstChildWhichIsA("GuiButton", true)
 			if loadingSkipButton then
@@ -1503,6 +1829,10 @@ function MainOrchestrator.Init(root: Instance)
 					updateLoadingProgress(0.9, formatLoadingLabel("Data Load", "Awaiting Server"))
 				end)
 			end
+
+			bindDataRecoveryFrame(instance:FindFirstChild("DataRecoveryFrame") :: Frame?)
+		elseif instance.Name == "DataRecoveryFrame" and instance:IsA("Frame") then
+			bindDataRecoveryFrame(instance)
 		elseif instance.Name == "ReturnToStageFrame" and instance:IsA("Frame") then
 			VisualFunctions.HUD.ReturnToStageFrame = instance
 			local returnToStageButton = instance:FindFirstChild("ReturnToStageButton", true)
@@ -1542,27 +1872,28 @@ function MainOrchestrator.Init(root: Instance)
 					end
 				end)
 
-				sessionMaid:GiveTask(
-					RewardedVideoClient.ConnectResult(
-						function(placementName: string, completed: boolean, _resultName: string)
-							if placementName ~= "ReturnToStage" then
-								return
-							end
+					sessionMaid:GiveTask(
+						RewardedVideoClient.ConnectResult(
+							function(placementName: string, completed: boolean, resultName: string)
+								if placementName ~= "ReturnToStage" then
+									return
+								end
 
-							if completed then
-								hideReturnToStageFrame()
-							else
-								watchAdButton.Active = true
-								watchAdButton.Interactable = true
+								if completed then
+									hideReturnToStageFrame()
+								elseif resultName == "Error" then
+									applyReturnToStageAdLayout(instance, false)
+								else
+									watchAdButton.Active = true
+									watchAdButton.Interactable = true
 							end
 						end
 					)
 				)
 
-				if watchAdFrame and watchAdFrame:IsA("GuiObject") then
-					watchAdFrame.Visible = false
-				end
 			end
+
+			applyReturnToStageAdLayout(instance, false)
 		elseif instance.Name == "StarterPackButtonFrame" then
 			local packImage = instance:FindFirstChild("PackImage", true)
 			if packImage and packImage:IsA("GuiObject") then
@@ -1594,7 +1925,13 @@ function MainOrchestrator.Init(root: Instance)
 				VisualFunctions.Labels.RebirthMultiLabel = instance
 			elseif instance.Name == "TrailMultiplier" then
 				VisualFunctions.Labels.TrailMultiplierLabel = instance
-			elseif instance.Name == "FriendMultiplier" then
+			elseif instance.Name == "FriendMultiplier"
+				or (
+					instance.Name == "Multiplier"
+					and instance.Parent ~= nil
+					and (instance.Parent.Name == "FriendMultiplier" or instance.Parent.Name == "FriendMultiplierFrame")
+				)
+			then
 				VisualFunctions.Labels.FriendMultiplierLabel = instance
 			elseif instance.Name == "XPAllSpeedLabel" then
 				VisualFunctions.Labels.XPAllSpeedLabel = instance
@@ -1734,8 +2071,8 @@ function MainOrchestrator.Init(root: Instance)
 		elseif instance.Name == "JumpscareImage" and instance:IsA("ImageLabel") then
 			jumpscareImage = instance
 			instance.Visible = false
-		elseif instance.Name == "PetsFrame" then
-			VisualFunctions.ActiveFrameGroup.PetsFrame = instance
+		elseif instance.Name == "PetFrame" and instance:IsA("Frame") then
+			VisualFunctions.ActiveFrameGroup.PetFrame = instance
 			instance.Visible = false
 		elseif instance.Name == "ShopFrame" then
 			VisualFunctions.ActiveFrameGroup.ShopFrame = instance
@@ -1777,25 +2114,25 @@ function MainOrchestrator.Init(root: Instance)
 				tutorialSystem:RefreshNotificationReferences()
 			end
 		elseif instance.Name == "StageProgressFrame" and instance:IsA("Frame") then
-			stageProgressFrame = instance
-			stageProgressTrackFrame = instance:FindFirstChild("TrackFrame", true) :: Frame?
-			stageProgressMarkersFrame = stageProgressTrackFrame
-				and stageProgressTrackFrame:FindFirstChild("Markers") :: Frame?
-			stageProgressCurrentStageLabel = instance:FindFirstChild("CurrentStageLabel", true) :: TextLabel?
-			stageProgressCurrentWorldLabel = (
+			stageProgressState.frame = instance
+			stageProgressState.trackFrame = instance:FindFirstChild("TrackFrame", true) :: Frame?
+			stageProgressState.markersFrame = stageProgressState.trackFrame
+				and stageProgressState.trackFrame:FindFirstChild("Markers") :: Frame?
+			stageProgressState.currentStageLabel = instance:FindFirstChild("CurrentStageLabel", true) :: TextLabel?
+			stageProgressState.currentWorldLabel = (
 				instance:FindFirstChild("CurrentWorldLabel", true)
 				or instance:FindFirstChild("CurrentWORLDLabel", true)
 				or instance:FindFirstChild("CurrentWorld", true)
 			) :: TextLabel?
-			stageProgressMarkerTemplate = stageProgressTrackFrame
-				and stageProgressTrackFrame:FindFirstChild("StageMarkerTemplate") :: GuiObject?
-			stageProgressAvatarTemplate = stageProgressTrackFrame
-				and stageProgressTrackFrame:FindFirstChild("AvatarImageTemplate") :: ImageLabel?
-			if stageProgressMarkerTemplate then
-				stageProgressMarkerTemplate.Visible = false
+			stageProgressState.markerTemplate = stageProgressState.trackFrame
+				and stageProgressState.trackFrame:FindFirstChild("StageMarkerTemplate") :: GuiObject?
+			stageProgressState.avatarTemplate = stageProgressState.trackFrame
+				and stageProgressState.trackFrame:FindFirstChild("AvatarImageTemplate") :: ImageLabel?
+			if stageProgressState.markerTemplate then
+				stageProgressState.markerTemplate.Visible = false
 			end
-			if stageProgressAvatarTemplate then
-				stageProgressAvatarTemplate.Visible = false
+			if stageProgressState.avatarTemplate then
+				stageProgressState.avatarTemplate.Visible = false
 			end
 		elseif instance.Name == "LevelsBarFrame" and not isInsideLoadingFrame(instance) then
 			local pg = instance:FindFirstChild("ProgressFrame", true)
@@ -1809,6 +2146,8 @@ function MainOrchestrator.Init(root: Instance)
 			end
 		elseif instance.Name == "SpeedMultiFrame" then
 			VisualFunctions.HUD.SpeedMultiFrame = instance
+		elseif instance.Name == "BottomRightGridFrame" and instance:IsA("Frame") then
+			VisualFunctions.HUD.BottomRightGridFrame = instance
 		elseif instance.Name == "SpeedBuyFrame" then
 			VisualFunctions.HUD.SpeedBuyFrame = instance
 		elseif instance.Name == "RightSideButtonsFrame" then
@@ -1827,9 +2166,9 @@ function MainOrchestrator.Init(root: Instance)
 			VisualFunctions.HUD.Float_CurrentWinFrame = instance
 			instance.Visible = false
 		elseif instance.Name == "CurrentWins" and instance:IsA("GuiObject") then
-			local bloodMoonProgress = instance:FindFirstAncestor("BloodMoonProgress")
-			if bloodMoonProgress then
-				VisualFunctions.HUD.BloodMoonCurrentWinsTarget = instance
+			local eventProgress = instance:FindFirstAncestor("EventProgress")
+			if eventProgress then
+				VisualFunctions.HUD.EventCurrentWinsTarget = instance
 			end
 		elseif instance.Name == "X2WinProductFrame_Parent" then
 			VisualFunctions.HUD.X2WinProductFrame_Parent = instance
@@ -1880,20 +2219,23 @@ function MainOrchestrator.Init(root: Instance)
 		end
 
 		-- 4. Hover & Click Interactions
+		local hudButtonStyle = ColorConfig.UI.HudButtonStyles[instance.Name]
+		if hudButtonStyle and instance:IsA("Frame") then
+			applyGradientStyle(instance, hudButtonStyle)
+		end
+
 		local hoverAttr = instance:GetAttribute("isHover")
+		local isPetInteractionFrame = PET_INTERACTION_FRAME_NAMES[instance.Name] == true
+			and instance:FindFirstAncestor("PetFrame") ~= nil
 		if
-			hoverAttr ~= nil
+			(hoverAttr ~= nil or isPetInteractionFrame)
 			and instance.Name ~= "TempSpeedBoostBuyFrame"
 			and instance.Name ~= "TempWinBoostBuyFrame"
+			and instance.Name ~= "WinStreak"
 		then
 			VisualFunctions.SetupFrameHover(instance, 1.1, 15, 1.5)
 			local hasButton = instance:IsA("GuiButton")
-			for _, child in ipairs(instance:GetChildren()) do
-				if child:IsA("GuiButton") then
-					hasButton = true
-					break
-				end
-			end
+				or instance:FindFirstChildWhichIsA("GuiButton", true) ~= nil
 			if hasButton then
 				VisualFunctions.SetupFrameClick(instance, 0.95, -15, 0.75)
 			end
@@ -1935,6 +2277,7 @@ function MainOrchestrator.Init(root: Instance)
 			TrollButtonFrame = "TrollFrame",
 			PlaytimeButtonFrame = "RewardsFrame",
 			DailyRewardButtonFrame = "DailyRewardFrame",
+			PetsButtonFrame = "PetFrame",
 		}
 		if instance.Name == "TrollButtonFrame" then
 			trollButtonFrame = instance
@@ -1960,6 +2303,9 @@ function MainOrchestrator.Init(root: Instance)
 			bindGuiButton(genericButton, "genericClick", function()
 				SoundService.PlayGuiSound("Click")
 			end)
+		end
+		if instance.Name == "RotateImage" and instance:FindFirstAncestor("WinCountFrame") then
+			WinCountShopShortcut.Bind(instance, sessionMaid)
 		end
 
 		if targetFrameName then
@@ -2009,6 +2355,7 @@ function MainOrchestrator.Init(root: Instance)
 			and instance.Parent:IsA("Frame")
 			and instance.Parent.Name ~= "SpinWheelFrame"
 			and instance.Parent.Name ~= "PromptBuyProductsFrame"
+			and not instance:FindFirstAncestor("OpenLuckyBlockFrame")
 		then
 			local targetParent = instance.Parent :: Frame
 			local button = if instance:IsA("GuiButton")
@@ -2152,14 +2499,36 @@ function MainOrchestrator.Init(root: Instance)
 					end)
 				elseif instance.Name == "DisableWaveButtonFrame" then
 					bindGuiButton(button, "purchase", function()
-						if Players.LocalPlayer:GetAttribute("DisableWavesOnCooldown") == true then
+						local cooldownEnd = Players.LocalPlayer:GetAttribute("DisableWavesCooldownEnd")
+						local isOnCooldown = typeof(cooldownEnd) == "number" and cooldownEnd > os.time()
+						if isOnCooldown or disableWavePurchaseInFlight then
 							return
 						end
 
-						SoundService.PlayGuiSound("Click")
 						local id = ProductService.DevProducts.DisableWaves
 						if id and id ~= 0 then
-							ProductService.promptProductPurchase(Players.LocalPlayer, id)
+							SoundService.PlayGuiSound("Click")
+							local promptStarted = ProductService.promptProductPurchase(Players.LocalPlayer, id)
+							if not promptStarted then
+								updateDisableWaveButtonInteraction()
+								return
+							end
+
+							cancelDisableWavePurchaseWatchdog()
+							disableWavePurchaseInFlight = true
+							local purchaseAttempt = disableWavePurchaseAttempt
+							updateDisableWaveButtonInteraction()
+							disableWavePurchaseWatchdogTask = task.spawn(function()
+								task.wait(DISABLE_WAVE_PURCHASE_WATCHDOG_SECONDS)
+								if isCleanedUp or purchaseAttempt ~= disableWavePurchaseAttempt then
+									return
+								end
+
+								disableWavePurchaseWatchdogTask = nil
+								disableWavePurchaseInFlight = false
+								updateDisableWaveButtonInteraction()
+							end)
+							sessionMaid:GiveTask(disableWavePurchaseWatchdogTask)
 						end
 					end)
 				elseif instance.Name == "ReturnToStageButton" then
@@ -2178,48 +2547,9 @@ function MainOrchestrator.Init(root: Instance)
 						end
 					end)
 				elseif instance.Name == "VerifyButton" then
-					bindGuiButton(button, "purchase", function()
-						SoundService.PlayGuiSound("Click")
-						spawnSessionTask(function()
-							local promptOk, promptResult = pcall(function()
-								return GroupService:PromptJoinAsync(VERIFY_GROUP_ID)
-							end)
-							if not promptOk then
-								DebugModule.debugWarn(
-									"Group prompt failed for VerifyButton: " .. tostring(promptResult),
-									"MainOrchestrator"
-								)
-							else
-								local status = promptResult :: Enum.GroupMembershipStatus
-								if
-									status ~= Enum.GroupMembershipStatus.Joined
-									and status ~= Enum.GroupMembershipStatus.AlreadyMember
-								then
-									if status == Enum.GroupMembershipStatus.JoinRequestPending then
-										local theme = VisualFunctions.NotificationThemes.Gold
-										showNotificationRespectingTutorial(
-											"GROUP REQUEST PENDING",
-											theme.textColor,
-											theme.gradientBottomColor
-										)
-									elseif status == Enum.GroupMembershipStatus.None then
-										local theme = VisualFunctions.NotificationThemes.Red
-										showNotificationRespectingTutorial(
-											"GROUP JOIN CANCELED",
-											theme.textColor,
-											theme.gradientBottomColor
-										)
-									end
-								end
-							end
-
-							local verifyRemote = ReplicatedStorage:WaitForChild("Remotes")
-								:FindFirstChild("VerifyRewardRequest")
-							if verifyRemote and verifyRemote:IsA("RemoteEvent") then
-								verifyRemote:FireServer()
-							end
-						end)
-					end)
+					if verifyGroupController then
+						verifyGroupController:BindButton(button)
+					end
 				elseif SHOP_BUTTON_CONFIGS[instance.Name] then
 					local shopConfig = SHOP_BUTTON_CONFIGS[instance.Name]
 					bindGuiButton(button, "purchase", function()
@@ -2239,9 +2569,24 @@ function MainOrchestrator.Init(root: Instance)
 		checkInstance(descendant)
 	end
 	sessionMaid:GiveTask(root.DescendantAdded:Connect(checkInstance))
+	sessionMaid:GiveTask(MenuOpenController.new(root))
 
 	local player = localPlayer
 	if player then
+		sessionMaid:GiveTask(bindPetInventoryNotifications(root, player, updateButtonNotificationBadge))
+		sessionMaid:GiveTask(WinStreakUI.new(root, player))
+		verifyGroupController = VerifyGroupController.new({
+			player = player,
+			groupId = if CoreConfig.social and typeof(CoreConfig.social.verifyGroupId) == "number"
+				then CoreConfig.social.verifyGroupId
+				else 13706307,
+			remotes = remotes,
+			sessionMaid = sessionMaid,
+			spawnSessionTask = spawnSessionTask,
+			showNotification = showNotificationRespectingTutorial,
+		})
+		verifyGroupController:BindAll(root)
+
 		local pendingPurchasedKarts: { [string]: boolean } = {}
 		local previousOwnedKarts: { [string]: boolean } = table.clone(PlayerHandler.GetOwnedKarts(player))
 		local winDisplayController: any = nil
@@ -2258,20 +2603,48 @@ function MainOrchestrator.Init(root: Instance)
 			local currentLevel = player:GetAttribute("CurrentLevel") or 1
 			local maxLevel = player:GetAttribute("MaxLevel") or 25
 			local canRebirth = maxLevel > 0 and currentLevel >= maxLevel
+			if rebirthReadyUIState.lightRay then
+				rebirthReadyUIState.lightRay.Visible = canRebirth
+			end
 
 			updateRebirthReadyBadgeVisibility(canRebirth)
 			if canRebirth and not rebirthReadyUIState.wasReady then
 				local theme = VisualFunctions.NotificationThemes.Purple
-				showNotificationRespectingTutorial("YOU CAN NOW REBIRTH!", theme.textColor, theme.gradientBottomColor)
+				rebirthReadyUIState.notificationPending = not showNotificationRespectingTutorial(
+					"YOU CAN NOW REBIRTH!",
+					theme.textColor,
+					theme.gradientBottomColor
+				)
+			elseif not canRebirth then
+				rebirthReadyUIState.notificationPending = false
 			end
 			rewardCelebrationController:UpdateRebirthReady(canRebirth, rebirthReadyUIState.buttonFrame)
 
 			rebirthReadyUIState.wasReady = canRebirth
 		end
+		rebirthReadyUIState.flushPending = function()
+			if not rebirthReadyUIState.notificationPending then
+				return
+			end
+
+			local currentLevel = player:GetAttribute("CurrentLevel") or 1
+			local maxLevel = player:GetAttribute("MaxLevel") or 25
+			if maxLevel <= 0 or currentLevel < maxLevel then
+				rebirthReadyUIState.notificationPending = false
+				return
+			end
+
+			local theme = VisualFunctions.NotificationThemes.Purple
+			if showNotificationRespectingTutorial("YOU CAN NOW REBIRTH!", theme.textColor, theme.gradientBottomColor) then
+				rebirthReadyUIState.notificationPending = false
+			end
+		end
 		rebirthReadyUIState.refresh = refreshRebirthReadyState
 		sessionMaid:GiveTask(function()
 			rebirthReadyUIState.refresh = nil
 			rebirthReadyUIState.wasReady = false
+			rebirthReadyUIState.notificationPending = false
+			rebirthReadyUIState.flushPending = nil
 			rewardCelebrationController:UpdateRebirthReady(false, nil)
 			updateRebirthReadyBadgeVisibility(false)
 		end)
@@ -2291,10 +2664,20 @@ function MainOrchestrator.Init(root: Instance)
 				tostring(pendingCount)
 			)
 		end
+		local function resetKartPurchaseBadgeBaseline()
+			previousOwnedKarts = table.clone(PlayerHandler.GetOwnedKarts(player))
+			table.clear(pendingPurchasedKarts)
+			refreshKartPurchaseBadge()
+		end
 		local function handleOwnedKartsChangedForBadge()
 			local currentOwnedKarts = PlayerHandler.GetOwnedKarts(player)
-			if player:GetAttribute("Data_Loaded") ~= true then
+			if
+				player:GetAttribute("Data_Loaded") ~= true
+				or player:GetAttribute("GamePassOwnershipSyncComplete") ~= true
+			then
 				previousOwnedKarts = table.clone(currentOwnedKarts)
+				table.clear(pendingPurchasedKarts)
+				refreshKartPurchaseBadge()
 				return
 			end
 			local equippedKart = player:GetAttribute("Kart_Equipped")
@@ -2413,35 +2796,12 @@ function MainOrchestrator.Init(root: Instance)
 		end)
 
 		local productCache = {}
-		local updateStageProgressPlayerMarkers: (() -> ())? = nil
-		local stageProgressMarkerUpdateAccumulator = STAGE_PROGRESS_MARKER_UPDATE_INTERVAL
+		stageProgressState.markerUpdateAccumulator = stageProgressState.markerUpdateInterval
 		local verifyRewardCountdownAccumulator = VERIFY_REWARD_COUNTDOWN_UPDATE_INTERVAL
 		local characterStateMaid: Maid? = nil
-		local kartEntryFrames: {
-			[string]: {
-				frame: Frame,
-				equipButton: Frame?,
-			},
-		} = {}
-		local trailEntryFrames: {
-			[string]: {
-				frame: Frame,
-				buyButton: Frame?,
-				robuxBuyButton: Frame?,
-				equipButton: Frame?,
-				robuxOriginalPosition: UDim2?,
-				robuxOriginalSize: UDim2?,
-			},
-		} =
-			{}
-		local kartShopMaid = Maid.new()
-		local trailShopMaid = Maid.new()
-		sessionMaid:GiveTask(kartShopMaid)
-		sessionMaid:GiveTask(trailShopMaid)
 		local disableWaveCountdownThread = 0
 		local returnToStageOfferThread = 0
 		local returnToStageOfferTask: thread? = nil
-		local pendingSkipRebirthNotificationUntil = 0
 		hideReturnToStageFrame = function()
 			returnToStageOfferThread += 1
 			if returnToStageOfferTask then
@@ -2557,6 +2917,13 @@ function MainOrchestrator.Init(root: Instance)
 			end
 
 			spawnSessionTask(function()
+				if ProductService.IsLocalExperienceCreator(Players.LocalPlayer) then
+					if VisualFunctions.HUD.ReturnToStagePriceLabel == priceLabel and priceLabel.Parent then
+						priceLabel.Text = "FREE"
+					end
+					return
+				end
+
 				local info = productCache[id]
 				if not info then
 					local success, result = pcall(function()
@@ -2599,55 +2966,55 @@ function MainOrchestrator.Init(root: Instance)
 			return nil
 		end
 
-		local function disconnectStageProgressTrackedPlayer(playerToDisconnect: Player)
-			local playerMaid = stageProgressTrackedPlayerMaids[playerToDisconnect]
+		stageProgressState.disconnectTrackedPlayer = function(playerToDisconnect: Player)
+			local playerMaid = stageProgressState.trackedPlayerMaids[playerToDisconnect]
 			if playerMaid then
 				playerMaid:DoCleaning()
-				stageProgressTrackedPlayerMaids[playerToDisconnect] = nil
+				stageProgressState.trackedPlayerMaids[playerToDisconnect] = nil
 			end
 
-			local existingMarker = stageProgressPlayerMarkers[playerToDisconnect.UserId]
+			local existingMarker = stageProgressState.playerMarkers[playerToDisconnect.UserId]
 			if existingMarker and existingMarker.Parent then
 				existingMarker:Destroy()
 			end
 
-			stageProgressPlayerMarkers[playerToDisconnect.UserId] = nil
-			stageProgressPlayerMarkerMissingUntil[playerToDisconnect.UserId] = nil
-			stageProgressAvatarCache[playerToDisconnect.UserId] = nil
-			stageProgressTrackedRootParts[playerToDisconnect] = nil
+			stageProgressState.playerMarkers[playerToDisconnect.UserId] = nil
+			stageProgressState.playerMarkerMissingUntil[playerToDisconnect.UserId] = nil
+			stageProgressState.avatarCache[playerToDisconnect.UserId] = nil
+			stageProgressState.trackedRootParts[playerToDisconnect] = nil
 		end
 
-		local function cacheStageProgressRootPart(playerToTrack: Player): BasePart?
+		stageProgressState.cacheRootPart = function(playerToTrack: Player): BasePart?
 			local targetCharacter = playerToTrack.Character
 			local rootCandidate = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
 			if rootCandidate and rootCandidate:IsA("BasePart") then
-				stageProgressTrackedRootParts[playerToTrack] = rootCandidate
+				stageProgressState.trackedRootParts[playerToTrack] = rootCandidate
 				return rootCandidate
 			end
 
-			stageProgressTrackedRootParts[playerToTrack] = nil
+			stageProgressState.trackedRootParts[playerToTrack] = nil
 			return nil
 		end
 
-		local function connectStageProgressTrackedPlayer(playerToTrack: Player)
-			disconnectStageProgressTrackedPlayer(playerToTrack)
+		stageProgressState.connectTrackedPlayer = function(playerToTrack: Player)
+			stageProgressState.disconnectTrackedPlayer(playerToTrack)
 
 			local playerMaid = Maid.new()
-			stageProgressTrackedPlayerMaids[playerToTrack] = playerMaid
-			cacheStageProgressRootPart(playerToTrack)
+			stageProgressState.trackedPlayerMaids[playerToTrack] = playerMaid
+			stageProgressState.cacheRootPart(playerToTrack)
 			playerMaid:GiveTask(playerToTrack.CharacterAdded:Connect(function()
-				cacheStageProgressRootPart(playerToTrack)
+				stageProgressState.cacheRootPart(playerToTrack)
 				sessionMaid:GiveTask(task.defer(function()
 					if not isCleanedUp then
-						updateStageProgressPlayerMarkers()
+						stageProgressState.updatePlayerMarkers()
 					end
 				end))
 			end))
 			playerMaid:GiveTask(playerToTrack.CharacterRemoving:Connect(function()
-				stageProgressTrackedRootParts[playerToTrack] = nil
+				stageProgressState.trackedRootParts[playerToTrack] = nil
 				sessionMaid:GiveTask(task.defer(function()
 					if not isCleanedUp then
-						updateStageProgressPlayerMarkers()
+						stageProgressState.updatePlayerMarkers()
 					end
 				end))
 			end))
@@ -2688,9 +3055,14 @@ function MainOrchestrator.Init(root: Instance)
 			playRewardCelebration = function()
 				rewardCelebrationController:PlayRewardCelebration()
 			end,
+			onTutorialUnlocked = function()
+				refreshRebirthReadyState()
+				if rebirthReadyUIState.flushPending then
+					rebirthReadyUIState.flushPending()
+				end
+			end,
 		})
 		tutorialSystem:RefreshNotificationReferences()
-		tutorialSystem:Start()
 		local dailyClaimableUIState = {
 			buttonFrame = root:FindFirstChild("DailyRewardButtonFrame", true) :: GuiObject?,
 			template = root:FindFirstChild("NotifShow_Template", true) :: GuiObject?,
@@ -2706,7 +3078,38 @@ function MainOrchestrator.Init(root: Instance)
 			end,
 			closeOtherFrames = MainFunctions.CloseOtherFrames,
 			openWindow = VisualFunctions.OpenWindow,
+			canAutoOpen = function(): boolean
+				return hasCompletedStartupLoading
+			end,
 		})
+		loadingMovementLockState.onLoadingComplete = function()
+			if
+				root:GetAttribute("PostLoadingStartupComplete") == true
+				or isCleanedUp
+				or root:GetAttribute("StartupLoadingComplete") ~= true
+				or localPlayer:GetAttribute("Data_Loaded") ~= true
+			then
+				return
+			end
+
+			root:SetAttribute("PostLoadingStartupComplete", true)
+			promptFavoriteGameIfReady()
+			tutorialSystem:Start()
+			tutorialSystem:OnProgressChanged()
+			refreshAffordableTrailBadge()
+			refreshPlaytimeClaimableBadge()
+			dailyRewardPromptController:RefreshBadge()
+			refreshVerifyClaimableBadge()
+			updateVerifyRewardValueLabels()
+			updateVerifyGroupCountdown(nil)
+			if verifyGroupController then
+				verifyGroupController:RefreshMembership()
+			end
+			dailyRewardPromptController:TryAutoOpen()
+		end
+		sessionMaid:GiveTask(
+			root:GetAttributeChangedSignal("StartupLoadingComplete"):Connect(loadingMovementLockState.onLoadingComplete)
+		)
 		dailyClaimableUIState.refresh = function()
 			dailyRewardPromptController:RefreshBadge()
 		end
@@ -2745,7 +3148,7 @@ function MainOrchestrator.Init(root: Instance)
 			return config.stepsText
 		end
 
-		local function getStageProgressWorldData(worldName: string): (Instance?, BasePart?, BasePart?, Instance?)
+		stageProgressState.getWorldData = function(worldName: string): (Instance?, BasePart?, BasePart?, Instance?)
 			local worldsFolder = Workspace:FindFirstChild("Worlds")
 			local world = worldsFolder and worldsFolder:FindFirstChild(worldName)
 			if not world then
@@ -2775,7 +3178,7 @@ function MainOrchestrator.Init(root: Instance)
 			return world, lobbyRegion, stageEnd, stagesFolder
 		end
 
-		local function formatCurrentWorldLabel(worldName: string?): string
+		stageProgressState.formatWorldLabel = function(worldName: string?): string
 			if typeof(worldName) ~= "string" or worldName == "" then
 				return "World 0"
 			end
@@ -2788,19 +3191,19 @@ function MainOrchestrator.Init(root: Instance)
 			return worldName
 		end
 
-		local function updateStageProgressTrackStyle(worldName: string?)
-			if not stageProgressTrackFrame then
+		stageProgressState.updateTrackStyle = function(worldName: string?)
+			if not stageProgressState.trackFrame then
 				return
 			end
 
-			local style = if typeof(worldName) == "string" and STAGE_PROGRESS_WORLD_STYLES[worldName]
-				then STAGE_PROGRESS_WORLD_STYLES[worldName]
-				else STAGE_PROGRESS_WORLD_STYLES.Fallback
+			local style = if typeof(worldName) == "string" and stageProgressState.worldStyles[worldName]
+				then stageProgressState.worldStyles[worldName]
+				else stageProgressState.worldStyles.Fallback
 
-			stageProgressTrackFrame.BackgroundColor3 = style.backgroundColor
+			stageProgressState.trackFrame.BackgroundColor3 = style.backgroundColor
 		end
 
-		local function getClampedTrackAlpha(
+		stageProgressState.getTrackAlpha = function(
 			startPosition: Vector3?,
 			endPosition: Vector3?,
 			worldPosition: Vector3?
@@ -2823,46 +3226,46 @@ function MainOrchestrator.Init(root: Instance)
 			return math.clamp(projectedDistance / pathLength, 0, 1)
 		end
 
-		local function clearStageProgressMarkers()
-			for _, marker in ipairs(stageProgressMarkerClones) do
+		stageProgressState.clearMarkers = function()
+			for _, marker in ipairs(stageProgressState.markerClones) do
 				marker:Destroy()
 			end
-			table.clear(stageProgressMarkerClones)
+			table.clear(stageProgressState.markerClones)
 		end
 
-		local function clearStageProgressPlayerMarkers()
-			for _, marker in pairs(stageProgressPlayerMarkers) do
+		stageProgressState.clearPlayerMarkers = function()
+			for _, marker in pairs(stageProgressState.playerMarkers) do
 				marker:Destroy()
 			end
-			table.clear(stageProgressPlayerMarkers)
-			table.clear(stageProgressPlayerMarkerMissingUntil)
+			table.clear(stageProgressState.playerMarkers)
+			table.clear(stageProgressState.playerMarkerMissingUntil)
 		end
 
-		local function ensureStageProgressAvatarMarker(targetPlayer: Player): ImageLabel?
-			if not stageProgressTrackFrame or not stageProgressAvatarTemplate then
+		stageProgressState.ensureAvatarMarker = function(targetPlayer: Player): ImageLabel?
+			if not stageProgressState.trackFrame or not stageProgressState.avatarTemplate then
 				return nil
 			end
 
-			local existing = stageProgressPlayerMarkers[targetPlayer.UserId]
+			local existing = stageProgressState.playerMarkers[targetPlayer.UserId]
 			if existing and existing.Parent then
 				return existing
 			end
 
-			local clone = stageProgressAvatarTemplate:Clone()
+			local clone = stageProgressState.avatarTemplate:Clone()
 			clone.Name = string.format("PlayerMarker_%d", targetPlayer.UserId)
 			clone.Visible = true
 			clone.Image = ""
 			clone.ImageTransparency = 0
-			clone.Parent = stageProgressTrackFrame
+			clone.Parent = stageProgressState.trackFrame
 			clone.ZIndex = if targetPlayer == player then 5 else 3
 			local requestId = (clone:GetAttribute("StageProgressAvatarRequestId") or 0) :: number
 			requestId += 1
 			clone:SetAttribute("StageProgressAvatarRequestId", requestId)
 			clone:SetAttribute("StageProgressAvatarUserId", targetPlayer.UserId)
-			stageProgressPlayerMarkers[targetPlayer.UserId] = clone
+			stageProgressState.playerMarkers[targetPlayer.UserId] = clone
 
 			spawnSessionTask(function()
-				local cachedImage = stageProgressAvatarCache[targetPlayer.UserId]
+				local cachedImage = stageProgressState.avatarCache[targetPlayer.UserId]
 				if not cachedImage then
 					local success, content, _ = pcall(function()
 						return Players:GetUserThumbnailAsync(
@@ -2873,7 +3276,7 @@ function MainOrchestrator.Init(root: Instance)
 					end)
 					if success and typeof(content) == "string" then
 						cachedImage = content
-						stageProgressAvatarCache[targetPlayer.UserId] = content
+						stageProgressState.avatarCache[targetPlayer.UserId] = content
 					end
 				end
 
@@ -2890,41 +3293,41 @@ function MainOrchestrator.Init(root: Instance)
 			return clone
 		end
 
-		local function rebuildStageProgressMarkers()
-			clearStageProgressMarkers()
+		stageProgressState.rebuildMarkers = function()
+			stageProgressState.clearMarkers()
 
 			local currentWorld = player:GetAttribute("Current_World")
 			if typeof(currentWorld) ~= "string" or currentWorld == "" then
-				stageProgressWorldName = nil
-				stageProgressStartPosition = nil
-				stageProgressEndPosition = nil
-				if stageProgressCurrentWorldLabel then
-					stageProgressCurrentWorldLabel.Text = "World 0"
+				stageProgressState.worldName = nil
+				stageProgressState.startPosition = nil
+				stageProgressState.endPosition = nil
+				if stageProgressState.currentWorldLabel then
+					stageProgressState.currentWorldLabel.Text = "World 0"
 				end
 				return
 			end
 
-			stageProgressWorldName = currentWorld
-			updateStageProgressTrackStyle(currentWorld)
-			if stageProgressCurrentWorldLabel then
-				stageProgressCurrentWorldLabel.Text = formatCurrentWorldLabel(currentWorld)
+			stageProgressState.worldName = currentWorld
+			stageProgressState.updateTrackStyle(currentWorld)
+			if stageProgressState.currentWorldLabel then
+				stageProgressState.currentWorldLabel.Text = stageProgressState.formatWorldLabel(currentWorld)
 			end
 
-			local _, lobbyRegion, stageEnd, stagesFolder = getStageProgressWorldData(currentWorld)
+			local _, lobbyRegion, stageEnd, stagesFolder = stageProgressState.getWorldData(currentWorld)
 			if
 				not lobbyRegion
 				or not stagesFolder
-				or not stageProgressTrackFrame
-				or not stageProgressMarkersFrame
-				or not stageProgressMarkerTemplate
+				or not stageProgressState.trackFrame
+				or not stageProgressState.markersFrame
+				or not stageProgressState.markerTemplate
 			then
-				stageProgressStartPosition = nil
-				stageProgressEndPosition = nil
+				stageProgressState.startPosition = nil
+				stageProgressState.endPosition = nil
 				return
 			end
 
-			stageProgressStartPosition = lobbyRegion.Position
-			stageProgressEndPosition = if stageEnd then stageEnd.Position else nil
+			stageProgressState.startPosition = lobbyRegion.Position
+			stageProgressState.endPosition = if stageEnd then stageEnd.Position else nil
 
 			local stageEntries = {}
 			for _, child in ipairs(stagesFolder:GetChildren()) do
@@ -2933,8 +3336,11 @@ function MainOrchestrator.Init(root: Instance)
 					then child
 					else child:FindFirstChildWhichIsA("BasePart", true)
 				if typeof(stageNumber) == "number" and stagePart and stagePart:IsA("BasePart") then
-					local alpha =
-						getClampedTrackAlpha(stageProgressStartPosition, stageProgressEndPosition, stagePart.Position)
+					local alpha = stageProgressState.getTrackAlpha(
+						stageProgressState.startPosition,
+						stageProgressState.endPosition,
+						stagePart.Position
+					)
 					table.insert(stageEntries, {
 						stageNumber = stageNumber,
 						position = stagePart.Position,
@@ -2947,20 +3353,20 @@ function MainOrchestrator.Init(root: Instance)
 				return a.stageNumber < b.stageNumber
 			end)
 
-			if not stageProgressEndPosition and #stageEntries > 0 then
-				stageProgressEndPosition = stageEntries[#stageEntries].position
+			if not stageProgressState.endPosition and #stageEntries > 0 then
+				stageProgressState.endPosition = stageEntries[#stageEntries].position
 			end
 
-			if not stageProgressEndPosition then
-				stageProgressStartPosition = nil
+			if not stageProgressState.endPosition then
+				stageProgressState.startPosition = nil
 				return
 			end
 
 			local minimumSpacingScale = 0.015
-			if stageProgressTrackFrame.AbsoluteSize.X > 0 then
+			if stageProgressState.trackFrame.AbsoluteSize.X > 0 then
 				minimumSpacingScale = math.max(
 					minimumSpacingScale,
-					stageProgressMarkerTemplate.AbsoluteSize.X / stageProgressTrackFrame.AbsoluteSize.X
+					stageProgressState.markerTemplate.AbsoluteSize.X / stageProgressState.trackFrame.AbsoluteSize.X
 				)
 			end
 
@@ -2978,91 +3384,89 @@ function MainOrchestrator.Init(root: Instance)
 			end
 
 			for index, stageEntry in ipairs(stageEntries) do
-				local markerClone = stageProgressMarkerTemplate:Clone()
+				local markerClone = stageProgressState.markerTemplate:Clone()
 				markerClone.Name = "StageMarker_" .. tostring(stageEntry.stageNumber)
 				markerClone.Visible = true
 				markerClone.ZIndex = 1
-				markerClone.Parent = stageProgressMarkersFrame
+				markerClone.Parent = stageProgressState.markersFrame
 
 				local alpha = math.clamp(adjustedAlphas[index], 0, 1)
 				markerClone.Position = UDim2.new(
 					alpha,
-					stageProgressMarkerTemplate.Position.X.Offset,
-					stageProgressMarkerTemplate.Position.Y.Scale,
-					stageProgressMarkerTemplate.Position.Y.Offset
+					stageProgressState.markerTemplate.Position.X.Offset,
+					stageProgressState.markerTemplate.Position.Y.Scale,
+					stageProgressState.markerTemplate.Position.Y.Offset
 				)
-				table.insert(stageProgressMarkerClones, markerClone)
+				table.insert(stageProgressState.markerClones, markerClone)
 			end
 		end
 
-		local function tryRefreshStageProgress()
-			rebuildStageProgressMarkers()
-			if updateStageProgressPlayerMarkers then
-				updateStageProgressPlayerMarkers()
-			end
+		stageProgressState.tryRefresh = function()
+			stageProgressState.rebuildMarkers()
+			stageProgressState.updatePlayerMarkers()
 		end
 
-		updateStageProgressPlayerMarkers = function()
-			if stageProgressFrame and not stageProgressFrame.Visible then
+		stageProgressState.updatePlayerMarkers = function()
+			if stageProgressState.frame and not stageProgressState.frame.Visible then
 				return
 			end
 
 			local currentWorld = player:GetAttribute("Current_World")
 			local currentStage = player:GetAttribute("CurrentStage")
 
-			if stageProgressCurrentStageLabel then
-				stageProgressCurrentStageLabel.Text =
+			if stageProgressState.currentStageLabel then
+				stageProgressState.currentStageLabel.Text =
 					string.format("Stage %d", if typeof(currentStage) == "number" then currentStage else 0)
 			end
 
 			if typeof(currentWorld) ~= "string" or currentWorld == "" then
-				clearStageProgressPlayerMarkers()
-				updateStageProgressTrackStyle(nil)
-				if stageProgressCurrentWorldLabel then
-					stageProgressCurrentWorldLabel.Text = "World 0"
+				stageProgressState.clearPlayerMarkers()
+				stageProgressState.updateTrackStyle(nil)
+				if stageProgressState.currentWorldLabel then
+					stageProgressState.currentWorldLabel.Text = "World 0"
 				end
 				return
 			end
 
-			if stageProgressCurrentWorldLabel then
-				stageProgressCurrentWorldLabel.Text = formatCurrentWorldLabel(currentWorld)
+			if stageProgressState.currentWorldLabel then
+				stageProgressState.currentWorldLabel.Text = stageProgressState.formatWorldLabel(currentWorld)
 			end
-			updateStageProgressTrackStyle(currentWorld)
+			stageProgressState.updateTrackStyle(currentWorld)
 
 			if
-				stageProgressWorldName ~= currentWorld
-				or not stageProgressStartPosition
-				or not stageProgressEndPosition
+				stageProgressState.worldName ~= currentWorld
+				or not stageProgressState.startPosition
+				or not stageProgressState.endPosition
 			then
-				rebuildStageProgressMarkers()
+				stageProgressState.rebuildMarkers()
 			end
 
-			if not stageProgressStartPosition or not stageProgressEndPosition then
-				clearStageProgressPlayerMarkers()
+			if not stageProgressState.startPosition or not stageProgressState.endPosition then
+				stageProgressState.clearPlayerMarkers()
 				return
 			end
 
-			if not stageProgressTrackFrame or not stageProgressAvatarTemplate then
+			if not stageProgressState.trackFrame or not stageProgressState.avatarTemplate then
 				return
 			end
 
 			local visibleUserIds = {}
-			for targetPlayer in pairs(stageProgressTrackedPlayerMaids) do
+			for targetPlayer in pairs(stageProgressState.trackedPlayerMaids) do
 				if targetPlayer:GetAttribute("Current_World") ~= currentWorld then
 					continue
 				end
 
 				local character = targetPlayer.Character
-				local rootPart = stageProgressTrackedRootParts[targetPlayer]
+				local rootPart = stageProgressState.trackedRootParts[targetPlayer]
 				if not character or not rootPart or rootPart.Parent ~= character then
-					rootPart = cacheStageProgressRootPart(targetPlayer)
+					rootPart = stageProgressState.cacheRootPart(targetPlayer)
 				end
 				if not rootPart or not rootPart:IsA("BasePart") then
-					local existingMarker = stageProgressPlayerMarkers[targetPlayer.UserId]
-					local missingUntil = stageProgressPlayerMarkerMissingUntil[targetPlayer.UserId]
+					local existingMarker = stageProgressState.playerMarkers[targetPlayer.UserId]
+					local missingUntil = stageProgressState.playerMarkerMissingUntil[targetPlayer.UserId]
 					if missingUntil == nil then
-						missingUntil = tick() + STAGE_PROGRESS_MARKER_MISSING_GRACE
-						stageProgressPlayerMarkerMissingUntil[targetPlayer.UserId] = missingUntil
+						missingUntil = tick() + stageProgressState.markerMissingGrace
+						stageProgressState.playerMarkerMissingUntil[targetPlayer.UserId] = missingUntil
 					end
 
 					if existingMarker and existingMarker.Parent and tick() <= missingUntil then
@@ -3072,131 +3476,35 @@ function MainOrchestrator.Init(root: Instance)
 					continue
 				end
 
-				stageProgressPlayerMarkerMissingUntil[targetPlayer.UserId] = nil
+				stageProgressState.playerMarkerMissingUntil[targetPlayer.UserId] = nil
 
-				local marker = ensureStageProgressAvatarMarker(targetPlayer)
+				local marker = stageProgressState.ensureAvatarMarker(targetPlayer)
 				if not marker then
 					continue
 				end
 
-				local alpha =
-					getClampedTrackAlpha(stageProgressStartPosition, stageProgressEndPosition, rootPart.Position)
+				local alpha = stageProgressState.getTrackAlpha(
+					stageProgressState.startPosition,
+					stageProgressState.endPosition,
+					rootPart.Position
+				)
 				marker.Position = UDim2.new(
 					alpha,
-					stageProgressAvatarTemplate.Position.X.Offset,
-					stageProgressAvatarTemplate.Position.Y.Scale,
-					stageProgressAvatarTemplate.Position.Y.Offset
+					stageProgressState.avatarTemplate.Position.X.Offset,
+					stageProgressState.avatarTemplate.Position.Y.Scale,
+					stageProgressState.avatarTemplate.Position.Y.Offset
 				)
 				marker.Visible = true
 				marker.ZIndex = if targetPlayer == player then 5 else 3
 				visibleUserIds[targetPlayer.UserId] = true
 			end
 
-			for userId, marker in pairs(stageProgressPlayerMarkers) do
+			for userId, marker in pairs(stageProgressState.playerMarkers) do
 				if not visibleUserIds[userId] then
 					marker.Visible = false
 				end
 			end
 		end
-
-		local KART_FRAME_CONFIGS = {
-			{
-				kartName = "AdvancedTank",
-				displayName = "Advanced Tank",
-				gamePassId = ProductService.Gamepasses["AdvancedTank"],
-				backgroundColor = Color3.new(0, 1, 1),
-				gradientBottomColor = Color3.new(0, 0.3843, 1),
-			},
-			{
-				kartName = "ShoppingKart",
-				displayName = "Shopping Kart",
-				gamePassId = ProductService.Gamepasses["ShoppingKart"],
-				backgroundColor = Color3.new(0.6745, 0.6471, 0.6667),
-				gradientBottomColor = Color3.new(0.302, 0.302, 0.302),
-			},
-			{
-				kartName = "FormulaCar",
-				displayName = "Formula Car",
-				gamePassId = ProductService.Gamepasses["FormulaCar"],
-				backgroundColor = Color3.new(1, 0.3059, 0.3059),
-				gradientBottomColor = Color3.new(0.8078, 0, 0.0118),
-			},
-			{
-				kartName = "1_FlameKart",
-				displayName = "Flame Kart",
-				sourceFolder = "Specials",
-				wheelOnly = true,
-				wheelImage = (SpinWheelConfig.GetReward("FlameKart") :: SpinWheelConfig.RewardDefinition).imageAssetId,
-				backgroundColor = Color3.fromRGB(254, 199, 41),
-				gradientBottomColor = Color3.fromRGB(255, 85, 0),
-			},
-			{
-				kartName = "1_CrimsonRunner",
-				displayName = "Crimson Runner",
-				sourceFolder = "Specials",
-				sourceSubfolder = "Bloodmoon",
-				bloodmoonKart = true,
-				showOnlyWhenOwned = true,
-				imageAssetId = "rbxassetid://140523900133990",
-				backgroundColor = Color3.fromRGB(255, 0, 0),
-				gradientBottomColor = Color3.fromRGB(130, 0, 0),
-			},
-			{
-				kartName = "2_NightGlider",
-				displayName = "Night Glider",
-				sourceFolder = "Specials",
-				sourceSubfolder = "Bloodmoon",
-				bloodmoonKart = true,
-				showOnlyWhenOwned = true,
-				imageAssetId = "rbxassetid://104926778382950",
-				backgroundColor = Color3.fromRGB(255, 0, 0),
-				gradientBottomColor = Color3.fromRGB(130, 0, 0),
-			},
-			{
-				kartName = "3_Moonfang",
-				displayName = "Moonfang",
-				sourceFolder = "Specials",
-				sourceSubfolder = "Bloodmoon",
-				bloodmoonKart = true,
-				showOnlyWhenOwned = true,
-				imageAssetId = "rbxassetid://120790041354948",
-				backgroundColor = Color3.fromRGB(255, 0, 0),
-				gradientBottomColor = Color3.fromRGB(130, 0, 0),
-			},
-			{
-				kartName = "4_CrimsonCell",
-				displayName = "Crimson Cell",
-				sourceFolder = "Specials",
-				sourceSubfolder = "Bloodmoon",
-				productKey = "CrimsonCell",
-				bloodmoonKart = true,
-				showOnlyWhenOwned = true,
-				backgroundColor = Color3.fromRGB(255, 0, 0),
-				gradientBottomColor = Color3.fromRGB(130, 0, 0),
-			},
-			{
-				kartName = "5_BloodDragon",
-				displayName = "Blood Dragon",
-				sourceFolder = "Specials",
-				sourceSubfolder = "Bloodmoon",
-				productKey = "BloodDragon",
-				bloodmoonKart = true,
-				showOnlyWhenOwned = true,
-				backgroundColor = Color3.fromRGB(255, 0, 0),
-				gradientBottomColor = Color3.fromRGB(130, 0, 0),
-			},
-			{
-				kartName = "6_SiegeTank",
-				displayName = "Siege Tank",
-				sourceFolder = "Specials",
-				sourceSubfolder = "Bloodmoon",
-				productKey = "SiegeTank",
-				bloodmoonKart = true,
-				showOnlyWhenOwned = true,
-				backgroundColor = Color3.fromRGB(255, 0, 0),
-				gradientBottomColor = Color3.fromRGB(130, 0, 0),
-			},
-		}
 
 		local function updateShopButtons()
 			for frameName, config in pairs(SHOP_BUTTON_CONFIGS) do
@@ -3315,9 +3623,7 @@ function MainOrchestrator.Init(root: Instance)
 
 			local watchAdFrame = frame:FindFirstChild("WatchAdButton", true)
 			local watchAdTextButton = watchAdFrame and watchAdFrame:FindFirstChildWhichIsA("GuiButton", true)
-			if watchAdFrame and watchAdFrame:IsA("GuiObject") then
-				watchAdFrame.Visible = RewardedVideoClient.IsAvailable()
-			end
+			applyReturnToStageAdLayout(frame, RewardedVideoClient.IsAvailable())
 			if watchAdTextButton then
 				watchAdTextButton.Active = true
 				watchAdTextButton.Interactable = true
@@ -3556,17 +3862,24 @@ function MainOrchestrator.Init(root: Instance)
 				return
 			end
 
-			local isOnCooldown = player:GetAttribute("DisableWavesOnCooldown") == true
-			local cooldownEnd = player:GetAttribute("DisableWavesCooldownEnd") or 0
+			local rawCooldownEnd = player:GetAttribute("DisableWavesCooldownEnd")
+			local cooldownEnd = if typeof(rawCooldownEnd) == "number" then math.floor(rawCooldownEnd) else 0
+			-- The timestamp is authoritative. A stale replicated boolean must not
+			-- permanently disable the purchase button after the cooldown expires.
+			local isOnCooldown = cooldownEnd > os.time()
 			local countdownLabel = VisualFunctions.HUD.DisableWaveCountdownLabel
-			VisualFunctions.SetFrameInteractableState(frame, not isOnCooldown)
+			updateDisableWaveButtonInteraction()
+
+			if isOnCooldown and cooldownEnd > 0 then
+				showDisableWaveNotification(cooldownEnd)
+			end
 
 			disableWaveCountdownThread += 1
 			local threadId = disableWaveCountdownThread
 
 			if not isOnCooldown or typeof(cooldownEnd) ~= "number" or cooldownEnd <= 0 then
 				if disableWaveCountdownTask then
-					task.cancel(disableWaveCountdownTask)
+					cancelThread(disableWaveCountdownTask)
 					disableWaveCountdownTask = nil
 				end
 				if countdownLabel then
@@ -3582,7 +3895,7 @@ function MainOrchestrator.Init(root: Instance)
 			end
 
 			if disableWaveCountdownTask then
-				task.cancel(disableWaveCountdownTask)
+				cancelThread(disableWaveCountdownTask)
 				disableWaveCountdownTask = nil
 			end
 
@@ -3592,7 +3905,6 @@ function MainOrchestrator.Init(root: Instance)
 					if countdownLabel then
 						countdownLabel.Text = tostring(remaining) .. "s"
 					end
-
 					if remaining <= 0 then
 						break
 					end
@@ -3600,9 +3912,12 @@ function MainOrchestrator.Init(root: Instance)
 					task.wait(1)
 				end
 
-				if threadId == disableWaveCountdownThread and countdownLabel then
-					countdownLabel.Text = "0s"
-					countdownLabel.Visible = false
+				if threadId == disableWaveCountdownThread then
+					updateDisableWaveButtonInteraction()
+					if countdownLabel then
+						countdownLabel.Text = "0s"
+						countdownLabel.Visible = false
+					end
 				end
 
 				if disableWaveCountdownTask == coroutine.running() then
@@ -3611,613 +3926,59 @@ function MainOrchestrator.Init(root: Instance)
 			end)
 		end
 
-		local function formatTrailMultiplier(multiplier: number): string
-			local text = string.format("%.2f", multiplier)
-			text = text:gsub("%.00$", "")
-			text = text:gsub("(%..-)0$", "%1")
-			return text
+		productCache.kartShopController = KartShopController.new({
+			player = player,
+			kartActionRemote = kartActionRemote,
+			getMarketplaceInfoCached = getMarketplaceInfoCached,
+			isLiveEventActive = isLiveEventActive,
+			openSpinWheelFromShop = openSpinWheelFromShop,
+			applyWheelStyle = applyWheelStyle,
+			applyEquipStyle = applyEquipStyle,
+		})
+		sessionMaid:GiveTask(productCache.kartShopController)
+
+		productCache.buildKartShop = function()
+			productCache.kartShopController:Build()
 		end
 
-		local function getOrCreateEquipButton(entryFrame: Frame): Frame?
-			local existing = entryFrame:FindFirstChild("EquipButton")
-			if existing and existing:IsA("Frame") then
-				return existing
-			end
-
-			local buyButton = entryFrame:FindFirstChild("BuyButton")
-			if not buyButton or not buyButton:IsA("Frame") then
-				return nil
-			end
-
-			local equipButton = buyButton:Clone()
-			equipButton.Name = "EquipButton"
-			equipButton.Parent = entryFrame
-
-			local textButton = equipButton:FindFirstChild("TextButton", true)
-			if textButton and textButton:IsA("TextButton") then
-				textButton.Text = "EQUIP"
-			end
-
-			return equipButton
+		productCache.updateKartShop = function()
+			productCache.kartShopController:Update()
 		end
 
-		local WHEEL_BACKGROUND_COLOR = Color3.fromRGB(254, 199, 41)
-		local WHEEL_GRADIENT_BOTTOM_COLOR = Color3.fromRGB(255, 85, 0)
-		local EQUIP_BACKGROUND_COLOR = Color3.fromRGB(0, 255, 0)
-		local EQUIP_GRADIENT_BOTTOM_COLOR = Color3.fromRGB(0, 130, 15)
 
-		local function applyWheelStyle(frame: Frame)
-			frame.BackgroundColor3 = WHEEL_BACKGROUND_COLOR
-			frame:SetAttribute("OriginalDisabledBaseColor", nil)
-			local gradient = frame:FindFirstChildOfClass("UIGradient")
-			if not gradient then
-				gradient = Instance.new("UIGradient")
-				gradient.Parent = frame
-			end
-			gradient.Rotation = 90
-			gradient.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-				ColorSequenceKeypoint.new(1, WHEEL_GRADIENT_BOTTOM_COLOR),
-			})
-			VisualFunctions.RefreshFrameInteractionColors(frame)
-		end
 
-		local function applyEquipStyle(frame: Frame)
-			frame.BackgroundColor3 = EQUIP_BACKGROUND_COLOR
-			local gradient = frame:FindFirstChildOfClass("UIGradient")
-			if not gradient then
-				gradient = Instance.new("UIGradient")
-				gradient.Parent = frame
-			end
-			gradient.Rotation = 90
-			gradient.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-				ColorSequenceKeypoint.new(1, EQUIP_GRADIENT_BOTTOM_COLOR),
-			})
-			VisualFunctions.RefreshFrameInteractionColors(frame)
-		end
 
-		local function openSpinWheelFromShop()
-			MainFunctions.SetFrameVisibleSimple("TrailFrame", false)
-			MainFunctions.SetFrameVisibleSimple("KartFrame", false)
-			local requestId = player:GetAttribute("SpinWheelOpenRequested")
-			local nextRequestId = if typeof(requestId) == "number" then requestId + 1 else 1
-			player:SetAttribute("SpinWheelOpenRequested", nextRequestId)
-		end
-
-		local function updateTrailEntryPrice(trailName: string, config)
-			local entry = trailEntryFrames[trailName]
-			if not entry or not entry.robuxBuyButton then
-				return
-			end
-			if config.RewardSource == "SpinWheel" or config.EventOnly == true then
-				entry.robuxBuyButton.Visible = false
-				return
-			end
-
-			local priceLabel = entry.robuxBuyButton:FindFirstChild("PriceLabel", true)
-			local trailTypeImage = entry.frame:FindFirstChild("TrailType", true)
-
-			local productId = ProductService.DevProducts[config.ProductKey]
-			if not productId then
-				if priceLabel and priceLabel:IsA("TextLabel") then
-					priceLabel.Text = "---"
-				end
-				return
-			end
-
-			spawnSessionTask(function()
-				local info = productCache[productId]
-				if not info then
-					local success, result = pcall(function()
-						return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
-					end)
-					if success then
-						info = result
-						productCache[productId] = result
-					end
-				end
-
-				if info then
-					if priceLabel and priceLabel:IsA("TextLabel") and priceLabel.Parent then
-						priceLabel.Text = tostring(info.PriceInRobux or 0)
-					end
-
-					if trailTypeImage and trailTypeImage:IsA("ImageLabel") and trailTypeImage.Parent then
-						local iconId = tonumber(info.IconImageAssetId)
-						if iconId and iconId > 0 then
-							trailTypeImage.Image = "rbxassetid://" .. tostring(iconId)
-						end
-					end
-				end
-			end)
-		end
-
-		local function updateTrailShop()
-			for trailName, entry in pairs(trailEntryFrames) do
-				local config = PlayerHandler.GetTrailConfig(trailName)
-				if not config then
-					continue
-				end
-
-				local isOwned = PlayerHandler.OwnsTrail(player, trailName)
-				local isEquipped = player:GetAttribute("Trail_Equipped") == trailName
-				local currentWins = player:GetAttribute("WinCount") or 0
-				local isWheelOnly = config.RewardSource == "SpinWheel"
-				local isEventLocked = config.EventOnly == true and not isOwned
-
-				entry.frame.BackgroundColor3 = if isWheelOnly then WHEEL_BACKGROUND_COLOR else config.BackgroundColor
-				local frameGradient = entry.frame:FindFirstChildOfClass("UIGradient")
-				if not frameGradient then
-					frameGradient = Instance.new("UIGradient")
-					frameGradient.Parent = entry.frame
-				end
-				frameGradient.Rotation = 90
-				frameGradient.Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-					ColorSequenceKeypoint.new(
-						1,
-						if isWheelOnly then WHEEL_GRADIENT_BOTTOM_COLOR else config.GradientBottomColor
-					),
-				})
-				VisualFunctions.RefreshFrameInteractionColors(entry.frame)
-
-				local trailImage = entry.frame:FindFirstChild("Image", true)
-				if
-					trailImage
-					and (trailImage:IsA("ImageLabel") or trailImage:IsA("ImageButton"))
-					and typeof(config.ImageAssetId) == "string"
-				then
-					trailImage.Image = config.ImageAssetId
-				end
-
-				local trailNameLabel = entry.frame:FindFirstChild("TrailName", true)
-				if trailNameLabel and trailNameLabel:IsA("TextLabel") then
-					trailNameLabel.Text = string.upper(config.DisplayName)
-				end
-
-				local speedAmountLabel = entry.frame:FindFirstChild("SpeedAmount", true)
-				if speedAmountLabel and speedAmountLabel:IsA("TextLabel") then
-					speedAmountLabel.Text = string.format("%sx Speed Boost", formatTrailMultiplier(config.XPMultiplier))
-				end
-
-				local trailTypeLabel = entry.frame:FindFirstChild("TrailType", true)
-				if trailTypeLabel and trailTypeLabel:IsA("TextLabel") then
-					trailTypeLabel.Text = if isEventLocked
-						then "EVENT"
-						else if isWheelOnly and not isOwned
-							then "SPIN"
-							else if config.CanBuyWithWins then "WINS / ROBUX" else "ROBUX ONLY"
-				elseif
-					trailTypeLabel
-					and (trailTypeLabel:IsA("ImageLabel") or trailTypeLabel:IsA("ImageButton"))
-					and (isWheelOnly or config.EventOnly == true)
-				then
-					if isWheelOnly then
-						local wheelReward = SpinWheelConfig.GetReward("FlameTrail")
-						if wheelReward then
-							trailTypeLabel.Image = wheelReward.imageAssetId
-						end
-					elseif config.EventOnly == true and typeof(config.ImageAssetId) == "string" then
-						trailTypeLabel.Image = config.ImageAssetId
-					end
-				end
-
-				local buyTextButton = entry.buyButton and entry.buyButton:FindFirstChild("TextButton", true)
-				if buyTextButton and buyTextButton:IsA("TextButton") then
-					buyTextButton.Text = string
-						.format("%d", math.round(config.WinsRequired))
-						:reverse()
-						:gsub("(%d%d%d)", "%1,")
-						:reverse()
-						:gsub("^,", "")
-				end
-
-				local equipTextButton = entry.equipButton and entry.equipButton:FindFirstChild("TextButton", true)
-				if equipTextButton and equipTextButton:IsA("TextButton") then
-					equipTextButton.Text = if isEventLocked
-						then "EVENT"
-						else if isWheelOnly and not isOwned
-							then "SPIN"
-							else if isEquipped then "UNEQUIP" else "EQUIP"
-				end
-
-				if entry.buyButton then
-					entry.buyButton.Visible = not isWheelOnly and not isOwned and config.CanBuyWithWins
-					VisualFunctions.SetFrameInteractableState(
-						entry.buyButton,
-						not isWheelOnly and currentWins >= config.WinsRequired
-					)
-				end
-
-				if entry.robuxBuyButton then
-					entry.robuxBuyButton.Visible = not isWheelOnly and config.EventOnly ~= true and not isOwned
-					if not config.CanBuyWithWins then
-						if entry.buyButton then
-							entry.robuxBuyButton.Position = entry.buyButton.Position
-							entry.robuxBuyButton.Size = entry.buyButton.Size
-						end
-					else
-						if entry.robuxOriginalPosition then
-							entry.robuxBuyButton.Position = entry.robuxOriginalPosition
-						end
-						if entry.robuxOriginalSize then
-							entry.robuxBuyButton.Size = entry.robuxOriginalSize
-						end
-					end
-				end
-
-				if entry.equipButton then
-					entry.equipButton.Visible = isWheelOnly or config.EventOnly == true or isOwned
-					VisualFunctions.SetFrameInteractableState(
-						entry.equipButton,
-						if isEventLocked then false elseif isWheelOnly and not isOwned then true else isOwned
-					)
-					if isEventLocked then
-						applyEquipStyle(entry.equipButton)
-						entry.equipButton.BackgroundColor3 = config.BackgroundColor
-						local eventGradient = entry.equipButton:FindFirstChildOfClass("UIGradient")
-						if eventGradient then
-							eventGradient.Rotation = 90
-							eventGradient.Color = ColorSequence.new({
-								ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-								ColorSequenceKeypoint.new(1, config.GradientBottomColor),
-							})
-						end
-						VisualFunctions.RefreshFrameInteractionColors(entry.equipButton)
-					elseif isWheelOnly and not isOwned then
-						applyWheelStyle(entry.equipButton)
-					else
-						applyEquipStyle(entry.equipButton)
-					end
-				end
-
-				updateTrailEntryPrice(trailName, config)
-			end
-		end
-
-		local function updateKartShop()
-			for _, config in ipairs(KART_FRAME_CONFIGS) do
-				local entry = kartEntryFrames[config.kartName]
-				if not entry then
-					continue
-				end
-
-				local isOwned = PlayerHandler.OwnsKart(player, config.kartName)
-				local isEquipped = player:GetAttribute("Kart_Equipped") == config.kartName
-				local isWheelOnly = config.wheelOnly == true
-
-				entry.frame.BackgroundColor3 = if config.bloodmoonKart == true or config.sourceSubfolder == "Bloodmoon"
-					then Color3.fromRGB(255, 0, 0)
-					elseif isWheelOnly then WHEEL_BACKGROUND_COLOR
-					else config.backgroundColor
-				local frameGradient = entry.frame:FindFirstChildOfClass("UIGradient")
-				if not frameGradient then
-					frameGradient = Instance.new("UIGradient")
-					frameGradient.Parent = entry.frame
-				end
-				frameGradient.Rotation = 90
-				frameGradient.Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-					ColorSequenceKeypoint.new(
-						1,
-						if config.bloodmoonKart == true or config.sourceSubfolder == "Bloodmoon"
-							then Color3.fromRGB(130, 0, 0)
-							elseif isWheelOnly then WHEEL_GRADIENT_BOTTOM_COLOR
-							else config.gradientBottomColor
-					),
-				})
-				VisualFunctions.RefreshFrameInteractionColors(entry.frame)
-
-				local kartNameLabel = entry.frame:FindFirstChild("KartName", true)
-				if kartNameLabel and kartNameLabel:IsA("TextLabel") then
-					kartNameLabel.Text = string.upper(config.displayName)
-					kartNameLabel.TextColor3 = if config.bloodmoonKart == true or config.sourceSubfolder == "Bloodmoon"
-						then Color3.fromRGB(255, 0, 0)
-						else config.backgroundColor
-				end
-
-				local kartTypeImage = entry.frame:FindFirstChild("KartType", true)
-				if kartTypeImage and (kartTypeImage:IsA("ImageLabel") or kartTypeImage:IsA("ImageButton")) then
-					if isWheelOnly and typeof(config.wheelImage) == "string" then
-						kartTypeImage.Image = config.wheelImage
-					elseif typeof(config.imageAssetId) == "string" then
-						kartTypeImage.Image = config.imageAssetId
-					elseif typeof(config.gamePassId) == "number" then
-						local info = getMarketplaceInfoCached(config.gamePassId, Enum.InfoType.GamePass)
-						if info then
-							local iconAssetId = tonumber((info :: any).IconImageAssetId)
-							if iconAssetId and iconAssetId > 0 then
-								kartTypeImage.Image = "rbxassetid://" .. tostring(iconAssetId)
-							end
-						end
-					elseif typeof(config.productKey) == "string" then
-						local productId = ProductService.DevProducts[config.productKey]
-						if typeof(productId) == "number" then
-							local info = getMarketplaceInfoCached(productId, Enum.InfoType.Product)
-							if info then
-								local iconAssetId = tonumber((info :: any).IconImageAssetId)
-								if iconAssetId and iconAssetId > 0 then
-									kartTypeImage.Image = "rbxassetid://" .. tostring(iconAssetId)
-								end
-							end
-						end
-					end
-				end
-
-				local speedAmountLabel = entry.frame:FindFirstChild("SpeedAmount", true)
-				if speedAmountLabel and speedAmountLabel:IsA("TextLabel") then
-					local stepsText = getKartShopStepsText({
-						kartModelName = config.kartName,
-						sourceFolder = config.sourceFolder,
-						sourceSubfolder = config.sourceSubfolder,
-						stepsText = "+0/Steps",
-					})
-					speedAmountLabel.Text = stepsText or "+0/Steps"
-				end
-
-				if entry.equipButton then
-					local textButton = entry.equipButton:FindFirstChild("TextButton", true)
-					if textButton and textButton:IsA("TextButton") then
-						if isWheelOnly and not isOwned then
-							textButton.Text = "SPIN"
-						elseif isBloodmoonKartConfig(config) and not isOwned and typeof(config.productKey) ~= "string" then
-							textButton.Text = "EVENT"
-						elseif isEquipped then
-							textButton.Text = "EQUIPPED"
-						elseif isOwned then
-							textButton.Text = "EQUIP"
-						else
-							textButton.Text = "BUY"
-						end
-					end
-
-					VisualFunctions.SetFrameInteractableState(
-						entry.equipButton,
-						isOwned
-							or (isWheelOnly and not isOwned)
-							or canBuyBloodmoonProduct(config, isOwned)
-					)
-					if isWheelOnly and not isOwned then
-						applyWheelStyle(entry.equipButton)
-					else
-						applyEquipStyle(entry.equipButton)
-					end
-				end
-			end
-		end
-
-		local function buildKartShop()
-			kartShopMaid:DoCleaning()
-			local kartFrame = VisualFunctions.ActiveFrameGroup.KartFrame
-			local scrollBackground = kartFrame and kartFrame:FindFirstChild("ScrollBackground")
-			local scrollingFrame = scrollBackground and scrollBackground:FindFirstChild("ScrollingFrame")
-			if not scrollingFrame or not scrollingFrame:IsA("ScrollingFrame") then
-				return
-			end
-
-			local template = scrollingFrame:FindFirstChild("KartTemplate")
-			if not template or not template:IsA("Frame") then
-				return
-			end
-
-			for _, child in ipairs(scrollingFrame:GetChildren()) do
-				if child ~= template and child:IsA("Frame") then
-					child:Destroy()
-				end
-			end
-			table.clear(kartEntryFrames)
-			template.Visible = false
-
-			local sortedKartConfigs = {}
-			for _, config in ipairs(KART_FRAME_CONFIGS) do
-				local isOwned = PlayerHandler.OwnsKart(player, config.kartName)
-				if
-					config.showOnlyWhenOwned ~= true
-					or isOwned
-					or (
-						isBloodmoonKartConfig(config)
-						and typeof(config.productKey) == "string"
-						and isBloodmoonEventActive()
-					)
-				then
-					table.insert(sortedKartConfigs, config)
-				end
-			end
-			table.sort(sortedKartConfigs, function(a, b)
-				local aKartModel = KartCatalog.FindModel(a.kartName, a.sourceFolder, a.sourceSubfolder)
-				local bKartModel = KartCatalog.FindModel(b.kartName, b.sourceFolder, b.sourceSubfolder)
-				local aGain = getNumericAttribute(aKartModel, "XP_Gain")
-					or 0
-				local bGain = getNumericAttribute(bKartModel, "XP_Gain")
-					or 0
-
-				if aGain == bGain then
-					return a.displayName < b.displayName
-				end
-
-				return aGain > bGain
-			end)
-
-			for index, config in ipairs(sortedKartConfigs) do
-				local clone = template:Clone()
-				clone.Name = config.kartName .. "Template"
-				clone.LayoutOrder = index
-				clone.Visible = true
-				clone.Parent = scrollingFrame
-
-				local equipButton = clone:FindFirstChild("EquipButton")
-				if equipButton and equipButton:IsA("Frame") then
-					local textButton = equipButton:FindFirstChild("TextButton", true)
-					if textButton and textButton:IsA("TextButton") then
-						kartShopMaid:GiveTask(textButton.MouseButton1Click:Connect(function()
-							SoundService.PlayGuiSound("Click")
-
-							local isOwned = PlayerHandler.OwnsKart(player, config.kartName)
-							if isBloodmoonKartConfig(config) and not isOwned and not isBloodmoonEventActive() then
-								return
-							end
-
-							if config.wheelOnly == true and not isOwned then
-								openSpinWheelFromShop()
-								return
-							end
-
-							if not isOwned then
-								if typeof(config.productKey) == "string" then
-									local productId = ProductService.DevProducts[config.productKey]
-									if typeof(productId) == "number" then
-										ProductService.promptProductPurchase(player, productId)
-									end
-								elseif typeof(config.gamePassId) == "number" then
-									ProductService.promptGamePassPurchase(player, config.gamePassId)
-								end
-								return
-							end
-
-							kartActionRemote:FireServer("Equip", config.kartName)
-						end))
-					end
-				end
-
-				kartEntryFrames[config.kartName] = {
-					frame = clone,
-					equipButton = if equipButton and equipButton:IsA("Frame") then equipButton else nil,
-				}
-			end
-
-			updateKartShop()
-		end
-
-		local function bindKartShopLiveEventState(stateFolder: Instance)
-			if not stateFolder:IsA("Folder") then
-				return
-			end
-
-			sessionMaid:GiveTask(stateFolder:GetAttributeChangedSignal("ActiveEventIds"):Connect(buildKartShop))
-		end
-
-		local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
-		if liveEventState then
-			bindKartShopLiveEventState(liveEventState)
+		if ReplicatedStorage:FindFirstChild("LiveEventState") and ReplicatedStorage.LiveEventState:IsA("Folder") then
+			sessionMaid:GiveTask(
+				(ReplicatedStorage.LiveEventState :: Folder)
+					:GetAttributeChangedSignal("ActiveEventIds")
+					:Connect(productCache.buildKartShop)
+			)
 		end
 		sessionMaid:GiveTask(ReplicatedStorage.ChildAdded:Connect(function(child: Instance)
 			if child.Name == "LiveEventState" and child:IsA("Folder") then
-				bindKartShopLiveEventState(child)
-				buildKartShop()
+				sessionMaid:GiveTask(
+					child:GetAttributeChangedSignal("ActiveEventIds"):Connect(productCache.buildKartShop)
+				)
+				productCache.buildKartShop()
 			end
 		end))
 
-		local function buildTrailShop()
-			trailShopMaid:DoCleaning()
-			local trailFrame = VisualFunctions.ActiveFrameGroup.TrailFrame
-			local scrollBackground = trailFrame and trailFrame:FindFirstChild("ScrollBackground")
-			local scrollingFrame = scrollBackground and scrollBackground:FindFirstChild("ScrollingFrame")
-			if not scrollingFrame or not scrollingFrame:IsA("ScrollingFrame") then
-				return
-			end
-
-			local template = scrollingFrame:FindFirstChild("SpeedTrailTemplate")
-			if not template or not template:IsA("Frame") then
-				return
-			end
-
-			for _, child in ipairs(scrollingFrame:GetChildren()) do
-				if child ~= template and child:IsA("Frame") then
-					child:Destroy()
-				end
-			end
-			table.clear(trailEntryFrames)
-			template.Visible = false
-
-			for index, trailName in ipairs(PlayerHandler.TRAIL_ORDER) do
-				local config = PlayerHandler.GetTrailConfig(trailName)
-				if not config then
-					continue
-				end
-
-				local clone = template:Clone()
-				clone.Name = trailName .. "Template"
-				clone.LayoutOrder = index
-				clone.Visible = true
-				clone.Parent = scrollingFrame
-
-				local buyButton = clone:FindFirstChild("BuyButton")
-				local robuxBuyButton = clone:FindFirstChild("RobuxBuyButton")
-				local equipButton = getOrCreateEquipButton(clone)
-
-				if buyButton and buyButton:IsA("Frame") then
-					local textButton = buyButton:FindFirstChild("TextButton", true)
-					if textButton and textButton:IsA("TextButton") then
-						trailShopMaid:GiveTask(textButton.MouseButton1Click:Connect(function()
-							SoundService.PlayGuiSound("Click")
-							if config.EventOnly == true and not PlayerHandler.OwnsTrail(player, trailName) then
-								return
-							end
-							if
-								config.RewardSource == "SpinWheel" and not PlayerHandler.OwnsTrail(player, trailName)
-							then
-								openSpinWheelFromShop()
-								return
-							end
-							local trailRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("TrailAction")
-							if trailRemote and trailRemote:IsA("RemoteEvent") then
-								trailRemote:FireServer("BuyWithWins", trailName)
-							end
-						end))
-					end
-				end
-
-				if robuxBuyButton and robuxBuyButton:IsA("Frame") then
-					local textButton = robuxBuyButton:FindFirstChild("TextButton", true)
-					if textButton and textButton:IsA("TextButton") then
-						trailShopMaid:GiveTask(textButton.MouseButton1Click:Connect(function()
-							SoundService.PlayGuiSound("Click")
-							local productId = ProductService.DevProducts[config.ProductKey]
-							if productId and productId ~= 0 then
-								ProductService.promptProductPurchase(Players.LocalPlayer, productId)
-							end
-						end))
-					end
-				end
-
-				if equipButton then
-					local textButton = equipButton:FindFirstChild("TextButton", true)
-					if textButton and textButton:IsA("TextButton") then
-						trailShopMaid:GiveTask(textButton.MouseButton1Click:Connect(function()
-							SoundService.PlayGuiSound("Click")
-							if config.EventOnly == true and not PlayerHandler.OwnsTrail(player, trailName) then
-								return
-							end
-							if
-								config.RewardSource == "SpinWheel" and not PlayerHandler.OwnsTrail(player, trailName)
-							then
-								openSpinWheelFromShop()
-								return
-							end
-							local trailRemote = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("TrailAction")
-							if trailRemote and trailRemote:IsA("RemoteEvent") then
-								trailRemote:FireServer("Equip", trailName)
-							end
-						end))
-					end
-				end
-
-				trailEntryFrames[trailName] = {
-					frame = clone,
-					buyButton = if buyButton and buyButton:IsA("Frame") then buyButton else nil,
-					robuxBuyButton = if robuxBuyButton and robuxBuyButton:IsA("Frame") then robuxBuyButton else nil,
-					equipButton = equipButton,
-					robuxOriginalPosition = if robuxBuyButton and robuxBuyButton:IsA("Frame")
-						then robuxBuyButton.Position
-						else nil,
-					robuxOriginalSize = if robuxBuyButton and robuxBuyButton:IsA("Frame")
-						then robuxBuyButton.Size
-						else nil,
-				}
-			end
-
-			updateTrailShop()
+		productCache.trailShopController = TrailShopController.new({
+			player = player,
+			openSpinWheelFromShop = openSpinWheelFromShop,
+			applyWheelStyle = applyWheelStyle,
+			applyEquipStyle = applyEquipStyle,
+			canBuyEventProduct = canBuyEventProduct,
+			formatTrailMultiplier = formatTrailMultiplier,
+			getOrCreateEquipButton = getOrCreateEquipButton,
+		})
+		sessionMaid:GiveTask(productCache.trailShopController)
+		productCache.buildTrailShop = function()
+			productCache.trailShopController:Build()
+		end
+		productCache.updateTrailShop = function()
+			productCache.trailShopController:Update()
 		end
 
 		if VisualFunctions.HUD.X2WinPromptButton then
@@ -4255,10 +4016,10 @@ function MainOrchestrator.Init(root: Instance)
 			playWinCountPop = function()
 				SoundService.PlayGuiSound("Pop")
 			end,
-			refreshTrailShop = updateTrailShop,
+			refreshTrailShop = productCache.updateTrailShop,
 			refreshAffordableTrailBadge = refreshAffordableTrailBadge,
 			onTutorialProgressChanged = function()
-				if tutorialSystem then
+				if hasCompletedStartupLoading and tutorialSystem then
 					tutorialSystem:OnProgressChanged()
 				end
 			end,
@@ -4285,23 +4046,77 @@ function MainOrchestrator.Init(root: Instance)
 				hudDisplayController = nil
 			end
 		end)
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("AllXPSpeed"):Connect(hudDisplayController:GetUpdateAllXPHandler())
-		)
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("CurrentXPSpeed"):Connect(hudDisplayController:GetUpdateXPHandler())
-		)
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("MaxXPSpeed"):Connect(hudDisplayController:GetUpdateXPHandler())
-		)
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("CurrentLevel"):Connect(levelDisplayController:GetLevelUpdateHandler())
-		)
-		sessionMaid:GiveTask(
-			player
-				:GetAttributeChangedSignal("Max_Player_Speed")
-				:Connect(levelDisplayController:GetMaxSpeedUpdateHandler())
-		)
+		PlayerAttributeBindings.Bind({
+			player = player,
+			sessionMaid = sessionMaid,
+			onAllXPSpeedChanged = hudDisplayController:GetUpdateAllXPHandler(),
+			onCurrentXPSpeedChanged = hudDisplayController:GetUpdateXPHandler(),
+			onMaxXPSpeedChanged = hudDisplayController:GetUpdateXPHandler(),
+			onCurrentLevelChanged = levelDisplayController:GetLevelUpdateHandler(),
+			onMaxPlayerSpeedChanged = levelDisplayController:GetMaxSpeedUpdateHandler(),
+			onOwnedTrailsChanged = TrailDisplayController.CreateOwnedTrailsRefreshHandler(
+				productCache.updateTrailShop,
+				refreshAffordableTrailBadge
+			),
+			onOwnedKartsChanged = function()
+				productCache.buildKartShop()
+				handleOwnedKartsChangedForBadge()
+			end,
+			onTrailEquippedChanged = function()
+				productCache.updateTrailShop()
+				hudDisplayController:UpdateTrailMultiplierDisplay()
+			end,
+			onKartEquippedChanged = function()
+				productCache.updateKartShop()
+				handleKartEquippedChangedForBadge()
+			end,
+			onWinCountChanged = winDisplayController:GetUpdateHandler(),
+			onDataLoadedChanged = function()
+				loadingMovementLockState.onLoadingComplete()
+				if player:GetAttribute("Data_Loaded") == true then
+					resetKartPurchaseBadgeBaseline()
+				else
+					handleOwnedKartsChangedForBadge()
+				end
+			end,
+			onGamePassOwnershipSyncChanged = function()
+				if player:GetAttribute("GamePassOwnershipSyncComplete") == true then
+					resetKartPurchaseBadgeBaseline()
+				else
+					handleOwnedKartsChangedForBadge()
+				end
+			end,
+			onTutorialCompletedChanged = function()
+				dailyRewardPromptController:OnTutorialCompletedChanged()
+			end,
+			verifyRewardNextClaimAttribute = VERIFY_REWARD_NEXT_CLAIM_ATTRIBUTE,
+			verifyRewardClaimCountAttribute = VERIFY_REWARD_CLAIM_COUNT_ATTRIBUTE,
+			onVerifyRewardNextClaimChanged = function()
+				refreshVerifyClaimableBadge()
+				updateVerifyGroupCountdown(nil)
+			end,
+			onVerifyRewardClaimCountChanged = updateVerifyRewardValueLabels,
+			onTreadmillActiveChanged = function()
+				if hasCompletedStartupLoading and tutorialSystem then
+					tutorialSystem:OnProgressChanged()
+				end
+			end,
+			onTreadmillMultiplierChanged = updateVerifyRewardValueLabels,
+			onDisableWavesOnCooldownChanged = updateDisableWaveButton,
+			onDisableWavesCooldownEndChanged = updateDisableWaveButton,
+			onHasVIPPassChanged = function()
+				updateShopButtons()
+				productCache.updateKartShop()
+			end,
+			onStarterPackRewardClaimedChanged = updateShopButtons,
+			onCurrentWorldChanged = function()
+				stageProgressState.updatePlayerMarkers()
+				if hasCompletedStartupLoading and tutorialSystem then
+					tutorialSystem:OnProgressChanged()
+				end
+			end,
+			onCurrentStageChanged = stageProgressState.updatePlayerMarkers,
+		})
 		DisplayRefreshBindings.Bind({
 			player = player,
 			sessionMaid = sessionMaid,
@@ -4311,88 +4126,18 @@ function MainOrchestrator.Init(root: Instance)
 			updateMultiplierShop = updateMultiplierShop,
 			updateX2WinShop = updateX2WinShop,
 			updateShopButtons = updateShopButtons,
-			updateKartShop = updateKartShop,
+			updateKartShop = productCache.updateKartShop,
 			updateTrailMultiplierDisplay = hudDisplayController:GetUpdateTrailMultiplierHandler(),
 		})
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("OwnedTrails"):Connect(
-				TrailDisplayController.CreateOwnedTrailsRefreshHandler(updateTrailShop, refreshAffordableTrailBadge)
-			)
-		)
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("OwnedKarts"):Connect(function()
-			buildKartShop()
-			handleOwnedKartsChangedForBadge()
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("Trail_Equipped"):Connect(function()
-			updateTrailShop()
-			hudDisplayController:UpdateTrailMultiplierDisplay()
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("Kart_Equipped"):Connect(function()
-			updateKartShop()
-			handleKartEquippedChangedForBadge()
-		end))
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("WinCount"):Connect(winDisplayController:GetUpdateHandler())
-		)
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("Data_Loaded"):Connect(function()
-			if tutorialSystem then
-				tutorialSystem:Start()
-			end
-			refreshAffordableTrailBadge()
-			refreshPlaytimeClaimableBadge()
-			dailyRewardPromptController:RefreshBadge()
-			refreshVerifyClaimableBadge()
-			updateVerifyRewardValueLabels()
-			updateVerifyGroupCountdown(nil)
-			dailyRewardPromptController:TryAutoOpen()
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("TutorialCompleted"):Connect(function()
-			dailyRewardPromptController:OnTutorialCompletedChanged()
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal(VERIFY_REWARD_NEXT_CLAIM_ATTRIBUTE):Connect(function()
-			refreshVerifyClaimableBadge()
-			updateVerifyGroupCountdown(nil)
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal(VERIFY_REWARD_CLAIM_COUNT_ATTRIBUTE):Connect(function()
-			updateVerifyRewardValueLabels()
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("Treadmill_Active"):Connect(function()
-			if tutorialSystem then
-				tutorialSystem:OnProgressChanged()
-			end
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("Treadmill_XPMultiplier"):Connect(function()
-			updateVerifyRewardValueLabels()
-		end))
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("DisableWavesOnCooldown"):Connect(updateDisableWaveButton)
-		)
-		sessionMaid:GiveTask(
-			player:GetAttributeChangedSignal("DisableWavesCooldownEnd"):Connect(updateDisableWaveButton)
-		)
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("HasVIPPass"):Connect(function()
-			updateShopButtons()
-			updateKartShop()
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("StarterPackRewardClaimed"):Connect(function()
-			updateShopButtons()
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("Current_World"):Connect(function()
-			updateStageProgressPlayerMarkers()
-			if tutorialSystem then
-				tutorialSystem:OnProgressChanged()
-			end
-		end))
-		sessionMaid:GiveTask(player:GetAttributeChangedSignal("CurrentStage"):Connect(updateStageProgressPlayerMarkers))
 		StageProgressBindings.Bind({
 			sessionMaid = sessionMaid,
 			playersService = Players,
 			workspace = Workspace,
 			player = player,
-			connectTrackedPlayer = connectStageProgressTrackedPlayer,
-			disconnectTrackedPlayer = disconnectStageProgressTrackedPlayer,
-			updateStageProgressPlayerMarkers = updateStageProgressPlayerMarkers,
-			tryRefreshStageProgress = tryRefreshStageProgress,
+			connectTrackedPlayer = stageProgressState.connectTrackedPlayer,
+			disconnectTrackedPlayer = stageProgressState.disconnectTrackedPlayer,
+			updateStageProgressPlayerMarkers = stageProgressState.updatePlayerMarkers,
+			tryRefreshStageProgress = stageProgressState.tryRefresh,
 		})
 
 		RemoteBindings.Bind({
@@ -4407,6 +4152,7 @@ function MainOrchestrator.Init(root: Instance)
 				VisualFunctions.CreateFloatingText(VisualFunctions.HUD.Float_CurrentSpeedFrame, amount, 1)
 			end,
 			onWinAwarded = winDisplayController:GetWinAwardedHandler(),
+			onEventWinAwarded = winDisplayController:GetEventWinAwardedHandler(),
 			onVerifyRewardResult = function(success: boolean, nextClaimUnix: number?)
 				refreshVerifyClaimableBadge()
 				updateVerifyGroupCountdown(nextClaimUnix)
@@ -4431,7 +4177,11 @@ function MainOrchestrator.Init(root: Instance)
 				local function showRebirthNotification()
 					SoundService.PlayGuiSound("Rebirth")
 					local theme = VisualFunctions.NotificationThemes.Purple
-					VisualFunctions.ShowNotification("YOU REBIRTHED!!", theme.textColor, theme.gradientBottomColor)
+					showNotificationRespectingTutorial(
+						"YOU REBIRTHED!!",
+						theme.textColor,
+						theme.gradientBottomColor
+					)
 				end
 
 				local rebirthFrame = VisualFunctions.ActiveFrameGroup.RebirthFrame
@@ -4439,8 +4189,8 @@ function MainOrchestrator.Init(root: Instance)
 					VisualFunctions.CloseWindow(rebirthFrame)
 				end
 
-				local skipNotificationUntil = if typeof(pendingSkipRebirthNotificationUntil) == "number"
-					then pendingSkipRebirthNotificationUntil
+				local skipNotificationUntil = if typeof(rebirthReadyUIState.skipNotificationUntil) == "number"
+					then rebirthReadyUIState.skipNotificationUntil
 					else 0
 				if tick() < skipNotificationUntil then
 					sessionMaid:GiveTask(task.delay(1.1, function()
@@ -4452,7 +4202,17 @@ function MainOrchestrator.Init(root: Instance)
 					showRebirthNotification()
 				end
 			end,
-			onShowNotification = function(message: string, themeName: string?, notificationStyle: string?)
+			onShowNotification = function(
+				message: string,
+				themeName: string?,
+				notificationStyle: string?,
+				notificationCooldownEnd: number?
+			)
+				if notificationStyle == "DisableWaves" and typeof(notificationCooldownEnd) == "number" then
+					showDisableWaveNotification(notificationCooldownEnd)
+					return
+				end
+
 				local theme = if typeof(themeName) == "string" and VisualFunctions.NotificationThemes[themeName]
 					then VisualFunctions.NotificationThemes[themeName]
 					else VisualFunctions.NotificationThemes.Default
@@ -4509,20 +4269,18 @@ function MainOrchestrator.Init(root: Instance)
 				end
 			end,
 			onLocalCharacterAdded = function()
-				if loadingFrame and loadingFrame.Visible and not hasCompletedStartupLoading then
+				if STARTUP_LOADING_ENABLED and loadingFrame and loadingFrame.Visible and not hasCompletedStartupLoading then
 					sessionMaid:GiveTask(task.defer(function()
 						if not isCleanedUp then
 							lockLocalMovementForLoading()
 						end
 					end))
 				end
-				if tutorialSystem then
-					sessionMaid:GiveTask(task.defer(function()
-						if not isCleanedUp and tutorialSystem then
-							tutorialSystem:OnProgressChanged()
-						end
-					end))
-				end
+				sessionMaid:GiveTask(task.defer(function()
+					if not isCleanedUp and hasCompletedStartupLoading and tutorialSystem then
+						tutorialSystem:OnProgressChanged()
+					end
+				end))
 			end,
 			onRequestReturnToStageOffer = function()
 				local requestRemote = remotes:WaitForChild("RequestReturnToStageOffer")
@@ -4530,9 +4288,15 @@ function MainOrchestrator.Init(root: Instance)
 					requestRemote:FireServer()
 				end
 			end,
-			onPromptProductPurchaseFinished = function(productId: number, wasPurchased: boolean)
+				onPromptProductPurchaseFinished = function(productId: number, wasPurchased: boolean)
+				if productId == ProductService.DevProducts.DisableWaves then
+					cancelDisableWavePurchaseWatchdog()
+					disableWavePurchaseInFlight = false
+					updateDisableWaveButton()
+				end
+
 				if productId == ProductService.DevProducts.SkipRebirth and wasPurchased then
-					pendingSkipRebirthNotificationUntil = tick() + 1.5
+					rebirthReadyUIState.skipNotificationUntil = tick() + 1.5
 				end
 
 				local theme = if wasPurchased
@@ -4557,8 +4321,8 @@ function MainOrchestrator.Init(root: Instance)
 		updateDisableWaveButton()
 		updateReturnToStagePrice()
 		updateShopButtons()
-		buildKartShop()
-		buildTrailShop()
+		productCache.buildKartShop()
+		productCache.buildTrailShop()
 		refreshKartPurchaseBadge()
 		refreshAffordableTrailBadge()
 		refreshPlaytimeClaimableBadge()
@@ -4566,37 +4330,37 @@ function MainOrchestrator.Init(root: Instance)
 		refreshVerifyClaimableBadge()
 		updateVerifyRewardValueLabels()
 		updateVerifyGroupCountdown(nil)
-		tryRefreshStageProgress()
-		dailyRewardPromptController:TryAutoOpen()
-		if tutorialSystem then
-			tutorialSystem:OnProgressChanged()
+		if verifyGroupController then
+			verifyGroupController:RefreshMembership()
 		end
+		stageProgressState.tryRefresh()
 		sessionMaid:GiveTask(task.delay(0.5, function()
 			updateX2WinShop()
 			hudDisplayController:UpdateXPProductLabels()
 			updateShopButtons()
-			updateKartShop()
+			productCache.updateKartShop()
 			refreshKartPurchaseBadge()
-			updateTrailShop()
+			productCache.updateTrailShop()
 			refreshAffordableTrailBadge()
 			refreshPlaytimeClaimableBadge()
 			dailyRewardPromptController:RefreshBadge()
 			refreshVerifyClaimableBadge()
 			updateVerifyRewardValueLabels()
 			updateVerifyGroupCountdown(nil)
-			tryRefreshStageProgress()
-			dailyRewardPromptController:TryAutoOpen()
+			stageProgressState.tryRefresh()
 		end))
 		if winDisplayController then
 			winDisplayController:SetDisplayedWinCount(player:GetAttribute("WinCount") or 0)
 		end
 		sessionMaid:GiveTask(RunService.Heartbeat:Connect(function(dt)
-			stageProgressMarkerUpdateAccumulator =
-				math.min(stageProgressMarkerUpdateAccumulator + dt, STAGE_PROGRESS_MARKER_UPDATE_INTERVAL * 3)
-			if stageProgressMarkerUpdateAccumulator >= STAGE_PROGRESS_MARKER_UPDATE_INTERVAL then
-				stageProgressMarkerUpdateAccumulator = 0
-				if updateStageProgressPlayerMarkers and (not stageProgressFrame or stageProgressFrame.Visible) then
-					updateStageProgressPlayerMarkers()
+			stageProgressState.markerUpdateAccumulator = math.min(
+				stageProgressState.markerUpdateAccumulator + dt,
+				stageProgressState.markerUpdateInterval * 3
+			)
+			if stageProgressState.markerUpdateAccumulator >= stageProgressState.markerUpdateInterval then
+				stageProgressState.markerUpdateAccumulator = 0
+				if not stageProgressState.frame or stageProgressState.frame.Visible then
+					stageProgressState.updatePlayerMarkers()
 				end
 			end
 

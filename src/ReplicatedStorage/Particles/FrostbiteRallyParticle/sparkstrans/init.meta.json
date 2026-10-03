@@ -1,0 +1,26 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Attributes": {
+      "EmitDelay": 0
+    },
+    "EmissionDirection": "Bottom",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [3, 5],
+    "LightEmission": 1,
+    "Rate": 1000,
+    "Rotation": [-360, 360],
+    "RotSpeed": [1, 1],
+    "Size": [{
+        "envelope": 1.0,
+        "time": 0.0,
+        "value": 4.0
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 2.0
+      }],
+    "Speed": [30, 30],
+    "Texture": "rbxassetid://6781947608"
+  }
+}

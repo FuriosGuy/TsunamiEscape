@@ -6,7 +6,7 @@
     "CFrame": [-174.5, 4, -100.5001, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Locked": true,
     "MaterialVariant": "Studs",
-    "Size": [121.0, 8, 1],
+    "Size": [121, 8, 1],
     "TopSurface": "Smooth"
   }
 }

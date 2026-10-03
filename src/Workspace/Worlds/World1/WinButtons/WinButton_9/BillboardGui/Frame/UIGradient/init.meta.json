@@ -2,17 +2,17 @@
   "className": "UIGradient",
   "properties": {
     "Transparency": [{
+        "envelope": 0.0,
         "time": 0.0,
-        "value": 1.0,
-        "envelope": 0.0
+        "value": 1.0
       }, {
+        "envelope": 0.0,
         "time": 0.5,
-        "value": 0.3,
-        "envelope": 0.0
+        "value": 0.3
       }, {
+        "envelope": 0.0,
         "time": 1.0,
-        "value": 1.0,
-        "envelope": 0.0
+        "value": 1.0
       }]
   }
 }

@@ -1,0 +1,12 @@
+{
+  "className": "Frame",
+  "properties": {
+    "BackgroundColor3": [0.8, 0.9333, 1],
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "Interactable": false,
+    "Size": [[0.2, 0.0], [0.2, 0.0]],
+    "Visible": false,
+    "ZIndex": 2
+  }
+}

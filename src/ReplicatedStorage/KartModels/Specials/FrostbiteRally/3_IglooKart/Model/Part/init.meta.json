@@ -1,0 +1,12 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-31.7794, 9.9921, 43.5816, 0, 0, -1, 0, 1, 0, 1, 0, 0],
+    "Color": [197, 198, 204],
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Universal",
+    "Size": [1.531, 3.3372, 0.3827],
+    "TopSurface": "Smooth"
+  }
+}

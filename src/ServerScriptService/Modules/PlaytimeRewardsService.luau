@@ -308,9 +308,17 @@ function PlaytimeRewardsService.OnRewardAction(player: Player, action: string, t
 	end
 
 	claimed[tierId] = true
-	player:SetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE, serializeClaimedTiers(claimed))
+	local cycleComplete = getFirstUnclaimedTierIndex(claimed) == nil
+	if cycleComplete then
+		-- Start a new reward cycle only after every gift has been claimed.
+		-- This also protects lower gifts when the final gift is claimed early.
+		player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, 0)
+		player:SetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE, "")
+	else
+		player:SetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE, serializeClaimedTiers(claimed))
+	end
 
-	if DEBUG_SEQUENTIAL_CLAIM_MODE then
+	if DEBUG_SEQUENTIAL_CLAIM_MODE and not cycleComplete then
 		local nextTier = PlaytimeRewardsConfig.GetTier(tierIndex + 1)
 		if nextTier then
 			local currentElapsed = player:GetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE)
@@ -334,7 +342,11 @@ function PlaytimeRewardsService.OnRewardAction(player: Player, action: string, t
 	end
 	local playerReadySessions = readyFunnelSessions[player]
 	if playerReadySessions then
-		playerReadySessions[tierId] = nil
+		if cycleComplete then
+			table.clear(playerReadySessions)
+		else
+			playerReadySessions[tierId] = nil
+		end
 	end
 	claimFunnelSessions[player] = nil
 

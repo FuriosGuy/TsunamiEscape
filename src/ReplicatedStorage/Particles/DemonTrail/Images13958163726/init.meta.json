@@ -1,28 +1,28 @@
 {
   "className": "ParticleEmitter",
+  "originalName": "Images/13958163726",
   "properties": {
     "Color": [{
-        "time": 0.0,
-        "color": [1.0, 0.0, 0.0]
+        "color": [1.0, 0.0, 0.0],
+        "time": 0.0
       }, {
-        "time": 1.0,
-        "color": [1.0, 0.0, 0.0]
+        "color": [1.0, 0.0, 0.0],
+        "time": 1.0
       }],
     "EmissionDirection": "Back",
     "FlipbookMode": "OneShot",
     "Lifetime": [0.5, 2],
     "Rotation": [-360, 360],
     "Size": [{
+        "envelope": 1.0,
         "time": 0.0,
-        "value": 3.625,
-        "envelope": 1.0
+        "value": 3.625
       }, {
+        "envelope": 0.0,
         "time": 1.0,
-        "value": 0.0,
-        "envelope": 0.0
+        "value": 0.0
       }],
     "Speed": [20, 20],
     "Texture": "rbxassetid://131828635123418"
-  },
-  "originalName": "Images/13958163726"
+  }
 }

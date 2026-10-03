@@ -1,0 +1,28 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Brightness": 5,
+    "Color": [{
+        "color": [1.0, 0.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.0, 0.0],
+        "time": 1.0
+      }],
+    "FlipbookLayout": "Grid8x8",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.15, 0.15],
+    "Rate": 15,
+    "Size": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 3.6011
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 3.6011
+      }],
+    "Speed": [0, 0],
+    "Texture": "rbxassetid://83784868925844"
+  }
+}

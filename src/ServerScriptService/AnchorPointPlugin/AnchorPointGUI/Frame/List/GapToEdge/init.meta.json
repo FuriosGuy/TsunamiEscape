@@ -1,0 +1,24 @@
+{
+  "className": "TextBox",
+  "properties": {
+    "BackgroundColor3": [0.0706, 0.0706, 0.0824],
+    "BorderColor3": [0.0706, 0.0706, 0.0824],
+    "BorderSizePixel": 0,
+    "FontFace": {
+      "cachedFaceId": null,
+      "family": "rbxasset://fonts/families/SourceSansPro.json",
+      "style": "Normal",
+      "weight": "Regular"
+    },
+    "LayoutOrder": 5,
+    "PlaceholderColor3": [0.7765, 0.7843, 0.8275],
+    "PlaceholderText": "0",
+    "Position": [[-0.16, 0.0], [0.8761, 0.0]],
+    "Size": [[0.98, 0.0], [0.0436, 0.0]],
+    "Text": "",
+    "TextColor3": [0.7765, 0.7843, 0.8275],
+    "TextScaled": true,
+    "TextSize": 14,
+    "TextWrapped": true
+  }
+}

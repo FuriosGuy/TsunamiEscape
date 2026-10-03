@@ -1,0 +1,117 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Color": [{
+        "color": [1.0, 0.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.0, 0.0],
+        "time": 1.0
+      }],
+    "FlipbookLayout": "Grid2x2",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.03, 0.03],
+    "Rate": 30,
+    "Size": [{
+        "envelope": 0.9881,
+        "time": 0.0,
+        "value": 1.9763
+      }, {
+        "envelope": 0.9881,
+        "time": 0.1,
+        "value": 0.983
+      }, {
+        "envelope": 0.9881,
+        "time": 0.2,
+        "value": 0.4798
+      }, {
+        "envelope": 0.9881,
+        "time": 0.3,
+        "value": 0.2379
+      }, {
+        "envelope": 0.9881,
+        "time": 0.4,
+        "value": 0.1169
+      }, {
+        "envelope": 0.9881,
+        "time": 0.5,
+        "value": 0.0549
+      }, {
+        "envelope": 0.9881,
+        "time": 0.6,
+        "value": 0.0234
+      }, {
+        "envelope": 0.9881,
+        "time": 0.7,
+        "value": 0.0084
+      }, {
+        "envelope": 0.9881,
+        "time": 0.8,
+        "value": 0.0022
+      }, {
+        "envelope": 0.9881,
+        "time": 0.9,
+        "value": 0.0002
+      }, {
+        "envelope": 0.9881,
+        "time": 1.0,
+        "value": 0.0
+      }, {
+        "envelope": 0.9881,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Speed": [0, 0],
+    "Squash": [{
+        "envelope": 0.4,
+        "time": 0.0,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.1,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.2,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.3,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.4,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.5,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.6,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.7,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.8,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 0.9,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 1.0,
+        "value": 0.0
+      }, {
+        "envelope": 0.4,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Texture": "rbxassetid://94129642400712",
+    "ZOffset": 1
+  }
+}

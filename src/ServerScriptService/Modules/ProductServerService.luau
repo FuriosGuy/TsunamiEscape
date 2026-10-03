@@ -1,4 +1,3 @@
---!strict
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -6,12 +5,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local ProductService = require(Modules:WaitForChild("ProductService"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local SystemChatService = require(Modules:WaitForChild("SystemChatService"))
+local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local SystemChatService =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("SystemChatService_Server"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DataStoreRequestGate = require(script.Parent:WaitForChild("DataStoreRequestGate"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 
 local ProductServerService = {}
 
@@ -28,6 +29,8 @@ local SESSION_LOCK_ID_METADATA_KEY = "SessionLockId"
 local SESSION_LOCK_UPDATED_AT_METADATA_KEY = "SessionLockUpdatedAt"
 local PROCESSED_RECEIPTS_FIELD = "ProcessedDevProductReceipts"
 local PROFILE_INITIALIZED_FIELD = "ProfileInitialized"
+local PROFILE_PLACEHOLDER_FIELD = "ProfilePlaceholder"
+local PROFILE_PLACEHOLDER_CREATED_AT_FIELD = "ProfilePlaceholderCreatedAt"
 local persistenceConfig = CoreConfig.persistence
 local SAVE_DEBOUNCE_SECONDS = if persistenceConfig
 		and typeof(persistenceConfig.saveDebounceSeconds) == "number"
@@ -48,6 +51,22 @@ local FINAL_SAVE_RETRY_DELAY_SECONDS = if persistenceConfig
 		and typeof(persistenceConfig.finalSaveRetryDelaySeconds) == "number"
 	then math.max(0, persistenceConfig.finalSaveRetryDelaySeconds)
 	else 1
+local REGULAR_SAVE_RETRY_INITIAL_SECONDS = if persistenceConfig
+		and typeof(persistenceConfig.regularSaveRetryInitialSeconds) == "number"
+	then math.max(0.25, persistenceConfig.regularSaveRetryInitialSeconds)
+	else 2
+local REGULAR_SAVE_RETRY_ATTEMPTS = if persistenceConfig
+		and typeof(persistenceConfig.regularSaveRetryAttempts) == "number"
+	then math.max(1, math.floor(persistenceConfig.regularSaveRetryAttempts))
+	else 6
+local REGULAR_SAVE_RETRY_MAX_SECONDS = if persistenceConfig
+		and typeof(persistenceConfig.regularSaveRetryMaxSeconds) == "number"
+	then math.max(REGULAR_SAVE_RETRY_INITIAL_SECONDS, persistenceConfig.regularSaveRetryMaxSeconds)
+	else 30
+local DATASTORE_BUDGET_WAIT_SECONDS = if persistenceConfig
+		and typeof(persistenceConfig.datastoreBudgetWaitSeconds) == "number"
+	then math.max(0.25, persistenceConfig.datastoreBudgetWaitSeconds)
+	else 5
 local GRANTED_RECEIPT_CACHE_LIMIT = if persistenceConfig
 		and typeof(persistenceConfig.grantedReceiptCacheLimit) == "number"
 	then math.max(0, math.floor(persistenceConfig.grantedReceiptCacheLimit))
@@ -101,6 +120,7 @@ local blockedSaveWarnings: { [Player]: boolean } = {}
 local blockedSaveWarningTimes: { [Player]: number } = {}
 local BLOCKED_SAVE_WARNING_INTERVAL_SECONDS = 30
 local devProductCallbacks: { [number]: (...any) -> () } = {}
+local devProductGrantedCallbacks: { [number]: (...any) -> () } = {}
 local gamePassCallbacks: { [number]: (...any) -> () } = {}
 local marketplaceInfoCache: { [string]: any } = {}
 local processingReceipts: { [string]: boolean } = {}
@@ -108,14 +128,29 @@ local grantedReceipts: { [string]: boolean } = {}
 local grantedReceiptOrder: { string } = {}
 local processedProfileReceipts: { [Player]: { [string]: boolean } } = {}
 local processedProfileReceiptOrder: { [Player]: { string } } = {}
+local announcedGamePasses: { [Player]: { [number]: boolean } } = {}
+local creatorGrantLocks: { [Player]: boolean } = {}
 local playerStoreQueues: { [number]: PlayerStoreQueue } = {}
 local heartbeatTokens: { [Player]: number } = {}
 local heartbeatInFlight: { [Player]: boolean } = {}
 local heartbeatFailureCounts: { [Player]: number } = {}
 local activePlayerSessions: { [number]: Player } = {}
+local persistedAttributeConnections: { [Player]: { RBXScriptConnection } } = {}
+local creatorUserId: number? = nil
 local serviceMaid = Maid.new()
 local serviceShuttingDown = false
 local sessionLockHeartbeatGeneration = 0
+
+local function runStandardUpdate(
+	operationName: string,
+	operation: () -> any,
+	shouldContinue: (() -> boolean)?
+): (boolean, any, any, any)
+	return DataStoreRequestGate.Run("StandardUpdate", operationName, operation, {
+		maxWaitSeconds = DATASTORE_BUDGET_WAIT_SECONDS,
+		shouldContinue = shouldContinue,
+	})
+end
 
 local function dataKeyForUserId(userId: number): string
 	return "player_" .. tostring(userId)
@@ -319,17 +354,22 @@ local function markProcessedProfileReceipt(player: Player, receiptId: string)
 	end
 end
 
-local function createStoredDataSnapshot(player: Player): StoredPlayerData
+local function createStoredDataSnapshot(player: Player): (StoredPlayerData?, string?)
 	local data: StoredPlayerData = {}
 	for _, entry in ipairs(ProductService.SAVED_ATTRIBUTES) do
 		local value = player:GetAttribute(entry.name)
-		data[entry.name] = if value ~= nil then value else entry.default
+		if value == nil then
+			return nil, entry.name
+		end
+		data[entry.name] = value
 	end
 
 	local receiptOrder = processedProfileReceiptOrder[player] or {}
 	data[PROCESSED_RECEIPTS_FIELD] = table.clone(receiptOrder)
 	data[PROFILE_INITIALIZED_FIELD] = true
-	return data
+	data[PROFILE_PLACEHOLDER_FIELD] = nil
+	data[PROFILE_PLACEHOLDER_CREATED_AT_FIELD] = nil
+	return data, nil
 end
 
 local function hasSavedProfileValues(data: StoredPlayerData): boolean
@@ -342,22 +382,128 @@ local function hasSavedProfileValues(data: StoredPlayerData): boolean
 	return false
 end
 
-local function classifyProfileData(data: StoredPlayerData, createdNew: boolean): LoadResult
+local PROFILE_ANCHOR_FIELDS: { string } = {
+	"CurrentLevel",
+	"MaxLevel",
+	"AllXPSpeed",
+	"MaxXPSpeed",
+	"CurrentXPSpeed",
+	"WinCount",
+	"OwnedKarts",
+	"Kart_Equipped",
+	"Trail_Equipped",
+	"OwnedTrails",
+	"Current_World",
+	"CurrentStage",
+}
+
+local savedAttributeDefaults: { [string]: any } = {}
+for _, entry in ipairs(ProductService.SAVED_ATTRIBUTES) do
+	savedAttributeDefaults[entry.name] = entry.default
+end
+
+local function isFiniteNumber(value: any): boolean
+	return typeof(value) == "number" and value == value and value > -math.huge and value < math.huge
+end
+
+local function validateProfilePlaceholder(data: StoredPlayerData): (boolean, string?)
+	if data[PROFILE_PLACEHOLDER_FIELD] ~= true then
+		return false, "profile is not a new-profile placeholder"
+	end
+	if data[PROFILE_INITIALIZED_FIELD] ~= false then
+		return false, PROFILE_INITIALIZED_FIELD .. " must be false for a placeholder"
+	end
+	if not isFiniteNumber(data[PROFILE_PLACEHOLDER_CREATED_AT_FIELD]) then
+		return false, PROFILE_PLACEHOLDER_CREATED_AT_FIELD .. " is missing or invalid"
+	end
+	for _, entry in ipairs(ProductService.SAVED_ATTRIBUTES) do
+		if data[entry.name] ~= nil then
+			return false, "placeholder contains saved profile field " .. entry.name
+		end
+	end
+	return true, nil
+end
+
+local function validateStoredProfileData(data: StoredPlayerData): (boolean, string?)
+	if data[PROFILE_INITIALIZED_FIELD] ~= nil and typeof(data[PROFILE_INITIALIZED_FIELD]) ~= "boolean" then
+		return false, PROFILE_INITIALIZED_FIELD .. " has an invalid type"
+	end
+	if data[PROFILE_PLACEHOLDER_FIELD] ~= nil and typeof(data[PROFILE_PLACEHOLDER_FIELD]) ~= "boolean" then
+		return false, PROFILE_PLACEHOLDER_FIELD .. " has an invalid type"
+	end
+	if data[PROFILE_PLACEHOLDER_CREATED_AT_FIELD] ~= nil
+		and not isFiniteNumber(data[PROFILE_PLACEHOLDER_CREATED_AT_FIELD])
+	then
+		return false, PROFILE_PLACEHOLDER_CREATED_AT_FIELD .. " is invalid"
+	end
+
+	for _, fieldName in ipairs(PROFILE_ANCHOR_FIELDS) do
+		local value = data[fieldName]
+		if value == nil then
+			return false, "missing required profile field " .. fieldName
+		end
+
+		local defaultValue = savedAttributeDefaults[fieldName]
+		if defaultValue == nil then
+			return false, "required profile field is not persisted " .. fieldName
+		end
+		if typeof(value) ~= typeof(defaultValue) then
+			return false, fieldName .. " has type " .. typeof(value) .. ", expected " .. typeof(defaultValue)
+		end
+		if typeof(value) == "number" and not isFiniteNumber(value) then
+			return false, fieldName .. " is not finite"
+		end
+	end
+
+	for _, entry in ipairs(ProductService.SAVED_ATTRIBUTES) do
+		local value = data[entry.name]
+		if value ~= nil then
+			if typeof(value) ~= typeof(entry.default) then
+				return false, entry.name .. " has an invalid type"
+			end
+			if typeof(value) == "number" and not isFiniteNumber(value) then
+				return false, entry.name .. " is not finite"
+			end
+		end
+	end
+
+	local storedReceipts = data[PROCESSED_RECEIPTS_FIELD]
+	if storedReceipts ~= nil and typeof(storedReceipts) ~= "table" then
+		return false, PROCESSED_RECEIPTS_FIELD .. " has an invalid type"
+	end
+
+	return true, nil
+end
+
+local function classifyProfileData(data: StoredPlayerData, createdNew: boolean): (LoadResult, string?)
 	if createdNew then
-		return "New"
+		return "New", nil
+	end
+
+	if data[PROFILE_PLACEHOLDER_FIELD] == true and data[PROFILE_INITIALIZED_FIELD] ~= true then
+		local placeholderValid, placeholderReason = validateProfilePlaceholder(data)
+		if placeholderValid then
+			return "New", nil
+		end
+		return "RecoveryRequired", placeholderReason
+	end
+
+	local valid, validationReason = validateStoredProfileData(data)
+	if not valid then
+		return "RecoveryRequired", validationReason
 	end
 	if data[PROFILE_INITIALIZED_FIELD] == true then
-		return "Loaded"
+		return "Loaded", nil
 	end
 	if hasSavedProfileValues(data) then
 		-- Legacy profiles predate ProfileInitialized. Their stored values are
 		-- authoritative and will be migrated through the active session lock.
-		return "LegacyMigration"
+		return "LegacyMigration", nil
 	end
 
 	-- This shape is only produced by an interrupted first-profile placeholder.
 	-- Never turn it into defaults without a durable source profile.
-	return "RecoveryRequired"
+	return "RecoveryRequired", "profile has no durable saved attributes"
 end
 
 local function cancelPendingSaveThread(player: Player)
@@ -398,15 +544,20 @@ local function releaseSessionLock(player: Player, reason: string): boolean
 	local queuedOk, outcome = runQueuedPlayerStoreOperation(userId, "ReleaseSessionLock", function()
 		local released = false
 		local ok, err = pcall(function()
-			playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
-				local metadata = cloneMetadata(keyInfo)
-				if metadata[SESSION_LOCK_ID_METADATA_KEY] ~= lockId then
-					return nil
-				end
-				setSessionLockMetadata(metadata, nil)
-				released = true
-				return existingData, cloneUserIds(keyInfo), metadata
+			local gateOk, gateResult = runStandardUpdate("ReleaseSessionLock", function()
+				return playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
+					local metadata = cloneMetadata(keyInfo)
+					if metadata[SESSION_LOCK_ID_METADATA_KEY] ~= lockId then
+						return nil
+					end
+					setSessionLockMetadata(metadata, nil)
+					released = true
+					return existingData, cloneUserIds(keyInfo), metadata
+				end)
 			end)
+			if not gateOk then
+				error(gateResult)
+			end
 		end)
 		return {
 			ok = ok,
@@ -451,30 +602,41 @@ local function acquireSessionLock(player: Player): (SessionAcquireResult, Stored
 	debugVerbose("Session lock acquisition requested | player=" .. player.Name .. " | userId=" .. tostring(userId))
 	local queuedOk, outcome = runQueuedPlayerStoreOperation(userId, "AcquireSessionLock", function()
 		local ok, err = pcall(function()
-			storedData, storedKeyInfo = playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
-				local metadata = cloneMetadata(keyInfo)
-				if isSessionLockActive(metadata, desiredLockId) then
-					local updatedAt = metadata[SESSION_LOCK_UPDATED_AT_METADATA_KEY]
-					local lockAge = if typeof(updatedAt) == "number"
-						then math.max(0, os.time() - math.floor(updatedAt))
-						else -1
-					lockContext = "activeLockAge=" .. tostring(lockAge)
-					result = "Locked"
-					return nil
-				end
-				if existingData ~= nil and typeof(existingData) ~= "table" then
-					result = "Malformed"
-					return nil
-				end
+			local gateOk, gateResult, gateKeyInfo = runStandardUpdate("AcquireSessionLock", function()
+				return playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
+					local metadata = cloneMetadata(keyInfo)
+					if isSessionLockActive(metadata, desiredLockId) then
+						local updatedAt = metadata[SESSION_LOCK_UPDATED_AT_METADATA_KEY]
+						local lockAge = if typeof(updatedAt) == "number"
+							then math.max(0, os.time() - math.floor(updatedAt))
+							else -1
+						lockContext = "activeLockAge=" .. tostring(lockAge)
+						result = "Locked"
+						return nil
+					end
+					if existingData ~= nil and typeof(existingData) ~= "table" then
+						result = "Malformed"
+						return nil
+					end
 
-				createdNew = existingData == nil
-				local nextData: StoredPlayerData = if typeof(existingData) == "table"
-					then table.clone(existingData)
-					else { [PROFILE_INITIALIZED_FIELD] = false }
-				setSessionLockMetadata(metadata, desiredLockId)
-				result = "Acquired"
-				return nextData, cloneUserIds(keyInfo), metadata
+					createdNew = existingData == nil
+					local nextData: StoredPlayerData = if typeof(existingData) == "table"
+						then table.clone(existingData)
+						else {
+							[PROFILE_INITIALIZED_FIELD] = false,
+							[PROFILE_PLACEHOLDER_FIELD] = true,
+							[PROFILE_PLACEHOLDER_CREATED_AT_FIELD] = os.time(),
+						}
+					setSessionLockMetadata(metadata, desiredLockId)
+					result = "Acquired"
+					return nextData, cloneUserIds(keyInfo), metadata
+				end)
 			end)
+			if not gateOk then
+				error(gateResult)
+			end
+			storedData = gateResult
+			storedKeyInfo = gateKeyInfo
 		end)
 		return {
 			ok = ok,
@@ -509,6 +671,19 @@ local function isDataLoaded(player: Player): boolean
 	return state == nil or state == "Loaded" or state == "New" or state == "LegacyMigration"
 end
 
+local function isExperienceCreator(player: Player): boolean
+	return creatorUserId ~= nil and player.UserId == creatorUserId
+end
+
+local function isCanonicalDeveloperProduct(productId: number): boolean
+	for _, configuredProductId in pairs(ProductService.DevProducts) do
+		if configuredProductId == productId then
+			return true
+		end
+	end
+	return false
+end
+
 local function canPersistPlayerData(player: Player, allowPendingInitialization: boolean): boolean
 	if isDataLoaded(player) then
 		return true
@@ -520,6 +695,37 @@ local function canPersistPlayerData(player: Player, allowPendingInitialization: 
 
 	local state = loadStates[player]
 	return state == "New" or state == "LegacyMigration"
+end
+
+local function disconnectPersistedAttributeListeners(player: Player)
+	local connections = persistedAttributeConnections[player]
+	if not connections then
+		return
+	end
+
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	persistedAttributeConnections[player] = nil
+end
+
+local function bindPersistedAttributeListeners(player: Player)
+	if persistedAttributeConnections[player] then
+		return
+	end
+
+	local connections: { RBXScriptConnection } = {}
+	for _, entry in ipairs(ProductService.SAVED_ATTRIBUTES) do
+		table.insert(
+			connections,
+			player:GetAttributeChangedSignal(entry.name):Connect(function()
+				if player.Parent ~= nil and isDataLoaded(player) and not serviceShuttingDown then
+					ProductServerService.SavePlayerData(player)
+				end
+			end)
+		)
+	end
+	persistedAttributeConnections[player] = connections
 end
 
 local function cacheGrantedReceipt(receiptId: string)
@@ -642,7 +848,30 @@ local function savePlayerData(
 		end
 		activeSaveLocks[player] = true
 
-		local data = createStoredDataSnapshot(player)
+		local data, snapshotFailure = createStoredDataSnapshot(player)
+		if data == nil then
+			activeSaveLocks[player] = nil
+			DebugModule.debugWarn(
+				"Save blocked because a persisted attribute is missing | player="
+					.. player.Name
+					.. " | attribute="
+					.. tostring(snapshotFailure),
+				MODULE_NAME
+			)
+			return false
+		end
+		local snapshotValid, snapshotValidationReason = validateStoredProfileData(data)
+		if not snapshotValid then
+			activeSaveLocks[player] = nil
+			DebugModule.debugWarn(
+				"Save blocked because the in-memory profile snapshot is invalid | player="
+					.. player.Name
+					.. " | reason="
+					.. tostring(snapshotValidationReason),
+				MODULE_NAME
+			)
+			return false
+		end
 		debugVerbose(
 			"Save snapshot created | player="
 				.. player.Name
@@ -658,39 +887,51 @@ local function savePlayerData(
 		local sessionLockLost = false
 		local recoveredLegacyLock = false
 		local staleGeneration = false
+		local gateShouldContinue: (() -> boolean)? = if expectedGeneration ~= nil then function()
+			return player.Parent ~= nil
+				and not serviceShuttingDown
+				and saveGenerations[player] == expectedGeneration
+		end else nil
 		local ok, err = pcall(function()
-			playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
-				if expectedGeneration ~= nil and saveGenerations[player] ~= expectedGeneration then
-					staleGeneration = true
-					return nil
-				end
-				if typeof(existingData) ~= "table" then
-					sessionLockLost = true
-					return nil
-				end
+			local gateOk, gateResult = runStandardUpdate(
+				"PlayerStatsUpdate",
+				function()
+					return playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
+						if expectedGeneration ~= nil and saveGenerations[player] ~= expectedGeneration then
+							staleGeneration = true
+							return nil
+						end
+						if typeof(existingData) ~= "table" then
+							sessionLockLost = true
+							return nil
+						end
 
-				local metadata = cloneMetadata(keyInfo)
-				local storedLockId = metadata[SESSION_LOCK_ID_METADATA_KEY]
-				if storedLockId ~= sessionLockIds[player] and storedLockId ~= nil and storedLockId ~= "" then
-					sessionLockLost = true
-					return nil
-				end
-				if storedLockId ~= sessionLockIds[player] then
-					recoveredLegacyLock = true
-				end
-				local nextData: StoredPlayerData = if typeof(existingData) == "table"
-					then table.clone(existingData)
-					else {}
-				for name, value in pairs(data) do
-					nextData[name] = value
-				end
-				if shouldReleaseLock then
-					setSessionLockMetadata(metadata, nil)
-				else
-					setSessionLockMetadata(metadata, sessionLockIds[player])
-				end
-				return nextData, cloneUserIds(keyInfo), metadata
-			end)
+						local metadata = cloneMetadata(keyInfo)
+						local storedLockId = metadata[SESSION_LOCK_ID_METADATA_KEY]
+						if storedLockId ~= sessionLockIds[player] and storedLockId ~= nil and storedLockId ~= "" then
+							sessionLockLost = true
+							return nil
+						end
+						if storedLockId ~= sessionLockIds[player] then
+							recoveredLegacyLock = true
+						end
+						local nextData: StoredPlayerData = table.clone(existingData)
+						for name, value in pairs(data) do
+							nextData[name] = value
+						end
+						if shouldReleaseLock then
+							setSessionLockMetadata(metadata, nil)
+						else
+							setSessionLockMetadata(metadata, sessionLockIds[player])
+						end
+						return nextData, cloneUserIds(keyInfo), metadata
+					end)
+				end,
+				gateShouldContinue
+			)
+			if not gateOk then
+				error(gateResult)
+			end
 		end)
 		activeSaveLocks[player] = nil
 		if staleGeneration then
@@ -764,7 +1005,7 @@ local function savePlayerData(
 		return false
 	end
 
-	if pendingSaveTasks[player] then
+	if pendingSaveTasks[player] or pendingSaveThreads[player] then
 		return true
 	end
 	local waitTime = math.max(0, SAVE_DEBOUNCE_SECONDS - (now - lastSave))
@@ -779,17 +1020,63 @@ local function savePlayerData(
 			.. tostring(generation)
 	)
 	pendingSaveThreads[player] = task.spawn(function()
+		local function finish()
+			if pendingSaveThreads[player] == coroutine.running() then
+				pendingSaveThreads[player] = nil
+			end
+		end
+
 		if waitTime > 0 then
 			task.wait(waitTime)
 		end
 		if saveGenerations[player] ~= generation then
+			finish()
 			return
 		end
 		pendingSaveTasks[player] = nil
-		pendingSaveThreads[player] = nil
-		runQueuedPlayerStoreOperation(userId, "RegularSave", function()
-			return perform(generation)
-		end)
+
+		local retryDelay = REGULAR_SAVE_RETRY_INITIAL_SECONDS
+		for attempt = 1, REGULAR_SAVE_RETRY_ATTEMPTS do
+			if player.Parent == nil or serviceShuttingDown or saveGenerations[player] ~= generation then
+				break
+			end
+			local queuedOk, saveResult = runQueuedPlayerStoreOperation(userId, "RegularSave", function()
+				return perform(generation)
+			end)
+			if queuedOk and saveResult == true then
+				finish()
+				return
+			end
+			if hardSessionFailure or not isDataLoaded(player) then
+				finish()
+				return
+			end
+
+			debugVerbose(
+				"Regular save retry scheduled | player="
+					.. player.Name
+					.. " | attempt="
+					.. tostring(attempt)
+					.. "/"
+					.. tostring(REGULAR_SAVE_RETRY_ATTEMPTS)
+					.. " | delaySeconds="
+					.. string.format("%.2f", retryDelay)
+			)
+			if attempt < REGULAR_SAVE_RETRY_ATTEMPTS then
+				task.wait(retryDelay)
+				retryDelay = math.min(REGULAR_SAVE_RETRY_MAX_SECONDS, retryDelay * 2)
+			end
+		end
+		if player.Parent ~= nil and not serviceShuttingDown and saveGenerations[player] == generation then
+			DebugModule.debugWarn(
+				"Regular save retries exhausted; later saves will retry | player="
+					.. player.Name
+					.. " | attempts="
+					.. tostring(REGULAR_SAVE_RETRY_ATTEMPTS),
+				MODULE_NAME
+			)
+		end
+		finish()
 	end)
 	return true
 end
@@ -829,26 +1116,40 @@ local function renewSessionLock(player: Player): boolean
 		local lockLost = false
 		local recoveredLegacyLock = false
 		local ok, err = pcall(function()
-			playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
-				if typeof(existingData) ~= "table" then
-					lockLost = true
-					return nil
-				end
+			local gateOk, gateResult = runStandardUpdate(
+				"RenewSessionLock",
+				function()
+					return playerStore:UpdateAsync(dataKey(player), function(existingData, keyInfo)
+						if typeof(existingData) ~= "table" then
+							lockLost = true
+							return nil
+						end
 
-				local metadata = cloneMetadata(keyInfo)
-				local storedLockId = metadata[SESSION_LOCK_ID_METADATA_KEY]
-				if storedLockId ~= lockId and storedLockId ~= nil and storedLockId ~= "" then
-					lockLost = true
-					return nil
-				end
-				if storedLockId ~= lockId then
-					recoveredLegacyLock = true
-				end
+						local metadata = cloneMetadata(keyInfo)
+						local storedLockId = metadata[SESSION_LOCK_ID_METADATA_KEY]
+						if storedLockId ~= lockId and storedLockId ~= nil and storedLockId ~= "" then
+							lockLost = true
+							return nil
+						end
+						if storedLockId ~= lockId then
+							recoveredLegacyLock = true
+						end
 
-				setSessionLockMetadata(metadata, lockId)
-				renewed = true
-				return existingData, cloneUserIds(keyInfo), metadata
-			end)
+						setSessionLockMetadata(metadata, lockId)
+						renewed = true
+						return existingData, cloneUserIds(keyInfo), metadata
+					end)
+				end,
+				function()
+					return not serviceShuttingDown
+						and player.Parent ~= nil
+						and sessionLockIds[player] == lockId
+						and isDataLoaded(player)
+				end
+			)
+			if not gateOk then
+				error(gateResult)
+			end
 		end)
 
 		return {
@@ -1054,7 +1355,7 @@ function ProductServerService.LoadPlayerData(player: Player): LoadResult
 		return "Failed"
 	end
 
-	local loadResult = classifyProfileData(data, createdNew)
+	local loadResult, validationReason = classifyProfileData(data, createdNew)
 	debugVerbose(
 		"Load profile classified | player="
 			.. player.Name
@@ -1067,7 +1368,10 @@ function ProductServerService.LoadPlayerData(player: Player): LoadResult
 		releaseSessionLock(player, "ProfileRecoveryRequired")
 		loadStates[player] = "RecoveryRequired"
 		DebugModule.debugWarn(
-			"Profile contains only an uninitialized placeholder; refusing default overwrite | player=" .. player.Name,
+			"Profile validation failed; refusing default overwrite | player="
+				.. player.Name
+				.. " | reason="
+				.. tostring(validationReason),
 			MODULE_NAME
 		)
 		return "RecoveryRequired"
@@ -1146,26 +1450,70 @@ function ProductServerService.UpdateStoredPlayerData(userId: number, mutator: St
 		end
 
 		local blockedBySessionLock = false
+		local missingProfile = false
+		local malformedProfile = false
 		local ok, err = pcall(function()
-			playerStore:UpdateAsync(dataKeyForUserId(userId), function(existingData, keyInfo)
-				local metadata = cloneMetadata(keyInfo)
-				if isSessionLockActive(metadata, nil) then
-					blockedBySessionLock = true
-					return nil
-				end
-				setSessionLockMetadata(metadata, nil)
-				local nextData: StoredPlayerData = if typeof(existingData) == "table"
-					then table.clone(existingData)
-					else {}
-				local updatedData = mutator(nextData)
-				if typeof(updatedData) ~= "table" then
-					assert(false, "Stored data mutator must return a table")
-				end
-				return updatedData, cloneUserIds(keyInfo), metadata
+			local gateOk, gateResult = runStandardUpdate("OfflineUpdate", function()
+				return playerStore:UpdateAsync(dataKeyForUserId(userId), function(existingData, keyInfo)
+					local metadata = cloneMetadata(keyInfo)
+					if isSessionLockActive(metadata, nil) then
+						blockedBySessionLock = true
+						return nil
+					end
+					if existingData == nil then
+						missingProfile = true
+						return nil
+					end
+					if typeof(existingData) ~= "table" then
+						malformedProfile = true
+						return nil
+					end
+					local existingValid, existingValidationReason = validateStoredProfileData(existingData)
+					if not existingValid then
+						malformedProfile = true
+						DebugModule.debugWarn(
+							"Offline update rejected invalid profile | userId="
+								.. tostring(userId)
+								.. " | reason="
+								.. tostring(existingValidationReason),
+							MODULE_NAME
+						)
+						return nil
+					end
+					setSessionLockMetadata(metadata, nil)
+					local nextData: StoredPlayerData = table.clone(existingData)
+					local updatedData = mutator(nextData)
+					if typeof(updatedData) ~= "table" then
+						assert(false, "Stored data mutator must return a table")
+					end
+					local updatedValid, updatedValidationReason = validateStoredProfileData(updatedData)
+					if not updatedValid then
+						malformedProfile = true
+						DebugModule.debugWarn(
+							"Offline update rejected invalid mutation | userId="
+								.. tostring(userId)
+								.. " | reason="
+								.. tostring(updatedValidationReason),
+							MODULE_NAME
+						)
+						return nil
+					end
+					return updatedData, cloneUserIds(keyInfo), metadata
+				end)
 			end)
+			if not gateOk then
+				error(gateResult)
+			end
 		end)
 		return {
-			status = if blockedBySessionLock then "Locked" elseif ok then "Succeeded" else "Failed",
+			status = if blockedBySessionLock
+				then "Locked"
+				elseif missingProfile
+					then "Missing"
+				elseif malformedProfile
+					then "Malformed"
+				elseif ok then "Succeeded"
+				else "Failed",
 			err = err,
 		}
 	end)
@@ -1193,6 +1541,16 @@ function ProductServerService.UpdateStoredPlayerData(userId: number, mutator: St
 		)
 		return false
 	end
+	if outcome.status == "Missing" or outcome.status == "Malformed" then
+		DebugModule.debugWarn(
+			"Offline update rejected because the profile is not recoverable | userId="
+				.. tostring(userId)
+				.. " | status="
+				.. outcome.status,
+			MODULE_NAME
+		)
+		return false
+	end
 	if outcome.status ~= "Succeeded" then
 		DebugModule.debugWarn(
 			"Stored player update failed | userId=" .. tostring(userId) .. " | err=" .. tostring(outcome.err),
@@ -1205,10 +1563,74 @@ function ProductServerService.UpdateStoredPlayerData(userId: number, mutator: St
 	return true
 end
 
+function ProductServerService.ResetRecoveryProfile(player: Player): boolean
+	if player.Parent == nil
+		or player:GetAttribute("Data_LoadState") ~= "RecoveryRequired"
+		or loadStates[player] ~= "RecoveryRequired"
+	then
+		DebugModule.debugWarn(
+			"Recovery reset rejected because player is not in RecoveryRequired state | player=" .. player.Name,
+			MODULE_NAME
+		)
+		return false
+	end
+
+	if sessionLockIds[player] ~= nil then
+		DebugModule.debugWarn(
+			"Recovery reset rejected because session lock already exists | player=" .. player.Name,
+			MODULE_NAME
+		)
+		return false
+	end
+
+	cancelPendingSaveThread(player)
+	local acquireResult, _, _, _, acquireError = acquireSessionLock(player)
+	if acquireResult ~= "Acquired" then
+		DebugModule.debugWarn(
+			"Recovery reset could not reacquire profile lock | player="
+				.. player.Name
+				.. " | result="
+				.. tostring(acquireResult)
+				.. " | err="
+				.. tostring(acquireError),
+			MODULE_NAME
+		)
+		return false
+	end
+
+	-- PlayerAttributeManager initialized missing attributes from canonical defaults
+	-- before loading. Save those defaults only after the profile lock is reacquired.
+	loadStates[player] = "New"
+	player:SetAttribute("Data_Loaded", true)
+	player:SetAttribute("Data_LoadState", "Saving")
+	local saved = ProductServerService.SavePlayerData(player, true, true)
+	if not saved then
+		if sessionLockIds[player] ~= nil then
+			releaseSessionLock(player, "RecoveryResetFailed")
+		end
+		if invalidatedSessions[player] ~= true then
+			loadStates[player] = "RecoveryRequired"
+			player:SetAttribute("Data_LoadState", "RecoveryRequired")
+		end
+		player:SetAttribute("Data_Loaded", false)
+		return false
+	end
+
+	loadStates[player] = "New"
+	player:SetAttribute("Data_Loaded", false)
+	player:SetAttribute("Data_LoadState", "ResetComplete")
+	DebugModule.debugWarn(
+		"Recovery profile reset completed; player must rejoin | player=" .. player.Name .. " | userId=" .. tostring(player.UserId),
+		MODULE_NAME
+	)
+	return true
+end
+
 function ProductServerService.CleanupPlayerState(player: Player)
 	local userId = player.UserId
 	local ownsActiveSession = activePlayerSessions[userId] == player
 
+	disconnectPersistedAttributeListeners(player)
 	cancelPendingSaveThread(player)
 	heartbeatTokens[player] = nil
 	heartbeatInFlight[player] = nil
@@ -1221,6 +1643,8 @@ function ProductServerService.CleanupPlayerState(player: Player)
 	blockedSaveWarningTimes[player] = nil
 	processedProfileReceipts[player] = nil
 	processedProfileReceiptOrder[player] = nil
+	announcedGamePasses[player] = nil
+	creatorGrantLocks[player] = nil
 	saveGenerations[player] = nil
 	if ownsActiveSession then
 		activePlayerSessions[userId] = nil
@@ -1257,8 +1681,17 @@ function ProductServerService.IsShuttingDown(): boolean
 	return serviceShuttingDown
 end
 
+function ProductServerService.SetCreatorUserId(userId: number?)
+	creatorUserId = if typeof(userId) == "number" and userId > 0 then userId else nil
+	DebugModule.debugInfo("Creator identity configured | creatorUserId=" .. tostring(creatorUserId), MODULE_NAME)
+end
+
 function ProductServerService.SetProductCallback(id: number, cb: (...any) -> ())
 	devProductCallbacks[id] = cb
+end
+
+function ProductServerService.SetProductGrantedCallback(id: number, cb: (...any) -> ())
+	devProductGrantedCallbacks[id] = cb
 end
 
 function ProductServerService.SetGamePassCallback(id: number, cb: (...any) -> ())
@@ -1284,7 +1717,7 @@ local function reserveReceipt(
 		return "Granted"
 	end
 
-	local ok, record = pcall(function()
+	local ok, record = runStandardUpdate("ReserveReceipt", function()
 		return receiptStore:UpdateAsync("receipt_" .. receiptId, function(previous)
 			if typeof(previous) == "table" then
 				if previous.Status == "Granted" then
@@ -1331,8 +1764,8 @@ local function reserveReceipt(
 end
 
 local function releaseReceipt(receiptId: string)
-	local ok, err = pcall(function()
-		receiptStore:UpdateAsync("receipt_" .. receiptId, function(previous)
+	local ok, err = runStandardUpdate("ReleaseReceipt", function()
+		return receiptStore:UpdateAsync("receipt_" .. receiptId, function(previous)
 			if typeof(previous) == "table" and previous.Status == "Processing" and previous.JobId == receiptJobId then
 				return {
 					Status = "Retry",
@@ -1351,8 +1784,8 @@ local function releaseReceipt(receiptId: string)
 end
 
 local function rememberGrantedReceipt(receiptId: string, player: Player, productId: number): boolean
-	local ok, err = pcall(function()
-		receiptStore:UpdateAsync("receipt_" .. receiptId, function(previous)
+	local ok, err = runStandardUpdate("RememberGrantedReceipt", function()
+		return receiptStore:UpdateAsync("receipt_" .. receiptId, function(previous)
 			if typeof(previous) == "table" and previous.Status == "Granted" then
 				return previous
 			end
@@ -1390,6 +1823,90 @@ local function restoreSavedAttributes(player: Player, snapshot: { [string]: any 
 	for _, entry in ipairs(ProductService.SAVED_ATTRIBUTES) do
 		player:SetAttribute(entry.name, snapshot[entry.name])
 	end
+end
+
+function ProductServerService.GrantCreatorDeveloperProduct(player: Player, productId: number): (boolean, string)
+	if typeof(productId) ~= "number" or productId <= 0 or productId ~= math.floor(productId) then
+		return false, "InvalidProductId"
+	end
+	if not isExperienceCreator(player) then
+		return false, "NotCreator"
+	end
+	if player.Parent == nil then
+		return false, "PlayerUnavailable"
+	end
+	if serviceShuttingDown then
+		return false, "ServiceShuttingDown"
+	end
+	if not isDataLoaded(player) then
+		return false, "DataNotLoaded"
+	end
+	if creatorGrantLocks[player] then
+		return false, "GrantInFlight"
+	end
+	if not isCanonicalDeveloperProduct(productId) then
+		return false, "UnknownProduct"
+	end
+
+	local callback = devProductCallbacks[productId]
+	if not callback then
+		return false, "ProductNotRegistered"
+	end
+
+	creatorGrantLocks[player] = true
+	local attributeSnapshot = snapshotSavedAttributes(player)
+	local callbackOk, callbackResult, callbackReason =
+		pcall(callback, player, productId, true, nil, nil, "CreatorGrant")
+	if not callbackOk then
+		restoreSavedAttributes(player, attributeSnapshot)
+		creatorGrantLocks[player] = nil
+		DebugModule.debugWarn(
+			"Creator developer product callback failed | player="
+				.. player.Name
+				.. " | productId="
+				.. tostring(productId)
+				.. " | err="
+				.. tostring(callbackResult),
+			MODULE_NAME
+		)
+		return false, "CallbackFailed"
+	end
+	if callbackResult == false then
+		restoreSavedAttributes(player, attributeSnapshot)
+		creatorGrantLocks[player] = nil
+		local rejectionReason = if typeof(callbackReason) == "string" then callbackReason else "CallbackRejected"
+		DebugModule.debugWarn(
+			"Creator developer product callback rejected | player="
+				.. player.Name
+				.. " | productId="
+				.. tostring(productId)
+				.. " | reason="
+				.. rejectionReason,
+			MODULE_NAME
+		)
+		return false, rejectionReason
+	end
+
+	local saved = ProductServerService.SavePlayerData(player, true)
+	if not saved then
+		restoreSavedAttributes(player, attributeSnapshot)
+		creatorGrantLocks[player] = nil
+		DebugModule.debugWarn(
+			"Creator developer product grant rolled back because save failed | player="
+				.. player.Name
+				.. " | productId="
+				.. tostring(productId),
+			MODULE_NAME
+		)
+		return false, "SaveFailed"
+	end
+
+	creatorGrantLocks[player] = nil
+	DebugModule.debugInfo(
+		"Creator developer product granted | player=" .. player.Name .. " | productId=" .. tostring(productId),
+		MODULE_NAME
+	)
+	return true, "Granted"
 end
 
 local function processReceipt(info: any): Enum.ProductPurchaseDecision
@@ -1451,7 +1968,8 @@ local function processReceipt(info: any): Enum.ProductPurchaseDecision
 	local alreadyPersisted = hasProcessedProfileReceipt(player, receiptId)
 	if not alreadyPersisted then
 		local attributeSnapshot = snapshotSavedAttributes(player)
-		local callbackOk, callbackErr = pcall(cb, player, info.ProductId, true, receiptId, info.ProductPurchaseChannel)
+		local callbackOk, callbackResult, callbackReason =
+			pcall(cb, player, info.ProductId, true, receiptId, info.ProductPurchaseChannel)
 		if not callbackOk then
 			restoreSavedAttributes(player, attributeSnapshot)
 			processingReceipts[receiptId] = nil
@@ -1462,7 +1980,22 @@ local function processReceipt(info: any): Enum.ProductPurchaseDecision
 					.. " productId="
 					.. tostring(info.ProductId)
 					.. " err="
-					.. tostring(callbackErr),
+					.. tostring(callbackResult),
+				MODULE_NAME
+			)
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+		if callbackResult == false then
+			restoreSavedAttributes(player, attributeSnapshot)
+			processingReceipts[receiptId] = nil
+			releaseReceipt(receiptId)
+			DebugModule.debugWarn(
+				"Dev product callback rejected; receipt will retry | player="
+					.. player.Name
+					.. " | productId="
+					.. tostring(info.ProductId)
+					.. " | reason="
+					.. tostring(callbackReason),
 				MODULE_NAME
 			)
 			return Enum.ProductPurchaseDecision.NotProcessedYet
@@ -1498,11 +2031,33 @@ local function processReceipt(info: any): Enum.ProductPurchaseDecision
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 
+	local grantedCallback = devProductGrantedCallbacks[info.ProductId]
+	if grantedCallback then
+		local callbackOk, callbackError = pcall(grantedCallback, player, info.ProductId, receiptId)
+		if not callbackOk then
+			DebugModule.debugWarn(
+				"Dev product post-grant callback failed | player="
+					.. player.Name
+					.. " | productId="
+					.. tostring(info.ProductId)
+					.. " | err="
+					.. tostring(callbackError),
+				MODULE_NAME
+			)
+		end
+	end
+
 	processingReceipts[receiptId] = nil
 
 	local itemInfo = getMarketplaceInfoCached(info.ProductId, Enum.InfoType.Product)
-	if itemInfo then
-		SystemChatService.BroadcastPurchase(player, itemInfo.Name, itemInfo.PriceInRobux or 0)
+	if itemInfo and not alreadyPersisted then
+		SystemChatService.BroadcastPurchase(
+			player,
+			itemInfo.Name,
+			itemInfo.PriceInRobux or 0,
+			nil,
+			"Product:" .. receiptId
+		)
 	end
 
 	return Enum.ProductPurchaseDecision.PurchaseGranted
@@ -1519,8 +2074,9 @@ function ProductServerService.Init()
 
 	serviceMaid.GamePassPurchaseFinished = MarketplaceService.PromptGamePassPurchaseFinished:Connect(
 		function(player, id, bought)
-			local resolvedBought = bought == true
-			if resolvedBought then
+			local purchaseCompleted = bought == true
+			local resolvedBought = purchaseCompleted
+			if purchaseCompleted then
 				ProductService.SetGamePassOwnershipCache(player, id, true)
 			else
 				ProductService.ClearOwnershipCache(player)
@@ -1534,10 +2090,22 @@ function ProductServerService.Init()
 			if cb then
 				pcall(cb, player, id, resolvedBought)
 			end
-			if resolvedBought then
+			if purchaseCompleted then
 				local itemInfo = getMarketplaceInfoCached(id, Enum.InfoType.GamePass)
-				if itemInfo then
-					SystemChatService.BroadcastPurchase(player, itemInfo.Name, itemInfo.PriceInRobux or 0)
+				local playerAnnouncements = announcedGamePasses[player]
+				if not playerAnnouncements then
+					playerAnnouncements = {}
+					announcedGamePasses[player] = playerAnnouncements
+				end
+				if itemInfo and not playerAnnouncements[id] then
+					SystemChatService.BroadcastPurchase(
+						player,
+						itemInfo.Name,
+						itemInfo.PriceInRobux or 0,
+						nil,
+						"GamePass:" .. tostring(player.UserId) .. ":" .. tostring(id)
+					)
+					playerAnnouncements[id] = true
 				end
 				ProductServerService.SavePlayerData(player)
 			end
@@ -1545,11 +2113,17 @@ function ProductServerService.Init()
 	)
 
 	serviceMaid.PlayerRemoving = Players.PlayerRemoving:Connect(function(player)
+		disconnectPersistedAttributeListeners(player)
 		heartbeatTokens[player] = nil
 		heartbeatInFlight[player] = nil
 		cancelPendingSaveThread(player)
 		lastSaveTimes[player] = nil
+		creatorGrantLocks[player] = nil
 	end)
+	serviceMaid.PersistencePlayerAdded = Players.PlayerAdded:Connect(bindPersistedAttributeListeners)
+	for _, player in ipairs(Players:GetPlayers()) do
+		bindPersistedAttributeListeners(player)
+	end
 	startSessionLockHeartbeat()
 end
 
@@ -1559,6 +2133,9 @@ function ProductServerService.Shutdown()
 	end
 
 	ProductServerService.PrepareForShutdown()
+	for player in pairs(persistedAttributeConnections) do
+		disconnectPersistedAttributeListeners(player)
+	end
 	serviceMaid:DoCleaning()
 	isInitialized = false
 	DebugModule.debugPrint("ProductServerService shutdown", MODULE_NAME)

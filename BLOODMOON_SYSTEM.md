@@ -1,30 +1,20 @@
 # Blood Moon System
 
 Current implementation summary for the Blood Moon event in SpeedBrainrotDev.
-Runtime configuration is defined in `src/ReplicatedStorage/Modules/Config/CoreConfig.luau`.
+Runtime configuration is defined in `src/ServerScriptService/Modules/Shared/CoreConfig_Server.luau`.
 
 ## Schedule And State
 
 - The server owns event state through `LiveEventService`.
 - State is replicated through the `ReplicatedStorage.LiveEventState` folder.
-- The production Blood Moon schedule uses fixed active and grace windows:
-  - Active: 3 days.
-  - Grace period: 3 days.
-  - Pre-event countdown: 24 hours.
-- The first cycle has a one-time launch exception: its pre-event countdown
-  begins at `1788019200` (`2026-08-30 00:00` Asia/Manila) and runs until the
-  first active start. Later cycles keep the normal 24-hour countdown.
-- The first configured cycle starts active. Later cycles use the grace period,
-  then the pre-event countdown during the final grace day, then the active event.
-- The full repeating cycle is 6 days.
-- Production starts at `cycleStartUnix = 1788562800` (`2026-09-04 23:00`
-  UTC / `2026-09-05 07:00` Asia/Manila), then repeats with the configured
-  three-day active and three-day grace windows. This launch time targets North
-  American evening while keeping Asia in its Saturday morning.
-- Studio debug mode is enabled in the current config:
-  - Starts immediately.
-  - Lasts 5 minutes.
-  - Uses a 20-second test grace period.
+- Production rotation transition is anchored at `1790809200` (2026-09-30
+  23:00 UTC / 2026-10-01 07:00 Asia/Manila). Its first window preserves the
+  in-progress Blood Moon for 3 active days, then uses the new 2-day grace.
+- Later Blood Moon windows use 2 active days and 2 grace days. Minor event
+  windows use 1 active day and 2 grace days. Major/Minor pair spans 7 days.
+- Pre-event countdown remains 24 hours.
+- Studio debug overrides are disabled; production rotation is configured in
+  the server-only `CoreConfig_Server` module.
 - Schedule refreshes live, so already-running servers receive event changes
   without restarting.
 - A new Blood Moon cycle resets `BloodmoonWins` to zero. Owned rewards remain
@@ -67,14 +57,16 @@ Runtime configuration is defined in `src/ReplicatedStorage/Modules/Config/CoreCo
 - Saved speed values are not permanently changed.
 - Custom speed UI uses the effective event-adjusted maximum.
 - Normal final-stage WinButton rewards continue to work.
-- A valid final-stage completion also grants Bloodmoon Wins.
+- Valid WinButton completions grant Bloodmoon Wins by stage: stages 16-17 grant
+  1, stages 18-19 grant 2, and stage 20 grants 3 before applicable win
+  multipliers.
 - Teleporting or reaching the end area without a valid server-side completion
   cannot grant Bloodmoon Wins.
 - Bloodmoon-specific wins use the normal `WinMultiplier` and temporary win
   boost, but do not use treadmill, rebirth, dev-product, or 2X Weekend reward
   multipliers.
-- Published servers use the normal base Bloodmoon win amount of 1. Studio
-  debug uses the configured test amount of 10.
+- The stage-based Bloodmoon win amounts are identical in Studio and published
+  servers when awarded through a WinButton.
 
 ## Compensation Campaign
 
@@ -88,7 +80,7 @@ Runtime configuration is defined in `src/ReplicatedStorage/Modules/Config/CoreCo
 
 ## Blood Moon Progress
 
-- `BloodMoonProgress` replaces `StageProgressFrame` while the event is active.
+- `EventProgress` replaces `StageProgressFrame` while an event with progress UI is active.
 - It is hidden at zero Bloodmoon Wins and restored when the event ends.
 - `CurrentWins` displays the player's Bloodmoon Wins.
 - `NextUnlock` displays the next reward or `ALL REWARDS UNLOCKED`.
@@ -188,7 +180,7 @@ servers never enable this behavior because the gate also requires
 - `src/ServerScriptService/Modules/LiveEventSchedule.luau`
 - `src/ReplicatedStorage/Modules/EnvironmentService.luau`
 - `src/ReplicatedStorage/Modules/UI/MainGUI/LiveEventBannerUI.luau`
-- `src/ReplicatedStorage/Modules/UI/MainGUI/BloodMoonProgressUI.luau`
+- `src/ReplicatedStorage/Modules/UI/MainGUI/EventProgressUI.luau`
 - `src/ReplicatedStorage/Modules/BloodmoonParticleService.luau`
 - `src/ReplicatedStorage/Modules/TsunamiVisualService.luau`
 - `src/ReplicatedStorage/Modules/ProductService.luau`

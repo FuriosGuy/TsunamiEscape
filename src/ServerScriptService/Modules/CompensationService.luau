@@ -1,10 +1,8 @@
---!strict
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local CoreConfig = require(Modules:WaitForChild("Config"):WaitForChild("CoreConfig"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
+local CoreConfig = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("CoreConfig_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
 local ProductServerService = require(script.Parent:WaitForChild("ProductServerService"))
 local TemporaryBoostService = require(script.Parent:WaitForChild("TemporaryBoostService"))
 
@@ -117,7 +115,10 @@ function CompensationService.TryGrant(player: Player): boolean
 		player:SetAttribute(WIN_END_ATTRIBUTE, previousWinEnd)
 		claimedThisSession[player] = nil
 		DebugModule.debugWarn(
-			"Compensation claim rolled back because save failed | player=" .. player.Name .. " | campaign=" .. campaignId,
+			"Compensation claim rolled back because save failed | player="
+				.. player.Name
+				.. " | campaign="
+				.. campaignId,
 			MODULE_NAME
 		)
 		return false
@@ -129,10 +130,7 @@ function CompensationService.TryGrant(player: Player): boolean
 		showNotification:FireClient(player, "COMPENSATION CLAIMED! +30 MIN 2X SPEED AND 2X WINS!", "Green")
 	end
 
-	DebugModule.debugInfo(
-		"Compensation claimed | player=" .. player.Name .. " | campaign=" .. campaignId,
-		MODULE_NAME
-	)
+	DebugModule.debugInfo("Compensation claimed | player=" .. player.Name .. " | campaign=" .. campaignId, MODULE_NAME)
 	return true
 end
 

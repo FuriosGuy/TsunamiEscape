@@ -1,5 +1,6 @@
 {
   "className": "ParticleEmitter",
+  "originalName": "Images/20250525_1848_Gray_4-Pointed_Star_remix_01j",
   "properties": {
     "EmissionDirection": "Back",
     "FlipbookMode": "OneShot",
@@ -8,16 +9,15 @@
     "LightInfluence": 1,
     "Rotation": [-360, 360],
     "Size": [{
+        "envelope": 1.0,
         "time": 0.0,
-        "value": 1.0,
-        "envelope": 1.0
+        "value": 1.0
       }, {
+        "envelope": 0.0,
         "time": 1.0,
-        "value": 0.0,
-        "envelope": 0.0
+        "value": 0.0
       }],
     "Speed": [20, 20],
     "Texture": "rbxassetid://77822867299693"
-  },
-  "originalName": "Images/20250525_1848_Gray_4-Pointed_Star_remix_01j"
+  }
 }

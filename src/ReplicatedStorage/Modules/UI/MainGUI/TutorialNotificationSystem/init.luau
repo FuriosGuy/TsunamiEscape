@@ -1,10 +1,10 @@
---!strict
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
+local ColorConfig = require(Modules:WaitForChild("Config"):WaitForChild("ColorConfig"))
+local PlayerHandler = require(Modules:WaitForChild("Shared"):WaitForChild("PlayerHandler_Client"))
 local FramerateManager = require(Modules:WaitForChild("FramerateManager"))
+local NotificationLayoutController = require(Modules.UI.MainGUI.NotificationLayoutController)
 
 local TutorialNotificationSystem = {}
 TutorialNotificationSystem.__index = TutorialNotificationSystem
@@ -16,12 +16,11 @@ local TUTORIAL_SEEN_ATTRIBUTE = "TutorialSeen"
 local TUTORIAL_COMPLETED_ATTRIBUTE = "TutorialCompleted"
 local TUTORIAL_PROGRESS_SEEN = "Seen"
 local TUTORIAL_PROGRESS_COMPLETED = "Completed"
-local TUTORIAL_MESSAGE_STEP_1 = "Hop on a treadmill and reach Level 3!"
-local TUTORIAL_MESSAGE_STEP_2 = "Floor it to the finish and grab your first win!"
-local TUTORIAL_FINAL_MESSAGE =
-	"Congratulations! You completed the tutorial! You can also buy trails, join the group and claim rewards, or buy boosts to progress faster!"
+local TUTORIAL_MESSAGE_STEP_1 = "GET TO LEVEL 3!"
+local TUTORIAL_MESSAGE_STEP_2 = "DRIVE HERE!"
+local TUTORIAL_FINAL_MESSAGE = "TUTORIAL COMPLETE! NOW ESCAPE THE TSUNAMI!"
 local TUTORIAL_WIN_BUTTON_STAGE = 1
-local TUTORIAL_HIGHLIGHT_COLOR = Color3.fromRGB(255, 255, 255)
+local TUTORIAL_HIGHLIGHT_COLOR = ColorConfig.Colors.White.Color
 local TUTORIAL_HIGHLIGHT_FILL_TRANSPARENCY = 0.75
 local TUTORIAL_HIGHLIGHT_OUTLINE_TRANSPARENCY = 0
 
@@ -37,6 +36,7 @@ type ControllerOptions = {
 	isCleanedUp: () -> boolean,
 	getNumericAttribute: (Instance?, string) -> number?,
 	playRewardCelebration: () -> (),
+	onTutorialUnlocked: (() -> ())?,
 }
 
 function TutorialNotificationSystem.new(options: ControllerOptions)
@@ -53,6 +53,7 @@ function TutorialNotificationSystem.new(options: ControllerOptions)
 	self.isCleanedUp = options.isCleanedUp
 	self.getNumericAttribute = options.getNumericAttribute
 	self.playRewardCelebration = options.playRewardCelebration
+	self.onTutorialUnlocked = options.onTutorialUnlocked
 
 	local tutorialCompleted = self.player:GetAttribute(TUTORIAL_COMPLETED_ATTRIBUTE) == true
 	local tutorialSeen = self.player:GetAttribute(TUTORIAL_SEEN_ATTRIBUTE) == true
@@ -237,7 +238,7 @@ function TutorialNotificationSystem:BindSkipButton()
 	end
 
 	self.boundSkipButton = self.skipButton
-	self.sessionMaid:GiveTask(self.skipButton.MouseButton1Click:Connect(function()
+	self.sessionMaid:GiveTask(self.skipButton.Activated:Connect(function()
 		if not self.tutorialActive or self.tutorialFinalizing then
 			return
 		end
@@ -251,10 +252,11 @@ function TutorialNotificationSystem:ShowNonTutorialNotification(
 	message: string,
 	textColor: Color3?,
 	gradientBottomColor: Color3?,
-	notificationStyle: string?
-)
+	notificationStyle: string?,
+	notificationKey: string?
+): boolean
 	if self.tutorialNotificationLock then
-		return
+		return false
 	end
 
 	local function setGradientsEnabledRecursive(root: Instance?, isEnabled: boolean)
@@ -282,11 +284,12 @@ function TutorialNotificationSystem:ShowNonTutorialNotification(
 	if notificationStyle == "QuickFade" then
 		self.visualFunctions.ShowQuickFadeNotification(message, textColor, gradientBottomColor)
 	else
-		self.visualFunctions.ShowNotification(message, textColor, gradientBottomColor)
+		self.visualFunctions.ShowNotification(message, textColor, gradientBottomColor, notificationKey)
 	end
 
 	-- Generic notification tweens may touch descendants, so re-hide tutorial-only labels after handoff.
 	self:ClearTutorialOnlyControls()
+	return true
 end
 
 function TutorialNotificationSystem:GetCurrentWorldInstance(): Instance?
@@ -480,7 +483,11 @@ function TutorialNotificationSystem:FindFirstWinButtonPart(world: Instance?): Ba
 	return nil
 end
 
-function TutorialNotificationSystem:ShowTutorialNotification(message: string, showSkipButton: boolean, tutorialHeader: string?)
+function TutorialNotificationSystem:ShowTutorialNotification(
+	message: string,
+	showSkipButton: boolean,
+	tutorialHeader: string?
+)
 	local frame = self.notificationFrame
 	local label = self.notificationLabel
 	if not frame or not label then
@@ -496,7 +503,7 @@ function TutorialNotificationSystem:ShowTutorialNotification(message: string, sh
 		local function applyToInstance(instance: Instance)
 			if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
 				instance.BackgroundTransparency = 1
-				instance.TextColor3 = Color3.fromRGB(255, 255, 255)
+				instance.TextColor3 = ColorConfig.Colors.White.Color
 			elseif instance:IsA("UIGradient") then
 				instance.Enabled = false
 			end
@@ -521,8 +528,8 @@ function TutorialNotificationSystem:ShowTutorialNotification(message: string, sh
 		setTextControlTutorialStyle(self.skipButton)
 	end
 
-	frame.Position = UDim2.new(0.214, 0, 0.107, 0)
 	frame.Visible = true
+	frame.Position = NotificationLayoutController.GetVisiblePosition(frame, true)
 
 	-- Re-assert after tween start to avoid stale visual state from previous notifications.
 	setTextControlTutorialStyle(label)
@@ -541,7 +548,7 @@ function TutorialNotificationSystem:ShowTutorialStepMessage(
 	showSkipButton: boolean,
 	stepNumber: number
 )
-	local tutorialHeader = string.format("Tutorial %d/3", math.clamp(stepNumber, 1, 3))
+	local tutorialHeader = string.format("TUTORIAL %d/3", math.clamp(stepNumber, 1, 3))
 	local messageKey = string.format("%s|%s|%s", message, tostring(showSkipButton), tutorialHeader)
 	if self.tutorialLastMessageKey == messageKey then
 		return
@@ -719,7 +726,7 @@ function TutorialNotificationSystem:StartTutorialFinalStep(reason: string)
 	self.tutorialShowKartBeamUntil = 0
 	self.tutorialLastMessageKey = nil
 	self:NotifyTutorialProgress(TUTORIAL_PROGRESS_COMPLETED)
-	self:ShowTutorialNotification(TUTORIAL_FINAL_MESSAGE, false, "Tutorial Completed")
+	self:ShowTutorialNotification(TUTORIAL_FINAL_MESSAGE, false, "TUTORIAL COMPLETE!")
 	self.playRewardCelebration()
 
 	self.debugModule.debugInfo("Tutorial final step started | reason=" .. reason, "TutorialNotificationSystem")
@@ -752,6 +759,17 @@ function TutorialNotificationSystem:StartTutorialFinalStep(reason: string)
 		self.tutorialShowKartBeamUntil = 0
 		self:CleanupBeam()
 		self.player:SetAttribute(TUTORIAL_COMPLETED_ATTRIBUTE, true)
+
+		local onTutorialUnlocked = self.onTutorialUnlocked
+		if onTutorialUnlocked then
+			local ok, err = pcall(onTutorialUnlocked)
+			if not ok then
+				self.debugModule.debugWarn(
+					"Tutorial unlock callback failed: " .. tostring(err),
+					"TutorialNotificationSystem"
+				)
+			end
+		end
 	end)
 end
 
@@ -820,8 +838,8 @@ function TutorialNotificationSystem:OnProgressChanged()
 	if self.tutorialStep == 3 then
 		local currentWins = self.player:GetAttribute("WinCount") or 0
 		local stepMessage = if currentWins < winsRequired
-			then string.format("Collect %d total wins to unlock Kart #2!", winsRequired)
-			else "You have enough wins! Buy Kart #2 to finish!"
+			then string.format("GET %d WINS FOR A FASTER KART!", winsRequired)
+			else "GET A FASTER KART!"
 		self:ShowTutorialStepMessage(stepMessage, true, 3)
 	end
 end

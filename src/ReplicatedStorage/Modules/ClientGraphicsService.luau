@@ -1,24 +1,18 @@
---!strict
-
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
+local ClientDeviceProfile = require(ReplicatedStorage.Modules.ClientDeviceProfile)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local ClientCullingService = require(ReplicatedStorage.Modules.ClientCullingService)
 local EnvironmentService = require(ReplicatedStorage.Modules.EnvironmentService)
+local LiveEventWorldVisualService = require(ReplicatedStorage.Modules.LiveEventWorldVisualService)
 local TsunamiVisualService = require(ReplicatedStorage.Modules.TsunamiVisualService)
 
 local ClientGraphicsService = {}
 local isInitialized = false
 local originalGlobalShadows: boolean? = nil
-
-local function isMobileClient(): boolean
-	-- Mobile heuristic: touch-first devices without keyboard/mouse availability.
-	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
-end
 
 function ClientGraphicsService.Init()
 	if isInitialized then
@@ -31,13 +25,14 @@ function ClientGraphicsService.Init()
 	end
 
 	EnvironmentService.Start()
+	LiveEventWorldVisualService.Start()
 
 	local config = CoreConfig.clientGraphics
 	if typeof(config) ~= "table" then
 		return
 	end
 
-	if config.disableGlobalShadowsOnMobile == true and isMobileClient() then
+	if config.disableGlobalShadowsOnMobile == true and ClientDeviceProfile.IsMobile() then
 		if originalGlobalShadows == nil then
 			originalGlobalShadows = Lighting.GlobalShadows
 		end
@@ -57,6 +52,7 @@ function ClientGraphicsService.Shutdown()
 
 	ClientCullingService.Stop()
 	TsunamiVisualService.Stop()
+	LiveEventWorldVisualService.Stop()
 	EnvironmentService.SetGlobalShadowsOverride(nil)
 	EnvironmentService.Stop()
 	if originalGlobalShadows ~= nil then

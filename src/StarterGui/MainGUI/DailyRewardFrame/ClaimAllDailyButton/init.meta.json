@@ -3,8 +3,8 @@
   "properties": {
     "AnchorPoint": [0.5, 0.5],
     "Attributes": {
-      "isShine": false,
-      "isHover": false
+      "isHover": false,
+      "isShine": false
     },
     "BackgroundColor3": [0.8941, 0.2941, 1],
     "BorderColor3": [0, 0, 0],

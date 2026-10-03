@@ -1,5 +1,3 @@
---!strict
-
 local LiveEventService = require(script.Parent.Modules:WaitForChild("LiveEventService"))
 
 LiveEventService.Init()

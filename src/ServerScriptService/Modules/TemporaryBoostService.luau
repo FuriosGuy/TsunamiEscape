@@ -1,10 +1,8 @@
---!strict
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
-local ProductService = require(ReplicatedStorage.Modules.ProductService)
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local ProductService = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("ProductService_Server"))
+local CoreConfig = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("CoreConfig_Server"))
 local ProductServerService = require(script.Parent.ProductServerService)
 
 local TemporaryBoostService = {}

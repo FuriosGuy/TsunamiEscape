@@ -1,0 +1,25 @@
+{
+  "className": "TextButton",
+  "properties": {
+    "BackgroundColor3": [1, 1, 1],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "FontFace": {
+      "cachedFaceId": null,
+      "family": "rbxasset://fonts/families/FredokaOne.json",
+      "style": "Normal",
+      "weight": "Regular"
+    },
+    "Position": [[0.0, 0.0], [0.0682, 0.0]],
+    "RichText": true,
+    "Size": [[1.0, 0.0], [0.8798, 0.0]],
+    "Text": "Faster Open",
+    "TextColor3": [1, 1, 1],
+    "TextScaled": true,
+    "TextSize": 60,
+    "TextWrapped": true,
+    "TextYAlignment": "Top",
+    "ZIndex": 4
+  }
+}

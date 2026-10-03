@@ -1,0 +1,13 @@
+{
+  "className": "SpawnLocation",
+  "properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "CFrame": [-24, 8.5, -25.0001, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Duration": 0,
+    "Locked": true,
+    "MaterialVariant": "Studs",
+    "Size": [20, 1, 20],
+    "TopSurface": "Smooth"
+  }
+}

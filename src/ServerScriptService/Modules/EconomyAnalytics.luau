@@ -1,12 +1,11 @@
---!strict
 local AnalyticsService = game:GetService("AnalyticsService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 
 local EconomyAnalytics = {}
 
@@ -21,10 +20,11 @@ local ECONOMY_EVENTS_ENABLED = if analyticsConfig and typeof(analyticsConfig.eco
 local LIVE_SERVER_ONLY = if analyticsConfig and typeof(analyticsConfig.liveServerOnly) == "boolean"
 	then analyticsConfig.liveServerOnly
 	else true
+local MAX_SAFE_ANALYTICS_INTEGER = 9007199254740991
 
 type ScalarValue = string | number | boolean
 
-export type CurrencyName = "Wins" | "XPSpeed"
+export type CurrencyName = "Wins" | "XPSpeed" | "BloodmoonWins" | "NeonRushWins" | "FrostbiteRallyWins"
 export type CustomFields = {
 	customField01: ScalarValue?,
 	customField02: ScalarValue?,
@@ -34,6 +34,9 @@ export type CustomFields = {
 local CURRENCY_BALANCE_ATTRIBUTES: { [CurrencyName]: string } = {
 	Wins = "WinCount",
 	XPSpeed = "AllXPSpeed",
+	BloodmoonWins = "BloodmoonWins",
+	NeonRushWins = "NeonRushWins",
+	FrostbiteRallyWins = "FrostbiteRallyWins",
 }
 
 local function canSendAnalytics(): boolean
@@ -52,12 +55,18 @@ local function canSendAnalytics(): boolean
 	return true
 end
 
-local function isFinitePositive(value: number): boolean
-	return value == value and value ~= math.huge and value ~= -math.huge and value > 0
+local function isFiniteNumber(value: unknown): boolean
+	return typeof(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
 end
 
-local function isFiniteNumber(value: number): boolean
-	return value == value and value ~= math.huge and value ~= -math.huge
+local function isSafeAnalyticsInteger(value: unknown, allowZero: boolean): boolean
+	if not isFiniteNumber(value) then
+		return false
+	end
+
+	local numberValue = value :: number
+	local minimum = if allowZero then 0 else 1
+	return numberValue >= minimum and numberValue <= MAX_SAFE_ANALYTICS_INTEGER
 end
 
 local function stringifyCustomFieldValue(value: ScalarValue): string
@@ -137,15 +146,24 @@ function EconomyAnalytics.Log(
 		return
 	end
 
-	if not isFinitePositive(amount) then
+	if not isSafeAnalyticsInteger(amount, false) then
+		DebugModule.debugWarn(
+			string.format(
+				"Skipping economy event with analytics-unsafe amount | player=%s | currency=%s | amount=%s",
+				player.Name,
+				currencyName,
+				tostring(amount)
+			),
+			MODULE_NAME
+		)
 		return
 	end
 
 	local sanitizedAmount = math.max(1, math.round(amount))
-	if not isFinitePositive(sanitizedAmount) then
+	if not isSafeAnalyticsInteger(sanitizedAmount, false) then
 		DebugModule.debugWarn(
 			string.format(
-				"Skipping economy event with non-finite amount | player=%s | currency=%s | amount=%s",
+				"Skipping economy event with analytics-unsafe rounded amount | player=%s | currency=%s | amount=%s",
 				player.Name,
 				currencyName,
 				tostring(amount)
@@ -157,10 +175,10 @@ function EconomyAnalytics.Log(
 
 	local balanceAttributeName = CURRENCY_BALANCE_ATTRIBUTES[currencyName]
 	local rawEndingBalance = player:GetAttribute(balanceAttributeName)
-	if typeof(rawEndingBalance) ~= "number" or not isFiniteNumber(rawEndingBalance) then
+	if not isSafeAnalyticsInteger(rawEndingBalance, true) then
 		DebugModule.debugWarn(
 			string.format(
-				"Skipping economy event with non-finite ending balance | player=%s | currency=%s | attribute=%s | value=%s",
+				"Skipping economy event with analytics-unsafe ending balance | player=%s | currency=%s | attribute=%s | value=%s",
 				player.Name,
 				currencyName,
 				balanceAttributeName,
@@ -172,10 +190,10 @@ function EconomyAnalytics.Log(
 	end
 
 	local endingBalance = math.max(0, math.round(rawEndingBalance))
-	if not isFiniteNumber(endingBalance) then
+	if not isSafeAnalyticsInteger(endingBalance, true) then
 		DebugModule.debugWarn(
 			string.format(
-				"Skipping economy event after balance normalization | player=%s | currency=%s | value=%s",
+				"Skipping economy event after analytics balance normalization | player=%s | currency=%s | value=%s",
 				player.Name,
 				currencyName,
 				tostring(rawEndingBalance)

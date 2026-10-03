@@ -1,0 +1,25 @@
+{
+  "className": "TextLabel",
+  "properties": {
+    "Active": true,
+    "BackgroundColor3": [1, 1, 1],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "FontFace": {
+      "cachedFaceId": null,
+      "family": "rbxasset://fonts/families/SourceSansPro.json",
+      "style": "Normal",
+      "weight": "Bold"
+    },
+    "Position": [[0.2249, 0.0], [0.727, 0.0]],
+    "Selectable": true,
+    "Size": [[0.6981, 0.0], [0.0546, 0.0]],
+    "Text": "Anchor + Position",
+    "TextColor3": [0.7765, 0.7843, 0.8275],
+    "TextScaled": true,
+    "TextSize": 25,
+    "TextWrapped": true,
+    "TextXAlignment": "Left"
+  }
+}

@@ -7,24 +7,24 @@
     "Rate": 30,
     "Rotation": [-90, 90],
     "Size": [{
+        "envelope": 3.63,
         "time": 0.0,
-        "value": 3.63,
-        "envelope": 3.63
+        "value": 3.63
       }, {
+        "envelope": 1.0,
         "time": 1.0,
-        "value": 1.0,
-        "envelope": 1.0
+        "value": 1.0
       }],
     "Speed": [50, 50],
     "Texture": "rbxassetid://2671910894",
     "Transparency": [{
+        "envelope": 0.0,
         "time": 0.0,
-        "value": 0.9,
-        "envelope": 0.0
+        "value": 0.9
       }, {
+        "envelope": 0.0,
         "time": 1.0,
-        "value": 1.0,
-        "envelope": 0.0
+        "value": 1.0
       }]
   }
 }

@@ -3,7 +3,8 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
-local PlayerHandler = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("PlayerHandler_Server"))
+local PlayerHandler =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("PlayerHandler_Server"))
 
 local ValidationService = {}
 
@@ -12,6 +13,13 @@ type PositionSample = {
 	position: Vector3,
 	observedAt: number,
 	worldName: string?,
+	previousPosition: Vector3?,
+	previousObservedAt: number?,
+}
+
+type PathSample = {
+	position: Vector3,
+	observedAt: number,
 }
 
 -- Movement validation is intentionally soft: it blocks rewards, never players.
@@ -23,13 +31,26 @@ local MIN_SUSPICIOUS_DISTANCE = 100
 local SPEED_TOLERANCE_RATIO = 0.35
 local MIN_DISTANCE_TOLERANCE = 50
 local SUSPICIOUS_LOG_COOLDOWN = 2
+local MAX_TRAVEL_TIME_PING_GRACE_SECONDS = 0.35
+local MAX_GENERIC_PING_DISTANCE_GRACE = 50
+local MOVEMENT_EVIDENCE_DECAY_PER_SECOND = 1.5
+local MOVEMENT_EVIDENCE_BLOCK_THRESHOLD = 2.5
+local HARD_MOVEMENT_DISTANCE = 300
+local HARD_MOVEMENT_RATIO = 4
+local MIN_RELIABLE_SAMPLE_ELAPSED = 0.05
+local MAX_PATH_SAMPLES = 64
+local MAX_STAGE_PATH_AGE_SECONDS = 6
 
 local positionSamples: { [Player]: PositionSample } = {}
+local pathSamples: { [Player]: { PathSample } } = {}
 local nextPositionObservation: { [Player]: number } = {}
 local serverTeleportGraceUntil: { [Player]: number } = {}
 local suspiciousMovementUntil: { [Player]: number } = {}
 local lastSuspiciousLogAt: { [Player]: number } = {}
 local lastRewardBlockLogAt: { [Player]: number } = {}
+local movementEvidenceScore: { [Player]: number } = {}
+local movementEvidenceObservedAt: { [Player]: number } = {}
+local highestPassedStageByPlayer: { [Player]: { [string]: number } } = {}
 
 local function getWorldName(player: Player): string?
 	local worldName = player:GetAttribute("Current_World")
@@ -37,12 +58,172 @@ local function getWorldName(player: Player): string?
 end
 
 local function updatePositionSample(player: Player, character: Model, rootPart: BasePart, now: number)
+	local worldName = getWorldName(player)
+	local previousSample = positionSamples[player]
+	local path = pathSamples[player]
+	if
+		not path
+		or not previousSample
+		or previousSample.character ~= character
+		or previousSample.worldName ~= worldName
+	then
+		path = {}
+		pathSamples[player] = path
+	end
+	table.insert(path, { position = rootPart.Position, observedAt = now })
+	if #path > MAX_PATH_SAMPLES then
+		table.remove(path, 1)
+	end
+
+	local previousPosition = if previousSample
+			and previousSample.character == character
+			and previousSample.worldName == worldName
+		then previousSample.position
+		else nil
+	local previousObservedAt = if previousSample
+			and previousSample.character == character
+			and previousSample.worldName == worldName
+		then previousSample.observedAt
+		else nil
 	positionSamples[player] = {
 		character = character,
 		position = rootPart.Position,
 		observedAt = now,
-		worldName = getWorldName(player),
+		worldName = worldName,
+		previousPosition = previousPosition,
+		previousObservedAt = previousObservedAt,
 	}
+end
+
+local function resetMovementEvidence(player: Player)
+	movementEvidenceScore[player] = nil
+	movementEvidenceObservedAt[player] = nil
+	suspiciousMovementUntil[player] = nil
+end
+
+local function getPingGraceSeconds(player: Player): (number, number)
+	local success, pingSeconds = pcall(function()
+		return player:GetNetworkPing()
+	end)
+	if not success or typeof(pingSeconds) ~= "number" or pingSeconds < 0 then
+		return 0, 0
+	end
+
+	local boundedPing = math.min(pingSeconds, 2)
+	return math.min(boundedPing * 0.5, MAX_TRAVEL_TIME_PING_GRACE_SECONDS), boundedPing
+end
+
+local function getAllowedMovementDistance(player: Player, expectedSpeed: number, elapsed: number): (number, number)
+	local distanceTolerance = math.max(MIN_DISTANCE_TOLERANCE, expectedSpeed * SPEED_TOLERANCE_RATIO)
+	local pingGrace, pingSeconds = getPingGraceSeconds(player)
+	local pingDistanceGrace = math.min(expectedSpeed * pingGrace, MAX_GENERIC_PING_DISTANCE_GRACE)
+	return expectedSpeed * elapsed + distanceTolerance + pingDistanceGrace, pingSeconds
+end
+
+local function addMovementEvidence(player: Player, contribution: number, now: number): number
+	local previousScore = movementEvidenceScore[player] or 0
+	local previousAt = movementEvidenceObservedAt[player] or now
+	local decay = math.max(0, now - previousAt) * MOVEMENT_EVIDENCE_DECAY_PER_SECOND
+	local nextScore = math.max(0, previousScore - decay) + contribution
+	movementEvidenceScore[player] = nextScore
+	movementEvidenceObservedAt[player] = now
+	return nextScore
+end
+
+local function getPartHalfSize(part: BasePart, padding: Vector3?): Vector3
+	local extraPadding = padding or Vector3.new(0.25, 0.25, 0.25)
+	return Vector3.new(
+		part.Size.X * 0.5 + math.max(0, extraPadding.X),
+		part.Size.Y * 0.5 + math.max(0, extraPadding.Y),
+		part.Size.Z * 0.5 + math.max(0, extraPadding.Z)
+	)
+end
+
+local function isPointWithinPartBounds(point: Vector3, part: BasePart, padding: Vector3?): boolean
+	local localPosition = part.CFrame:PointToObjectSpace(point)
+	local halfSize = getPartHalfSize(part, padding)
+	return math.abs(localPosition.X) <= halfSize.X
+		and math.abs(localPosition.Y) <= halfSize.Y
+		and math.abs(localPosition.Z) <= halfSize.Z
+end
+
+local function updateSegmentSlab(
+	startValue: number,
+	endValue: number,
+	halfExtent: number,
+	tMin: number,
+	tMax: number
+): (number, number, boolean)
+	local delta = endValue - startValue
+	if math.abs(delta) < 0.000001 then
+		return tMin, tMax, math.abs(startValue) <= halfExtent
+	end
+
+	local first = (-halfExtent - startValue) / delta
+	local second = (halfExtent - startValue) / delta
+	if first > second then
+		first, second = second, first
+	end
+
+	return math.max(tMin, first), math.min(tMax, second), true
+end
+
+local function doesSegmentIntersectPartBounds(
+	startPoint: Vector3,
+	endPoint: Vector3,
+	part: BasePart,
+	padding: Vector3?
+): boolean
+	local localStart = part.CFrame:PointToObjectSpace(startPoint)
+	local localEnd = part.CFrame:PointToObjectSpace(endPoint)
+	local halfSize = getPartHalfSize(part, padding)
+	local tMin, tMax = 0, 1
+
+	local xMin, xMax, xIntersects = updateSegmentSlab(localStart.X, localEnd.X, halfSize.X, tMin, tMax)
+	if not xIntersects or xMin > xMax then
+		return false
+	end
+	tMin, tMax = xMin, xMax
+	local yMin, yMax, yIntersects = updateSegmentSlab(localStart.Y, localEnd.Y, halfSize.Y, tMin, tMax)
+	if not yIntersects or yMin > yMax then
+		return false
+	end
+	tMin, tMax = yMin, yMax
+	local zMin, zMax, zIntersects = updateSegmentSlab(localStart.Z, localEnd.Z, halfSize.Z, tMin, tMax)
+	return zIntersects and zMin <= zMax
+end
+
+local function didRecentSampleCrossPart(
+	player: Player,
+	character: Model,
+	part: BasePart,
+	padding: Vector3?,
+	maximumAge: number?
+): boolean
+	local sample = positionSamples[player]
+	if not sample or sample.character ~= character or sample.worldName ~= getWorldName(player) then
+		return false
+	end
+
+	local now = os.clock()
+	local path = pathSamples[player]
+	local pathAge = maximumAge or MAX_SAMPLE_ELAPSED
+	if now - sample.observedAt > pathAge or not path or #path < 2 then
+		return false
+	end
+
+	for index = #path - 1, 1, -1 do
+		local startSample = path[index]
+		local endSample = path[index + 1]
+		if now - startSample.observedAt > pathAge then
+			break
+		end
+		if doesSegmentIntersectPartBounds(startSample.position, endSample.position, part, padding) then
+			return true
+		end
+	end
+
+	return false
 end
 
 local function flagSuspiciousMovement(
@@ -50,7 +231,9 @@ local function flagSuspiciousMovement(
 	distance: number,
 	elapsed: number,
 	allowedDistance: number,
-	now: number
+	now: number,
+	evidenceScore: number,
+	pingSeconds: number
 )
 	suspiciousMovementUntil[player] = now + SUSPICIOUS_MOVEMENT_SECONDS
 	local lastLogAt = lastSuspiciousLogAt[player] or 0
@@ -58,11 +241,13 @@ local function flagSuspiciousMovement(
 		lastSuspiciousLogAt[player] = now
 		DebugModule.validationWarn(
 			string.format(
-				"Suspicious teleport movement | player=%s | distance=%.1f | elapsed=%.2f | allowed=%.1f",
+				"Suspicious teleport movement | player=%s | distance=%.1f | elapsed=%.2f | allowed=%.1f | evidence=%.2f | pingMs=%.0f",
 				player.Name,
 				distance,
 				elapsed,
-				allowedDistance
+				allowedDistance,
+				evidenceScore,
+				pingSeconds * 1000
 			),
 			"ValidationService"
 		)
@@ -75,12 +260,16 @@ local function evaluateCurrentMovement(player: Player, now: number): boolean
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 	if not character or not humanoid or not rootPart or not rootPart:IsA("BasePart") then
 		positionSamples[player] = nil
+		pathSamples[player] = nil
+		resetMovementEvidence(player)
 		return false
 	end
 
 	local graceUntil = serverTeleportGraceUntil[player]
 	if graceUntil then
 		if now < graceUntil then
+			resetMovementEvidence(player)
+			pathSamples[player] = nil
 			updatePositionSample(player, character, rootPart, now)
 			return false
 		end
@@ -94,6 +283,8 @@ local function evaluateCurrentMovement(player: Player, now: number): boolean
 		or sample.worldName ~= getWorldName(player)
 		or now <= sample.observedAt
 	then
+		resetMovementEvidence(player)
+		pathSamples[player] = nil
 		updatePositionSample(player, character, rootPart, now)
 		return false
 	end
@@ -101,44 +292,41 @@ local function evaluateCurrentMovement(player: Player, now: number): boolean
 	local elapsed = now - sample.observedAt
 	if elapsed > MAX_SAMPLE_ELAPSED then
 		-- A delayed server frame is not enough evidence for a teleport.
+		resetMovementEvidence(player)
+		pathSamples[player] = nil
 		updatePositionSample(player, character, rootPart, now)
 		return false
 	end
 
 	local expectedSpeed = math.clamp(PlayerHandler.GetEffectiveWalkSpeed(player), 0, 100000)
-	local distanceTolerance = math.max(MIN_DISTANCE_TOLERANCE, expectedSpeed * SPEED_TOLERANCE_RATIO)
-	local allowedDistance = expectedSpeed * elapsed + distanceTolerance
+	local allowedDistance, pingSeconds = getAllowedMovementDistance(player, expectedSpeed, elapsed)
 	local distance = (rootPart.Position - sample.position).Magnitude
 	local suspicious = distance >= MIN_SUSPICIOUS_DISTANCE and distance > allowedDistance
 	updatePositionSample(player, character, rootPart, now)
 
-	if suspicious then
-		flagSuspiciousMovement(player, distance, elapsed, allowedDistance, now)
+	if not suspicious then
+		addMovementEvidence(player, 0, now)
+		return false
 	end
 
-	return suspicious
-end
-
-local function resetPlayerToWorldSpawn(player: Player)
-	local currentWorld = player:GetAttribute("Current_World")
-	if typeof(currentWorld) ~= "string" or currentWorld == "" then
-		currentWorld = "World1"
+	local movementRatio = distance / math.max(allowedDistance, 1)
+	local contribution = math.clamp((movementRatio - 1) * 0.75, 0.25, 1.5)
+	if elapsed < MIN_RELIABLE_SAMPLE_ELAPSED then
+		contribution *= 0.5
+	end
+	if pingSeconds >= 0.25 then
+		contribution *= 0.75
 	end
 
-	player:SetAttribute("CurrentStage", 0)
-
-	local character = player.Character
-	if not character then
-		return
+	local evidenceScore = addMovementEvidence(player, contribution, now)
+	local hardMovementDistance = math.max(HARD_MOVEMENT_DISTANCE, allowedDistance * HARD_MOVEMENT_RATIO)
+	local hardMovement = distance >= hardMovementDistance
+	if hardMovement or evidenceScore >= MOVEMENT_EVIDENCE_BLOCK_THRESHOLD then
+		flagSuspiciousMovement(player, distance, elapsed, allowedDistance, now, evidenceScore, pingSeconds)
+		return true
 	end
 
-	local worldsFolder = Workspace:FindFirstChild("Worlds")
-	local worldFolder = worldsFolder and worldsFolder:FindFirstChild(currentWorld)
-	local spawnLocation = worldFolder and worldFolder:FindFirstChild("SpawnLocation")
-	if spawnLocation and spawnLocation:IsA("BasePart") then
-		character:PivotTo(spawnLocation:GetPivot() * CFrame.new(0, 3, 0))
-		ValidationService.MarkServerTeleport(player)
-	end
+	return false
 end
 
 function ValidationService.GetAliveHumanoid(character: Model?): Humanoid?
@@ -180,10 +368,59 @@ function ValidationService.GetAlivePlayerFromTouch(hit: BasePart): Player?
 	return player
 end
 
+function ValidationService.IsRootPartWithinPartBounds(rootPart: BasePart?, part: BasePart, padding: Vector3?): boolean
+	return rootPart ~= nil and isPointWithinPartBounds(rootPart.Position, part, padding)
+end
+
+function ValidationService.IsPlayerWithinPartBounds(player: Player, part: BasePart, padding: Vector3?): boolean
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return false
+	end
+
+	return ValidationService.IsRootPartWithinPartBounds(rootPart, part, padding)
+end
+
+-- Uses the current position plus recent server-observed movement. This avoids
+-- relying on .Touched for thin checkpoints when a legitimate player is fast.
+function ValidationService.IsPlayerNearPart(player: Player, part: BasePart, padding: Vector3?): boolean
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not character or not rootPart or not rootPart:IsA("BasePart") then
+		return false
+	end
+
+	if isPointWithinPartBounds(rootPart.Position, part, padding) then
+		return true
+	end
+
+	return didRecentSampleCrossPart(player, character, part, padding)
+end
+
+-- Segment-only variant for automatic checkpoint reconciliation. It never treats
+-- spawning or an already-positioned player as proof that a checkpoint was crossed.
+function ValidationService.DidPlayerRecentlyCrossPart(player: Player, part: BasePart, padding: Vector3?): boolean
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not character or not rootPart or not rootPart:IsA("BasePart") then
+		return false
+	end
+
+	return didRecentSampleCrossPart(player, character, part, padding, MAX_STAGE_PATH_AGE_SECONDS)
+end
+
 -- Mark a server-owned movement so normal redirects do not look like exploits.
-function ValidationService.MarkServerTeleport(player: Player)
+function ValidationService.MarkServerTeleport(player: Player, graceSeconds: number?)
 	local now = os.clock()
-	serverTeleportGraceUntil[player] = now + SERVER_TELEPORT_GRACE_SECONDS
+	resetMovementEvidence(player)
+	positionSamples[player] = nil
+	pathSamples[player] = nil
+	local graceDuration = SERVER_TELEPORT_GRACE_SECONDS
+	if typeof(graceSeconds) == "number" then
+		graceDuration = math.clamp(graceSeconds, 0, 5)
+	end
+	serverTeleportGraceUntil[player] = now + graceDuration
 
 	local character = player.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -191,7 +428,58 @@ function ValidationService.MarkServerTeleport(player: Player)
 		updatePositionSample(player, character, rootPart, now)
 	else
 		positionSamples[player] = nil
+		pathSamples[player] = nil
 	end
+end
+
+-- Checks a server-observed journey against the fastest legitimate travel time.
+-- The optional speed override preserves a higher speed that was valid at race start.
+function ValidationService.ValidateTravelTime(
+	player: Player,
+	origin: Vector3,
+	destination: Vector3,
+	startedAt: number,
+	actionName: string,
+	maximumSpeedOverride: number?
+): boolean
+	if typeof(startedAt) ~= "number" or startedAt <= 0 then
+		return true
+	end
+
+	local offset = destination - origin
+	local horizontalDistance = Vector3.new(offset.X, 0, offset.Z).Magnitude
+	if horizontalDistance < 1 then
+		return true
+	end
+
+	local currentSpeed = math.clamp(PlayerHandler.GetEffectiveWalkSpeed(player), 1, 100000)
+	local maximumSpeed = currentSpeed
+	if typeof(maximumSpeedOverride) == "number" and maximumSpeedOverride > 0 then
+		maximumSpeed = math.max(maximumSpeed, math.clamp(maximumSpeedOverride, 1, 100000))
+	end
+
+	local observedElapsed = math.max(0, Workspace:GetServerTimeNow() - startedAt)
+	local minimumTravelTime = horizontalDistance / maximumSpeed
+	local pingGrace, pingSeconds = getPingGraceSeconds(player)
+	local requiredElapsed = math.max(0, minimumTravelTime - pingGrace)
+	if observedElapsed + 0.05 >= requiredElapsed then
+		return true
+	end
+
+	DebugModule.validationWarn(
+		string.format(
+			"Travel time validation failed | player=%s | action=%s | distance=%.1f | elapsed=%.2f | required=%.2f | speed=%.1f | pingMs=%.0f",
+			player.Name,
+			actionName,
+			horizontalDistance,
+			observedElapsed,
+			requiredElapsed,
+			maximumSpeed,
+			pingSeconds * 1000
+		),
+		"ValidationService"
+	)
+	return false
 end
 
 -- Called from an existing server heartbeat. The module owns only bounded tables;
@@ -232,13 +520,66 @@ function ValidationService.ValidateRewardEligibility(player: Player, rewardName:
 	return false
 end
 
+-- Stage evidence is server-owned and survives missed .Touched events until the
+-- player completes the current run. It is never accepted from the client.
+function ValidationService.RecordPassedStage(player: Player, worldName: string, stageValue: number)
+	if typeof(worldName) ~= "string" or typeof(stageValue) ~= "number" then
+		return
+	end
+
+	local playerStages = highestPassedStageByPlayer[player]
+	if not playerStages then
+		playerStages = {}
+		highestPassedStageByPlayer[player] = playerStages
+	end
+
+	local normalizedStage = math.max(0, math.floor(stageValue))
+	playerStages[worldName] = math.max(playerStages[worldName] or 0, normalizedStage)
+end
+
+function ValidationService.GetHighestPassedStage(player: Player, worldName: string): number
+	local playerStages = highestPassedStageByPlayer[player]
+	return if playerStages then playerStages[worldName] or 0 else 0
+end
+
+function ValidationService.ResetStageProgress(player: Player, worldName: string?)
+	if worldName then
+		local playerStages = highestPassedStageByPlayer[player]
+		if playerStages then
+			playerStages[worldName] = nil
+			if next(playerStages) == nil then
+				highestPassedStageByPlayer[player] = nil
+			end
+		end
+	else
+		highestPassedStageByPlayer[player] = nil
+	end
+end
+
 function ValidationService.CleanupPlayer(player: Player)
 	positionSamples[player] = nil
+	pathSamples[player] = nil
 	nextPositionObservation[player] = nil
 	serverTeleportGraceUntil[player] = nil
 	suspiciousMovementUntil[player] = nil
 	lastSuspiciousLogAt[player] = nil
 	lastRewardBlockLogAt[player] = nil
+	movementEvidenceScore[player] = nil
+	movementEvidenceObservedAt[player] = nil
+	highestPassedStageByPlayer[player] = nil
+end
+
+function ValidationService.Cleanup()
+	table.clear(positionSamples)
+	table.clear(pathSamples)
+	table.clear(nextPositionObservation)
+	table.clear(serverTeleportGraceUntil)
+	table.clear(suspiciousMovementUntil)
+	table.clear(lastSuspiciousLogAt)
+	table.clear(lastRewardBlockLogAt)
+	table.clear(movementEvidenceScore)
+	table.clear(movementEvidenceObservedAt)
+	table.clear(highestPassedStageByPlayer)
 end
 
 --[[
@@ -289,18 +630,21 @@ function ValidationService.ValidateWinButtonStage(player: Player, requiredStage:
 	if typeof(currentStage) ~= "number" then
 		currentStage = 0
 	end
+	local currentWorld = getWorldName(player)
+	local highestPassedStage = if currentWorld then ValidationService.GetHighestPassedStage(player, currentWorld) else 0
+	local effectiveStage = math.max(currentStage, highestPassedStage)
 
-	if requiredStage > currentStage then
+	if requiredStage > effectiveStage then
 		DebugModule.validationWarn(
 			string.format(
-				"Player %s tried to skip ahead to WinButton stage %d while on stage %d",
+				"Player %s tried to skip ahead to WinButton stage %d while on stage %d (highest passed stage %d)",
 				player.Name,
 				requiredStage,
-				currentStage
+				currentStage,
+				highestPassedStage
 			),
 			"ValidationService"
 		)
-		resetPlayerToWorldSpawn(player)
 		return false
 	end
 

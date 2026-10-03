@@ -2,12 +2,14 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
 local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
 local FramerateManager = require(ReplicatedStorage.Modules.FramerateManager)
 local NumberFormatting = require(ReplicatedStorage.Modules.Shared:WaitForChild("NumberFormatting"))
+local NotificationLayoutController = require(ReplicatedStorage.Modules.UI.MainGUI.NotificationLayoutController)
 
 local VisualFunctions = {}
 
@@ -22,11 +24,13 @@ VisualFunctions.ActiveFrameGroup = {
 	DailyRewardFrame = nil :: Frame?,
 	RewardsFrame = nil :: Frame?,
 	SpinWheelFrame = nil :: Frame?,
+	PetFrame = nil :: Frame?,
 }
 
 VisualFunctions.HUD = {
 	LevelsBarFrame = nil :: Frame?,
 	SpeedMultiFrame = nil :: Frame?,
+	BottomRightGridFrame = nil :: Frame?,
 	SpeedBuyFrame = nil :: Frame?,
 	RightSideButtonsFrame = nil :: Frame?,
 	XPProgressFrame = nil :: Frame?,
@@ -40,7 +44,7 @@ VisualFunctions.HUD = {
 	FloatingFrame = nil :: Frame?,
 	Float_CurrentSpeedFrame = nil :: Frame?,
 	Float_CurrentBloodMoonWinFrame = nil :: Frame?,
-	BloodMoonCurrentWinsTarget = nil :: GuiObject?,
+	EventCurrentWinsTarget = nil :: GuiObject?,
 	DisableWaveButtonFrame = nil :: Frame?,
 	DisableWavePriceLabel = nil :: TextLabel?,
 	DisableWaveCountdownLabel = nil :: TextLabel?,
@@ -200,8 +204,11 @@ local RainbowGradientStates: { [UIGradient]: { colors: { Color3 }, speed: number
 }
 local HoverSetupBindings: { [GuiObject]: boolean } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: boolean }
 local ClickSetupBindings: { [GuiObject]: boolean } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: boolean }
+local ClickPulseActions: { [GuiObject]: () -> () } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: () -> () }
+local ClickPulseThreads: { [GuiObject]: thread } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: thread }
 local AnimationMaids: { [Instance]: Maid } = setmetatable({}, { __mode = "k" }) :: { [Instance]: Maid }
 local InteractionMaids: { [GuiObject]: Maid } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: Maid }
+local activeNotificationKey: string? = nil
 local RAINBOW_GRADIENT_UPDATE_INTERVAL = 1 / 30
 local rainbowGradientUpdaterBound = false
 local rainbowGradientUpdateAccumulator = 0
@@ -395,6 +402,12 @@ local function getInteractionMaid(frame: GuiObject): Maid
 		HoverStates[frame] = nil
 		HoverSetupBindings[frame] = nil
 		ClickSetupBindings[frame] = nil
+		ClickPulseActions[frame] = nil
+		local pulseThread = ClickPulseThreads[frame]
+		ClickPulseThreads[frame] = nil
+		if pulseThread and coroutine.status(pulseThread) ~= "dead" then
+			pcall(task.cancel, pulseThread)
+		end
 		interactionMaid:DoCleaning()
 	end
 
@@ -408,32 +421,7 @@ local function getInteractionMaid(frame: GuiObject): Maid
 	return interactionMaid
 end
 
-VisualFunctions.NotificationThemes = {
-	Default = {
-		textColor = Color3.fromRGB(255, 255, 255),
-		gradientBottomColor = Color3.fromRGB(255, 255, 255),
-	},
-	Purple = {
-		textColor = Color3.fromRGB(227, 74, 255),
-		gradientBottomColor = Color3.fromRGB(74, 3, 255),
-	},
-	Gold = {
-		textColor = Color3.fromRGB(254, 200, 42),
-		gradientBottomColor = Color3.fromRGB(255, 85, 0),
-	},
-	Blue = {
-		textColor = Color3.fromRGB(88, 216, 255),
-		gradientBottomColor = Color3.fromRGB(0, 81, 255),
-	},
-	Green = {
-		textColor = Color3.fromRGB(0, 255, 0),
-		gradientBottomColor = Color3.fromRGB(0, 130, 15),
-	},
-	Red = {
-		textColor = Color3.fromRGB(255, 78, 78),
-		gradientBottomColor = Color3.fromRGB(206, 0, 3),
-	},
-}
+VisualFunctions.NotificationThemes = ColorConfig.UI.NotificationThemes
 
 local function lightenColor(color: Color3, multiplier: number): Color3
 	return Color3.new(
@@ -445,6 +433,14 @@ end
 
 local function applyColorToDescendants(root: Instance, multiplier: number, isReset: boolean)
 	local function applyColor(target: Instance)
+		if target:GetAttribute("DynamicVisualState") == true then
+			return
+		end
+		if target:IsA("UIGradient") then
+			-- Parent color already tints the gradient output; tinting both compounds darkening.
+			return
+		end
+
 		local targetProps = {}
 		if target:IsA("Frame") or target:IsA("ScrollingFrame") then
 			table.insert(targetProps, "BackgroundColor3")
@@ -482,7 +478,7 @@ local function applyColorToDescendants(root: Instance, multiplier: number, isRes
 				else lightenColor(originalColor or Color3.new(1, 1, 1), multiplier)
 		end
 
-		TweenService:Create(target, TweenConfig.Hover, tweenGoals):Play()
+		TweenService:Create(target, TweenConfig.HoverColor, tweenGoals):Play()
 	end
 
 	applyColor(root)
@@ -494,6 +490,8 @@ end
 local function getTransparencyProperty(obj: Instance): string?
 	if obj:IsA("Frame") or obj:IsA("ScrollingFrame") or obj:IsA("CanvasGroup") then
 		return "BackgroundTransparency"
+	elseif obj:IsA("ViewportFrame") then
+		return "ImageTransparency"
 	elseif obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
 		return "TextTransparency"
 	elseif obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
@@ -537,6 +535,14 @@ local function setTransparencyRecursive(root: Instance, alpha: number)
 				(obj :: any).BackgroundTransparency = baseBgAlpha + (1 - baseBgAlpha) * alpha
 			end
 		end
+		if obj:IsA("ScrollingFrame") then
+			local scrollbarOriginal = obj:GetAttribute("OriginalScrollBarImageTransparency") :: number?
+			if scrollbarOriginal == nil then
+				scrollbarOriginal = obj.ScrollBarImageTransparency
+				obj:SetAttribute("OriginalScrollBarImageTransparency", scrollbarOriginal)
+			end
+			obj.ScrollBarImageTransparency = scrollbarOriginal + (1 - scrollbarOriginal) * alpha
+		end
 	end
 
 	apply(root)
@@ -545,8 +551,19 @@ local function setTransparencyRecursive(root: Instance, alpha: number)
 	end
 end
 
-local function findRotatingImage(frame: GuiObject): GuiObject?
-	if (frame:IsA("ImageLabel") or frame:IsA("ImageButton")) and frame:GetAttribute("isRotate") ~= nil then
+local function isRotateTextLabel(instance: Instance): boolean
+	return instance:IsA("TextLabel") and string.find(string.lower(instance.Name), "rotate", 1, true) ~= nil
+end
+
+local function findRotatingTarget(frame: GuiObject): GuiObject?
+	if isRotateTextLabel(frame) then
+		return frame
+	end
+
+	if
+		(frame:IsA("ImageLabel") or frame:IsA("ImageButton"))
+		and (frame:GetAttribute("isRotate") ~= nil or frame.Name == "RotateImage")
+	then
 		return frame
 	end
 
@@ -561,6 +578,9 @@ local function findRotatingImage(frame: GuiObject): GuiObject?
 			and descendant:GetAttribute("isRotate") ~= nil
 		then
 			return descendant
+		end
+		if isRotateTextLabel(descendant) then
+			return descendant :: TextLabel
 		end
 	end
 
@@ -614,7 +634,7 @@ function VisualFunctions.SetupFrameHover(
 		originalSize.Y.Offset
 	)
 
-	local rotateImage = findRotatingImage(frame)
+	local rotateImage = findRotatingTarget(frame)
 	local targetRotation = rotateScale or 35
 
 	local originalColor = frame.BackgroundColor3
@@ -662,7 +682,9 @@ function VisualFunctions.SetupFrameHover(
 			TweenService:Create(rotateImage, TweenConfig.Rotate, { Rotation = targetRotation }):Play()
 		end
 		if colorMultiplier then
-			TweenService:Create(frame, tweenInfo, { BackgroundColor3 = hoverState.hoverColor }):Play()
+			if frame:GetAttribute("DynamicVisualState") ~= true then
+				TweenService:Create(frame, TweenConfig.HoverColor, { BackgroundColor3 = hoverState.hoverColor }):Play()
+			end
 			applyColorToDescendants(target, mult, false)
 		end
 	end
@@ -690,7 +712,9 @@ function VisualFunctions.SetupFrameHover(
 			TweenService:Create(rotateImage, TweenConfig.Rotate, { Rotation = 0 }):Play()
 		end
 		if colorMultiplier then
-			TweenService:Create(frame, tweenInfo, { BackgroundColor3 = hoverState.originalColor }):Play()
+			if frame:GetAttribute("DynamicVisualState") ~= true then
+				TweenService:Create(frame, TweenConfig.HoverColor, { BackgroundColor3 = hoverState.originalColor }):Play()
+			end
 			applyColorToDescendants(target, mult, true)
 		end
 	end
@@ -759,7 +783,9 @@ function VisualFunctions.SetupFrameClick(
 
 		if colorMultiplier then
 			local clickColor = lightenColor(getBaseColor(), cColorMult)
-			TweenService:Create(frame, TweenConfig.Click, { BackgroundColor3 = clickColor }):Play()
+			if frame:GetAttribute("DynamicVisualState") ~= true then
+				TweenService:Create(frame, TweenConfig.Click, { BackgroundColor3 = clickColor }):Play()
+			end
 			applyColorToDescendants(target, cColorMult, false)
 		end
 
@@ -785,7 +811,9 @@ function VisualFunctions.SetupFrameClick(
 			end
 
 			if state.colorMultiplier then
-				TweenService:Create(frame, TweenConfig.Hover, { BackgroundColor3 = state.hoverColor }):Play()
+				if frame:GetAttribute("DynamicVisualState") ~= true then
+					TweenService:Create(frame, TweenConfig.HoverColor, { BackgroundColor3 = state.hoverColor }):Play()
+				end
 				applyColorToDescendants(target, state.colorMultiplier or 1.2, false)
 			end
 			if state.rotateImage then
@@ -799,13 +827,39 @@ function VisualFunctions.SetupFrameClick(
 			end
 
 			if colorMultiplier then
-				TweenService:Create(frame, TweenConfig.Click, { BackgroundColor3 = getBaseColor() }):Play()
+				if frame:GetAttribute("DynamicVisualState") ~= true then
+					TweenService:Create(frame, TweenConfig.Click, { BackgroundColor3 = getBaseColor() }):Play()
+				end
 				applyColorToDescendants(target, 1, true)
 			end
 			if state and state.rotateImage then
 				TweenService:Create(state.rotateImage, TweenConfig.Rotate, { Rotation = 0 }):Play()
 			end
 		end
+	end
+
+	ClickPulseActions[frame] = function()
+		if not frame.Parent or target:GetAttribute("UiDisabled") == true then
+			return
+		end
+
+		local currentThread = ClickPulseThreads[frame]
+		if currentThread and coroutine.status(currentThread) ~= "dead" then
+			pcall(task.cancel, currentThread)
+		end
+
+		onMouseDown()
+		local releaseThread: thread
+		releaseThread = task.delay(0.12, function()
+			if ClickPulseThreads[frame] ~= releaseThread then
+				return
+			end
+			ClickPulseThreads[frame] = nil
+			if frame.Parent then
+				onMouseUp()
+			end
+		end)
+		ClickPulseThreads[frame] = releaseThread
 	end
 
 	local function setupButton(child: Instance)
@@ -841,6 +895,13 @@ function VisualFunctions.SetupFrameClick(
 	end
 
 	interactionMaid:GiveTask(frame.ChildAdded:Connect(setupButton))
+end
+
+function VisualFunctions.PlayFrameClick(frame: GuiObject)
+	local clickPulseAction = ClickPulseActions[frame]
+	if clickPulseAction then
+		clickPulseAction()
+	end
 end
 
 local function resetHoverAndClickVisualState(root: Instance)
@@ -885,13 +946,19 @@ function VisualFunctions.SetFrameDisabledState(frame: Frame?, isDisabled: boolea
 	local mult = colorMultiplier or 0.75
 	local originalColor = frame:GetAttribute("OriginalDisabledBaseColor") :: Color3?
 	if not originalColor then
-		originalColor = frame.BackgroundColor3
-		frame:SetAttribute("OriginalDisabledBaseColor", originalColor)
+		originalColor = frame:GetAttribute("OriginalColor_BackgroundColor3") :: Color3?
 	end
+	if not originalColor then
+		originalColor = frame.BackgroundColor3
+	end
+	frame:SetAttribute("OriginalDisabledBaseColor", originalColor)
+	frame:SetAttribute("OriginalColor_BackgroundColor3", originalColor)
 
 	frame.Interactable = not isDisabled
 	frame:SetAttribute("UiDisabled", isDisabled)
-	frame.BackgroundColor3 = if isDisabled then lightenColor(originalColor, mult) else originalColor
+	if frame:GetAttribute("DynamicVisualState") == true then
+		frame.BackgroundColor3 = if isDisabled then lightenColor(originalColor, mult) else originalColor
+	end
 	applyColorToDescendants(frame, if isDisabled then mult else 1, not isDisabled)
 
 	for _, descendant in ipairs(frame:GetDescendants()) do
@@ -902,6 +969,14 @@ function VisualFunctions.SetFrameDisabledState(frame: Frame?, isDisabled: boolea
 			descendant.Selectable = not isDisabled
 		end
 	end
+end
+
+function VisualFunctions.SetTextLabelDisabledState(label: TextLabel?, isDisabled: boolean, colorMultiplier: number?)
+	if not label then
+		return
+	end
+
+	applyColorToDescendants(label, if isDisabled then colorMultiplier or 0.75 else 1, not isDisabled)
 end
 
 function VisualFunctions.SetFrameInteractableState(frame: Frame?, isInteractable: boolean)
@@ -939,6 +1014,8 @@ function VisualFunctions.RefreshFrameInteractionColors(frame: GuiObject?)
 	local currentColor = frame.BackgroundColor3
 	state.originalColor = currentColor
 	state.hoverColor = lightenColor(currentColor, state.colorMultiplier or 1.2)
+	frame:SetAttribute("OriginalDisabledBaseColor", currentColor)
+	frame:SetAttribute("OriginalColor_BackgroundColor3", currentColor)
 	if state.isHovering and state.colorMultiplier then
 		frame.BackgroundColor3 = state.hoverColor
 	end
@@ -984,6 +1061,7 @@ function VisualFunctions.OpenWindow(frame: Frame)
 		end
 	end)
 	animationMaid:GiveTask(connection)
+	animationMaid:GiveTask(sizeTween)
 
 	sizeTween:Play()
 end
@@ -1023,6 +1101,7 @@ function VisualFunctions.CloseWindow(frame: Frame)
 		end
 	end)
 	animationMaid:GiveTask(connection)
+	animationMaid:GiveTask(sizeTween)
 
 	sizeTween:Play()
 
@@ -1296,6 +1375,10 @@ function VisualFunctions.CreateFloatingText(
 		TargetFrame: GuiObject?,
 		IntegerOnly: boolean?,
 		PlayPopSound: boolean?,
+		TextColor: Color3?,
+		GradientBottomColor: Color3?,
+		ImageColor: Color3?,
+		ImageAssetId: string?,
 	}?
 )
 	local container = VisualFunctions.HUD.FloatingFrame
@@ -1362,11 +1445,35 @@ function VisualFunctions.CreateFloatingText(
 				else
 					label.Text = "+" .. formatPreciseNumber(amount)
 				end
+				if config and config.TextColor then
+					label.TextColor3 = config.TextColor
+				end
+				if config and config.GradientBottomColor then
+					local gradient = label:FindFirstChildWhichIsA("UIGradient", true)
+					if gradient then
+						local keypoints = gradient.Color.Keypoints
+						if #keypoints > 0 then
+							local updatedKeypoints = table.clone(keypoints)
+							local lastKeypoint = updatedKeypoints[#updatedKeypoints]
+							updatedKeypoints[#updatedKeypoints] = ColorSequenceKeypoint.new(
+								lastKeypoint.Time,
+								config.GradientBottomColor
+							)
+							gradient.Color = ColorSequence.new(updatedKeypoints)
+						end
+					end
+				end
 			end
 
 			local image = clone:FindFirstChildWhichIsA("ImageLabel", true)
 			if image then
 				image.Visible = true
+				if config and config.ImageAssetId then
+					image.Image = config.ImageAssetId
+				end
+				if config and config.ImageColor then
+					image.ImageColor3 = config.ImageColor
+				end
 			end
 
 			clone.Parent = container
@@ -1391,8 +1498,8 @@ function VisualFunctions.CreateFloatingText(
 			clone.Size = UDim2.fromScale(0.3, 0.3)
 
 			-- Appear Tween
-			local appearInfo = TweenInfo.new(lifetime * 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-			local moveInfo = TweenInfo.new(lifetime, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+			local appearInfo = TweenConfig.WithDuration(lifetime * 0.3, TweenConfig.RemoteEffectAppear)
+			local moveInfo = TweenConfig.WithDuration(lifetime, TweenConfig.RemoteEffectMove)
 
 			local appearGoals = {
 				Size = template.Size,
@@ -1419,7 +1526,7 @@ function VisualFunctions.CreateFloatingText(
 			task.wait(spreadDuration)
 
 			if finalTargetPos then
-				local collectInfo = TweenInfo.new(collectDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+				local collectInfo = TweenConfig.WithDuration(collectDuration, TweenConfig.RemoteEffectCollect)
 				local collectGoals = {
 					Position = finalTargetPos,
 				}
@@ -1453,7 +1560,7 @@ function VisualFunctions.CreateFloatingText(
 			end
 
 			-- Disappear Tween
-			local disappearInfo = TweenInfo.new(disappearDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+			local disappearInfo = TweenConfig.WithDuration(disappearDuration, TweenConfig.RemoteEffectDisappear)
 			local disappearGoals = {}
 			if canvasGroup then
 				(disappearGoals :: any).GroupTransparency = 1
@@ -1501,14 +1608,19 @@ function VisualFunctions.ShowLevelUpNotification(oldLvl: number, newLvl: number,
 		labels.WalkspeedAfterLabel.Text = "Walkspeed " .. tostring(newSpeed)
 	end
 
-	local startPos = UDim2.new(0.214, 0, 0.207, 0)
-	local endPos = UDim2.new(0.214, 0, 0.107, 0)
+	local startPos, endPos = NotificationLayoutController.GetAnimationPositions(frame)
 
 	if not frame.Visible then
-		frame.Position = startPos
 		setTransparencyRecursive(frame, 1)
 		frame.Visible = true
+		frame.Position = startPos
 	end
+	-- Recalculate after visibility changes so newly active event/progress UI is included.
+	endPos = NotificationLayoutController.GetVisiblePosition(frame, true)
+	DebugModule.debugPrint(
+		string.format("Level-up notification target | yScale=%.3f | yOffset=%d", endPos.Y.Scale, endPos.Y.Offset),
+		"VisualFunctions"
+	)
 
 	TweenService:Create(frame, TweenConfig.WindowOpen, {
 		Position = endPos,
@@ -1583,6 +1695,7 @@ end
 
 local function hideNotificationFrame(frame: Frame, label: TextLabel?)
 	clearAnimationMaid(frame)
+	activeNotificationKey = nil
 	frame.Visible = false
 	if label then
 		label.Text = ""
@@ -1593,6 +1706,46 @@ end
 
 local function hasNotificationText(message: string): boolean
 	return typeof(message) == "string" and string.match(message, "%S") ~= nil
+end
+
+local function playNotificationCloseAnimation(
+	frame: Frame,
+	animationMaid: Maid,
+	startPos: UDim2,
+	label: TextLabel?
+)
+	if AnimationMaids[frame] ~= animationMaid then
+		return
+	end
+
+	local closeTween = TweenService:Create(frame, TweenConfig.WindowClose, {
+		Position = startPos,
+	})
+	SoundService.PlayGuiSound("Swish")
+	closeTween:Play()
+
+	local ft = 0
+	local fConnection
+	fConnection = RunService.RenderStepped:Connect(function(dt)
+		if AnimationMaids[frame] ~= animationMaid then
+			fConnection:Disconnect()
+			return
+		end
+
+		ft = math.min(1, ft + dt / 0.3)
+		setTransparencyRecursive(frame, ft)
+		if ft >= 1 then
+			fConnection:Disconnect()
+			if AnimationMaids[frame] == animationMaid then
+				frame.Visible = false
+				if label then
+					label.Text = ""
+				end
+				setTransparencyRecursive(frame, 0)
+			end
+		end
+	end)
+	animationMaid:GiveTask(fConnection)
 end
 
 function VisualFunctions.BindNotificationVisibilityGuard(frame: Frame, cleanupMaid: any)
@@ -1614,10 +1767,18 @@ function VisualFunctions.BindNotificationVisibilityGuard(frame: Frame, cleanupMa
 	validateVisibleNotification()
 end
 
-function VisualFunctions.ShowNotification(message: string, textColor: Color3?, gradientBottomColor: Color3?)
+function VisualFunctions.ShowNotification(
+	message: string,
+	textColor: Color3?,
+	gradientBottomColor: Color3?,
+	notificationKey: string?
+)
 	local frame = VisualFunctions.HUD.NotificationFrame
 	local label = VisualFunctions.Labels.NotificationTextLabel
 	if not hasNotificationText(message) then
+		if activeNotificationKey ~= nil then
+			return
+		end
 		if frame then
 			hideNotificationFrame(frame, label)
 		end
@@ -1631,6 +1792,10 @@ function VisualFunctions.ShowNotification(message: string, textColor: Color3?, g
 		DebugModule.debugWarn("Notification mapping is stale; notification was ignored", "VisualFunctions")
 		return
 	end
+	if activeNotificationKey ~= nil and activeNotificationKey ~= notificationKey then
+		return
+	end
+	activeNotificationKey = notificationKey
 	local animationMaid = replaceAnimationMaid(frame)
 	clearTutorialOnlyNotificationControls(frame)
 
@@ -1657,14 +1822,23 @@ function VisualFunctions.ShowNotification(message: string, textColor: Color3?, g
 		labelGradient.Rotation = 90
 	end
 
-	local startPos = UDim2.new(0.214, 0, 0.207, 0)
-	local endPos = UDim2.new(0.214, 0, 0.107, 0)
+	local startPos, endPos = NotificationLayoutController.GetAnimationPositions(frame)
 
 	if not frame.Visible then
-		frame.Position = startPos
 		setTransparencyRecursive(frame, 1)
 		frame.Visible = true
+		frame.Position = startPos
 	end
+	endPos = NotificationLayoutController.GetVisiblePosition(frame, true)
+	DebugModule.debugPrint(
+		string.format(
+			"Notification target | message=%s | yScale=%.3f | yOffset=%d",
+			label.Text,
+			endPos.Y.Scale,
+			endPos.Y.Offset
+		),
+		"VisualFunctions"
+	)
 
 	TweenService:Create(frame, TweenConfig.WindowOpen, {
 		Position = endPos,
@@ -1681,42 +1855,63 @@ function VisualFunctions.ShowNotification(message: string, textColor: Color3?, g
 	end)
 	animationMaid:GiveTask(connection)
 
-	animationMaid:GiveTask(task.delay(2.5, function()
-		if AnimationMaids[frame] ~= animationMaid then
-			return
-		end
+	if notificationKey == nil then
+		animationMaid:GiveTask(task.delay(2.5, function()
+			playNotificationCloseAnimation(frame, animationMaid, startPos, nil)
+		end))
+	end
+end
 
-		local closeTween = TweenService:Create(frame, TweenConfig.WindowClose, {
-			Position = startPos,
-		})
-		SoundService.PlayGuiSound("Swish")
-		closeTween:Play()
+function VisualFunctions.UpdateNotification(message: string, notificationKey: string): boolean
+	if activeNotificationKey ~= notificationKey then
+		return false
+	end
 
-		local ft = 0
-		local fConnection
-		fConnection = RunService.RenderStepped:Connect(function(dt)
-			if AnimationMaids[frame] ~= animationMaid then
-				fConnection:Disconnect()
-				return
-			end
+	local frame = VisualFunctions.HUD.NotificationFrame
+	local label = VisualFunctions.Labels.NotificationTextLabel
+	if not frame or not label or not frame.Visible or frame.Parent == nil or label.Parent == nil then
+		return false
+	end
 
-			ft = math.min(1, ft + dt / 0.3)
-			setTransparencyRecursive(frame, ft)
-			if ft >= 1 then
-				fConnection:Disconnect()
-				if AnimationMaids[frame] == animationMaid then
-					frame.Visible = false
-				end
-			end
-		end)
-		animationMaid:GiveTask(fConnection)
-	end))
+	label.Text = toNotificationDisplayText(message)
+	return true
+end
+
+function VisualFunctions.HideNotification(notificationKey: string): boolean
+	if activeNotificationKey ~= notificationKey then
+		return false
+	end
+
+	local frame = VisualFunctions.HUD.NotificationFrame
+	local label = VisualFunctions.Labels.NotificationTextLabel
+	if not frame then
+		activeNotificationKey = nil
+		return false
+	end
+
+	local animationMaid = AnimationMaids[frame]
+	if not animationMaid or not frame.Visible then
+		hideNotificationFrame(frame, label)
+		return true
+	end
+
+	activeNotificationKey = nil
+	playNotificationCloseAnimation(
+		frame,
+		animationMaid,
+		NotificationLayoutController.GetAnimationPositions(frame),
+		label
+	)
+	return true
 end
 
 function VisualFunctions.ShowQuickFadeNotification(message: string, textColor: Color3?, gradientBottomColor: Color3?)
 	local frame = VisualFunctions.HUD.NotificationFrame
 	local label = VisualFunctions.Labels.NotificationTextLabel
 	if not hasNotificationText(message) then
+		if activeNotificationKey ~= nil then
+			return
+		end
 		if frame then
 			hideNotificationFrame(frame, label)
 		end
@@ -1730,10 +1925,12 @@ function VisualFunctions.ShowQuickFadeNotification(message: string, textColor: C
 		DebugModule.debugWarn("Quick-fade notification mapping is stale; notification was ignored", "VisualFunctions")
 		return
 	end
+	if activeNotificationKey ~= nil then
+		return
+	end
+	activeNotificationKey = nil
 	local animationMaid = replaceAnimationMaid(frame)
 	clearTutorialOnlyNotificationControls(frame)
-	local quickFadeDisplayPosition = UDim2.new(0.214, 0, 0.107, 0)
-
 	label.Text = toNotificationDisplayText(message)
 	label.TextColor3 = textColor or Color3.fromRGB(255, 255, 255)
 
@@ -1757,8 +1954,17 @@ function VisualFunctions.ShowQuickFadeNotification(message: string, textColor: C
 		labelGradient.Rotation = 90
 	end
 
-	frame.Position = quickFadeDisplayPosition
 	frame.Visible = true
+	frame.Position = NotificationLayoutController.GetVisiblePosition(frame, true)
+	DebugModule.debugPrint(
+		string.format(
+			"Quick-fade notification target | message=%s | yScale=%.3f | yOffset=%d",
+			label.Text,
+			frame.Position.Y.Scale,
+			frame.Position.Y.Offset
+		),
+		"VisualFunctions"
+	)
 	setTransparencyRecursive(frame, 1)
 
 	local fadeIn = 0
@@ -1806,6 +2012,7 @@ function VisualFunctions.ResetRuntimeState()
 		gradientMaid:DoCleaning()
 	end
 	stopRainbowGradientUpdater()
+	activeNotificationKey = nil
 
 	for instance, animationMaid in pairs(AnimationMaids) do
 		AnimationMaids[instance] = nil
@@ -1816,10 +2023,17 @@ function VisualFunctions.ResetRuntimeState()
 		InteractionMaids[guiObject] = nil
 		interactionMaid:DoCleaning()
 	end
+	for guiObject, pulseThread in pairs(ClickPulseThreads) do
+		ClickPulseThreads[guiObject] = nil
+		if coroutine.status(pulseThread) ~= "dead" then
+			pcall(task.cancel, pulseThread)
+		end
+	end
 
 	clearReferenceTable(HoverStates :: any)
 	clearReferenceTable(HoverSetupBindings :: any)
 	clearReferenceTable(ClickSetupBindings :: any)
+	clearReferenceTable(ClickPulseActions :: any)
 	clearReferenceTable(VisualFunctions.ActiveFrameGroup :: any)
 	clearReferenceTable(VisualFunctions.HUD :: any)
 	clearReferenceTable(VisualFunctions.Labels :: any)

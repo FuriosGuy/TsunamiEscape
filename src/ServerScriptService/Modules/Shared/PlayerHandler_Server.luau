@@ -2,7 +2,10 @@ local PlayerHandler = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
+local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
+local PetInventoryService = require(ServerScriptService.Modules:WaitForChild("PetInventoryService"))
 local SharedFolder = ReplicatedStorage.Modules:WaitForChild("Shared")
 local ServerSharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
 local CoreConfig = require(ServerSharedFolder:WaitForChild("CoreConfig_Server"))
@@ -18,6 +21,9 @@ local DefaultAttributes = PlayerHandler.DEFAULT_ATTRIBUTES
 local FRIEND_INVITE_MULTIPLIER_STEP = PlayerHandler.FRIEND_INVITE_MULTIPLIER_STEP
 local DEFAULT_PLAYER_SPEED = PlayerDataConfig.DEFAULT_PLAYER_SPEED
 local DEFAULT_MAX_PLAYER_SPEED = PlayerDataConfig.DEFAULT_MAX_PLAYER_SPEED
+local PREMIUM_MULTIPLIER = if typeof(PlayerDataConfig.PREMIUM_MULTIPLIER) == "number"
+	then math.max(1, PlayerDataConfig.PREMIUM_MULTIPLIER)
+	else 1.25
 
 local function applyDefaultMovementAttributes(player: Player)
 	if player:GetAttribute("Movement_XPGainRate") == nil then
@@ -371,10 +377,25 @@ local function getTemporaryBoostMultiplier(player: Player, endAttributeName: str
 	return if endUnix > os.time() then 2 else 1
 end
 
+function PlayerHandler.HasPremiumMembership(player: Player?): boolean
+	return player ~= nil and player.MembershipType == Enum.MembershipType.Premium
+end
+
+function PlayerHandler.GetPremiumMultiplier(player: Player): number
+	return if PlayerHandler.HasPremiumMembership(player) then PREMIUM_MULTIPLIER else 1
+end
+
+function PlayerHandler.GetWinStreakMultiplier(player: Player): number
+	local value = getNumericAttribute(player, "WinStreakMultiplier", 1)
+	return math.max(1, value)
+end
+
 local function combineWinMultipliers(
 	winMultiplier: number,
 	liveEventMultiplier: number?,
-	temporaryBoostMultiplier: number?
+	temporaryBoostMultiplier: number?,
+	premiumMultiplier: number?,
+	winStreakMultiplier: number?
 ): number
 	-- Add each multiplier's bonus over 1x so two 2x sources produce 3x, not 4x.
 	local combinedMultiplier = 1 + (math.max(0, winMultiplier) - 1)
@@ -383,6 +404,12 @@ local function combineWinMultipliers(
 	end
 	if temporaryBoostMultiplier ~= nil then
 		combinedMultiplier += math.max(0, temporaryBoostMultiplier) - 1
+	end
+	if premiumMultiplier ~= nil then
+		combinedMultiplier += math.max(0, premiumMultiplier) - 1
+	end
+	if winStreakMultiplier ~= nil then
+		combinedMultiplier += math.max(0, winStreakMultiplier) - 1
 	end
 
 	return math.max(0, combinedMultiplier)
@@ -395,13 +422,19 @@ local function getStandardXPSpeedMultiplier(player: Player): number
 	local friendMult = getNumericAttribute(player, "Friend_XPMultiplier", 1)
 	local treadmillMult = getNumericAttribute(player, "Treadmill_XPMultiplier", 1)
 
-	return rebirthMult * devMult * miscMult * friendMult * treadmillMult
+	return rebirthMult * devMult * miscMult * friendMult * treadmillMult * PlayerHandler.GetPremiumMultiplier(player)
+end
+
+local function multiplyEquippedPetMultiplier(player: Player, baseMultiplier: number): number
+	local petMultiplier = PetInventoryService.GetEquippedMultiplier(player)
+	return math.max(0, baseMultiplier * petMultiplier)
 end
 
 function PlayerHandler.GetXPSpeedMultiplier(player: Player): number
-	return getStandardXPSpeedMultiplier(player)
+	local existingMultiplier = getStandardXPSpeedMultiplier(player)
 		* PlayerHandler.GetLiveEventXPMultiplier(player)
 		* getTemporaryBoostMultiplier(player, "TemporarySpeedBoostEndUnix")
+	return multiplyEquippedPetMultiplier(player, existingMultiplier)
 end
 
 function PlayerHandler.CalculateAwardedXPSpeed(player: Player, amount: number): number
@@ -431,47 +464,190 @@ end
 
 function PlayerHandler.CalculateAwardedWins(player: Player, amount: number): number
 	local winMultiplier = getNumericAttribute(player, "WinMultiplier", 1)
-	return math.max(0, math.round(amount * winMultiplier))
+	local combinedMultiplier = combineWinMultipliers(
+		winMultiplier,
+		nil,
+		nil,
+		PlayerHandler.GetPremiumMultiplier(player)
+	)
+	return math.max(0, math.round(amount * combinedMultiplier))
 end
 
-function PlayerHandler.CalculateBloodmoonWinAward(player: Player): number
-	local winMultiplier = getNumericAttribute(player, "WinMultiplier", 1)
-	local temporaryWinMultiplier = getTemporaryBoostMultiplier(player, "TemporaryWinBoostEndUnix")
-	local baseAward = 1
-	local progressConfig = CoreConfig.bloodmoonProgress
-	if RunService:IsStudio() and typeof(progressConfig) == "table" then
-		local studioWinAmount = progressConfig.debugStudioWinAmount
-		if typeof(studioWinAmount) == "number" and studioWinAmount > 0 then
-			baseAward = math.max(1, math.floor(studioWinAmount))
-		end
-	end
-
-	local combinedMultiplier = combineWinMultipliers(winMultiplier, nil, temporaryWinMultiplier)
-	return math.max(1, math.round(baseAward * combinedMultiplier))
-end
-
-function PlayerHandler.AddBloodmoonWin(player: Player): (number, { string })
-	local currentWins = getFiniteNumberAttribute(player, "BloodmoonWins", 0)
-	local awardedAmount = PlayerHandler.CalculateBloodmoonWinAward(player)
-	if not currentWins or not isFiniteNumber(awardedAmount) then
-		DebugModule.debugWarn(
-			string.format("Rejected invalid Bloodmoon win award | player=%s", player.Name),
-			"PlayerHandler"
-		)
-		return 0, {}
-	end
-
-	PlayerHandler.SetAttribute(player, "BloodmoonWins", currentWins + awardedAmount)
-	return awardedAmount, PlayerHandler.SyncBloodmoonUnlocks(player)
-end
-
-function PlayerHandler.GetBloodmoonUnlockDisplayName(rewardId: string): string?
-	local progressConfig = CoreConfig.bloodmoonProgress
-	if typeof(progressConfig) ~= "table" or typeof(progressConfig.unlocks) ~= "table" then
+local function getLiveEventDefinition(eventName: string): { [string]: any }?
+	local liveEventsConfig = CoreConfig.liveEvents
+	if typeof(liveEventsConfig) ~= "table" or typeof(liveEventsConfig.events) ~= "table" then
 		return nil
 	end
 
-	for _, unlock in ipairs(progressConfig.unlocks) do
+	for _, eventDefinition in ipairs(liveEventsConfig.events) do
+		if
+			type(eventDefinition) == "table"
+			and typeof(eventDefinition.id) == "string"
+			and string.lower(eventDefinition.id) == string.lower(eventName)
+		then
+			return eventDefinition
+		end
+	end
+
+	return nil
+end
+
+local function getEventWinsAttribute(eventName: string, eventDefinition: { [string]: any }?): string?
+	if eventDefinition and typeof(eventDefinition.kartWinsAttribute) == "string" then
+		return eventDefinition.kartWinsAttribute
+	end
+
+	local normalizedName = string.gsub(eventName, "[^%w]", "")
+	return if normalizedName ~= "" then normalizedName .. "Wins" else nil
+end
+
+function PlayerHandler.GetEventWinBaseAward(eventName: string, requiredStage: number): number?
+	if typeof(eventName) ~= "string" or not isFiniteNumber(requiredStage) then
+		return nil
+	end
+
+	local eventDefinition = getLiveEventDefinition(eventName)
+	local stageWinAwards = eventDefinition and eventDefinition.stageWinAwards
+	if typeof(stageWinAwards) ~= "table" and string.lower(eventName) == "bloodmoon" then
+		local progressConfig = CoreConfig.bloodmoonProgress
+		stageWinAwards = if typeof(progressConfig) == "table" then progressConfig.winStageRewards else nil
+	end
+	if typeof(stageWinAwards) ~= "table" then
+		return nil
+	end
+
+	local highestMinimumStage = -math.huge
+	local highestAward = 0
+	for _, rawReward in ipairs(stageWinAwards) do
+		if typeof(rawReward) == "table" then
+			local minimumStage = rawReward.minimumStage
+			local amount = rawReward.amount
+			local normalizedMinimumStage = if isFiniteNumber(minimumStage) then math.floor(minimumStage) else nil
+			local normalizedAmount = if isFiniteNumber(amount) then math.floor(amount) else nil
+			if
+				normalizedMinimumStage ~= nil
+				and normalizedAmount ~= nil
+				and normalizedMinimumStage >= 0
+				and normalizedAmount > 0
+				and normalizedMinimumStage > highestMinimumStage
+				and requiredStage >= normalizedMinimumStage
+			then
+				highestMinimumStage = normalizedMinimumStage
+				highestAward = normalizedAmount
+			end
+		end
+	end
+
+	return if highestAward > 0 then highestAward else nil
+end
+
+function PlayerHandler.GetBloodmoonWinBaseAward(requiredStage: number): number?
+	return PlayerHandler.GetEventWinBaseAward("Bloodmoon", requiredStage)
+end
+
+function PlayerHandler.CalculateEventWinAward(player: Player, eventName: string, baseAward: number?): number
+	local winMultiplier = getNumericAttribute(player, "WinMultiplier", 1)
+	local temporaryWinMultiplier = getTemporaryBoostMultiplier(player, "TemporaryWinBoostEndUnix")
+	local normalizedBaseAward = if isFiniteNumber(baseAward) and baseAward > 0 then math.floor(baseAward) else 1
+	local progressConfig = if string.lower(eventName) == "bloodmoon" then CoreConfig.bloodmoonProgress else nil
+	if baseAward == nil and RunService:IsStudio() and typeof(progressConfig) == "table" then
+		local studioWinAmount = progressConfig.debugStudioWinAmount
+		if typeof(studioWinAmount) == "number" and studioWinAmount > 0 then
+			normalizedBaseAward = math.max(1, math.floor(studioWinAmount))
+		end
+	end
+
+	local combinedMultiplier = combineWinMultipliers(
+		winMultiplier,
+		nil,
+		temporaryWinMultiplier,
+		PlayerHandler.GetPremiumMultiplier(player),
+		PlayerHandler.GetWinStreakMultiplier(player)
+	)
+	return math.max(1, math.round(normalizedBaseAward * combinedMultiplier))
+end
+
+function PlayerHandler.CalculateBloodmoonWinAward(player: Player, baseAward: number?): number
+	return PlayerHandler.CalculateEventWinAward(player, "Bloodmoon", baseAward)
+end
+
+function PlayerHandler.AddEventWin(player: Player, eventName: string, baseAward: number?): number
+	local eventDefinition = getLiveEventDefinition(eventName)
+	local winsAttribute = getEventWinsAttribute(eventName, eventDefinition)
+	if not winsAttribute then
+		return 0
+	end
+
+	local currentWins = getFiniteNumberAttribute(player, winsAttribute, 0)
+	local awardedAmount = PlayerHandler.CalculateEventWinAward(player, eventName, baseAward)
+	if not currentWins or not isFiniteNumber(awardedAmount) then
+		DebugModule.debugWarn(
+			string.format("Rejected invalid event win award | event=%s | player=%s", eventName, player.Name),
+			"PlayerHandler"
+		)
+		return 0
+	end
+
+	PlayerHandler.SetAttribute(player, winsAttribute, currentWins + awardedAmount)
+	return awardedAmount
+end
+
+function PlayerHandler.AddBloodmoonWin(player: Player, baseAward: number?): (number, { string })
+	local awardedAmount = PlayerHandler.AddEventWin(player, "Bloodmoon", baseAward)
+	if awardedAmount <= 0 then
+		return 0, {}
+	end
+
+	return awardedAmount, PlayerHandler.SyncBloodmoonUnlocks(player)
+end
+
+function PlayerHandler.ResetEventWinsForCycle(player: Player, eventName: string, cycleStartUnix: number): boolean
+	if typeof(eventName) ~= "string" or not isFiniteNumber(cycleStartUnix) or cycleStartUnix <= 0 then
+		return false
+	end
+
+	local eventDefinition = getLiveEventDefinition(eventName)
+	local winsAttribute = getEventWinsAttribute(eventName, eventDefinition)
+	if not winsAttribute then
+		return false
+	end
+
+	local cycleAttribute = winsAttribute .. "CycleUnix"
+	local normalizedCycle = math.floor(cycleStartUnix)
+	local previousCycle = getFiniteNumberAttribute(player, cycleAttribute, 0)
+	if previousCycle == normalizedCycle then
+		return false
+	end
+
+	PlayerHandler.SetAttribute(player, winsAttribute, 0)
+	PlayerHandler.SetAttribute(player, cycleAttribute, normalizedCycle)
+	return true
+end
+
+local function getEventUnlocks(eventName: string): { [number]: any }?
+	local eventDefinition = getLiveEventDefinition(eventName)
+	local progressUi = eventDefinition and eventDefinition.progressUi
+	if typeof(progressUi) == "table" and typeof(progressUi.unlocks) == "table" then
+		return progressUi.unlocks
+	end
+
+	if string.lower(eventName) == "bloodmoon" then
+		local progressConfig = CoreConfig.bloodmoonProgress
+		if typeof(progressConfig) == "table" and typeof(progressConfig.unlocks) == "table" then
+			return progressConfig.unlocks
+		end
+	end
+
+	return nil
+end
+
+function PlayerHandler.GetEventUnlockDisplayName(eventName: string, rewardId: string): string?
+	local unlocks = getEventUnlocks(eventName)
+	if not unlocks then
+		return nil
+	end
+
+	for _, unlock in ipairs(unlocks) do
 		if typeof(unlock) == "table" and unlock.id == rewardId and typeof(unlock.displayName) == "string" then
 			return unlock.displayName
 		end
@@ -480,26 +656,37 @@ function PlayerHandler.GetBloodmoonUnlockDisplayName(rewardId: string): string?
 	return nil
 end
 
-function PlayerHandler.SyncBloodmoonUnlocks(player: Player): { string }
-	local progressConfig = CoreConfig.bloodmoonProgress
-	if typeof(progressConfig) ~= "table" or typeof(progressConfig.unlocks) ~= "table" then
+function PlayerHandler.SyncEventUnlocks(player: Player, eventName: string): { string }
+	local unlocks = getEventUnlocks(eventName)
+	if not unlocks then
 		return {}
 	end
 
-	local currentWins = getFiniteNumberAttribute(player, "BloodmoonWins", 0)
+	local eventDefinition = getLiveEventDefinition(eventName)
+	local winsAttribute = getEventWinsAttribute(eventName, eventDefinition)
+	if not winsAttribute then
+		return {}
+	end
+
+	local currentWins = getFiniteNumberAttribute(player, winsAttribute, 0)
 	if not currentWins then
 		return {}
 	end
 
 	local unlockedRewards: { string } = {}
-	for _, unlock in ipairs(progressConfig.unlocks) do
+	for _, unlock in ipairs(unlocks) do
 		if typeof(unlock) ~= "table" then
 			continue
 		end
 
 		local rewardId = unlock.id
 		local winsRequired = unlock.winsRequired
-		if typeof(rewardId) ~= "string" or typeof(winsRequired) ~= "number" or currentWins < winsRequired then
+		if
+			typeof(rewardId) ~= "string"
+			or typeof(winsRequired) ~= "number"
+			or not isFiniteNumber(winsRequired)
+			or currentWins < winsRequired
+		then
 			continue
 		end
 
@@ -534,7 +721,7 @@ function PlayerHandler.SyncBloodmoonUnlocks(player: Player): { string }
 			end
 			table.insert(unlockedRewards, rewardId)
 			DebugModule.debugInfo(
-				string.format("Migrated Bloodmoon ownership | player=%s | reward=%s", player.Name, rewardId),
+				string.format("Migrated event ownership | event=%s | player=%s | reward=%s", eventName, player.Name, rewardId),
 				"PlayerHandler"
 			)
 			continue
@@ -546,7 +733,7 @@ function PlayerHandler.SyncBloodmoonUnlocks(player: Player): { string }
 				PlayerHandler.AddOwnedTrail(player, rewardId)
 				table.insert(unlockedRewards, rewardId)
 				DebugModule.debugInfo(
-					string.format("Unlocked permanent Bloodmoon trail | player=%s | trail=%s", player.Name, rewardId),
+					string.format("Unlocked permanent event trail | event=%s | player=%s | trail=%s", eventName, player.Name, rewardId),
 					"PlayerHandler"
 				)
 			end
@@ -554,7 +741,7 @@ function PlayerHandler.SyncBloodmoonUnlocks(player: Player): { string }
 			PlayerHandler.AddOwnedKart(player, rewardId)
 			table.insert(unlockedRewards, rewardId)
 			DebugModule.debugInfo(
-				string.format("Unlocked permanent Bloodmoon kart | player=%s | kart=%s", player.Name, rewardId),
+				string.format("Unlocked permanent event kart | event=%s | player=%s | kart=%s", eventName, player.Name, rewardId),
 				"PlayerHandler"
 			)
 		end
@@ -563,20 +750,29 @@ function PlayerHandler.SyncBloodmoonUnlocks(player: Player): { string }
 	return unlockedRewards
 end
 
+function PlayerHandler.GetBloodmoonUnlockDisplayName(rewardId: string): string?
+	return PlayerHandler.GetEventUnlockDisplayName("Bloodmoon", rewardId)
+end
+
+function PlayerHandler.SyncBloodmoonUnlocks(player: Player): { string }
+	return PlayerHandler.SyncEventUnlocks(player, "Bloodmoon")
+end
+
+function PlayerHandler.SyncConfiguredEventUnlocks(player: Player)
+	local liveEventsConfig = CoreConfig.liveEvents
+	if typeof(liveEventsConfig) ~= "table" or typeof(liveEventsConfig.events) ~= "table" then
+		return
+	end
+
+	for _, eventDefinition in ipairs(liveEventsConfig.events) do
+		if typeof(eventDefinition) == "table" and typeof(eventDefinition.id) == "string" then
+			PlayerHandler.SyncEventUnlocks(player, eventDefinition.id)
+		end
+	end
+end
+
 function PlayerHandler.ResetBloodmoonWinsForCycle(player: Player, cycleStartUnix: number): boolean
-	if not isFiniteNumber(cycleStartUnix) or cycleStartUnix <= 0 then
-		return false
-	end
-
-	local normalizedCycle = math.floor(cycleStartUnix)
-	local previousCycle = getFiniteNumberAttribute(player, "BloodmoonWinsCycleUnix", 0)
-	if previousCycle == normalizedCycle then
-		return false
-	end
-
-	PlayerHandler.SetAttribute(player, "BloodmoonWins", 0)
-	PlayerHandler.SetAttribute(player, "BloodmoonWinsCycleUnix", normalizedCycle)
-	return true
+	return PlayerHandler.ResetEventWinsForCycle(player, "Bloodmoon", cycleStartUnix)
 end
 
 -- Live-event bonuses intentionally apply only to normal treadmill XP and WinButton awards.
@@ -595,8 +791,14 @@ function PlayerHandler.GetPlaytimeWinsMultiplier(player: Player): number
 	local miscMult = getNumericAttribute(player, "Misc_XPSpeedMultiplier", 1)
 	local devMult = getNumericAttribute(player, "DevProduct_XPSpeedMultiplier", 1)
 	local reducedDevMult = 1 + math.max(0, devMult - 1) * 0.1
+	local combinedWinMult = combineWinMultipliers(
+		winMult,
+		nil,
+		nil,
+		PlayerHandler.GetPremiumMultiplier(player)
+	)
 
-	return rebirthMult * winMult * miscMult * reducedDevMult
+	return rebirthMult * combinedWinMult * miscMult * reducedDevMult
 end
 
 function PlayerHandler.CalculatePlaytimeWinsAward(player: Player, amount: number): number
@@ -615,7 +817,7 @@ function PlayerHandler.AddXPSpeed(player: Player, amount: number)
 end
 
 function PlayerHandler.AddRewardXPSpeed(player: Player, amount: number): number
-	return applyAwardedXPSpeed(player, amount * getStandardXPSpeedMultiplier(player))
+	return applyAwardedXPSpeed(player, PlayerHandler.CalculateRewardXPSpeed(player, amount))
 end
 
 --[[
@@ -820,7 +1022,9 @@ function PlayerHandler.AddWinButtonWins(player: Player, amount: number): number
 	local combinedMultiplier = combineWinMultipliers(
 		getNumericAttribute(player, "WinMultiplier", 1),
 		PlayerHandler.GetLiveEventWinButtonMultiplier(player),
-		getTemporaryBoostMultiplier(player, "TemporaryWinBoostEndUnix")
+		getTemporaryBoostMultiplier(player, "TemporaryWinBoostEndUnix"),
+		PlayerHandler.GetPremiumMultiplier(player),
+		PlayerHandler.GetWinStreakMultiplier(player)
 	)
 	local gamePassAward = math.round(amount * combinedMultiplier)
 	if not currentWins or not isFiniteNumber(gamePassAward) then

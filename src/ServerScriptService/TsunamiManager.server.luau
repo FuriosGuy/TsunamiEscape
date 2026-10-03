@@ -1,11 +1,10 @@
---!strict
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
-local ConfigFolder = ReplicatedStorage.Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 local TsunamiSystem = require(script.Parent.Modules.TsunamiSystem)
 
 local MODULE_NAME = "TsunamiManager"
@@ -111,14 +110,23 @@ if not DISABLE_WAVES_IN_STUDIO then
 			MODULE_NAME
 		)
 		spawnForAllWorlds(false)
+		local nextNormalSpawnAt = os.clock() + math.random(MIN_SPAWN_DELAY, MAX_SPAWN_DELAY)
+		local observedRecoverySerial = TsunamiSystem.GetRecoverySerial()
 
 		while isRunning do
-			local delayTime = math.random(MIN_SPAWN_DELAY, MAX_SPAWN_DELAY)
-			task.wait(delayTime)
-			if not isRunning then
-				break
+			local currentRecoverySerial = TsunamiSystem.GetRecoverySerial()
+			if currentRecoverySerial ~= observedRecoverySerial then
+				observedRecoverySerial = currentRecoverySerial
+				nextNormalSpawnAt = os.clock() + math.random(MIN_SPAWN_DELAY, MAX_SPAWN_DELAY)
 			end
-			spawnForAllWorlds(false)
+
+			local remaining = nextNormalSpawnAt - os.clock()
+			if remaining > 0 then
+				task.wait(math.min(remaining, 0.25))
+			else
+				spawnForAllWorlds(false)
+				nextNormalSpawnAt = os.clock() + math.random(MIN_SPAWN_DELAY, MAX_SPAWN_DELAY)
+			end
 		end
 	end)
 else

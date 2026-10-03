@@ -1,0 +1,33 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/Snow",
+  "properties": {
+    "FlipbookMode": "OneShot",
+    "Lifetime": [1, 1],
+    "LightEmission": 1,
+    "LightInfluence": 1,
+    "Rate": 10,
+    "Rotation": [-360, 360],
+    "RotSpeed": [15, 15],
+    "Size": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 3.625
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "SpreadAngle": [360, 360],
+    "Texture": "rbxassetid://933102662",
+    "Transparency": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 0.75
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 1.0
+      }]
+  }
+}

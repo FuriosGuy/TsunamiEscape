@@ -5,16 +5,16 @@
     "FlipbookMode": "OneShot",
     "Lifetime": [0.5, 2],
     "Rate": 5,
-    "RotSpeed": [360, 360],
     "Rotation": [-360, 360],
+    "RotSpeed": [360, 360],
     "Size": [{
+        "envelope": 1.0,
         "time": 0.0,
-        "value": 1.0,
-        "envelope": 1.0
+        "value": 1.0
       }, {
+        "envelope": 0.0,
         "time": 1.0,
-        "value": 0.0,
-        "envelope": 0.0
+        "value": 0.0
       }],
     "Speed": [20, 20],
     "Texture": "rbxassetid://691179887"

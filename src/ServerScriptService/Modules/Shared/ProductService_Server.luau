@@ -13,6 +13,7 @@ local ProductService: { [string]: any } = {}
 ProductService.Gamepasses = ProductCatalog.Gamepasses
 ProductService.DevProducts = ProductCatalog.DevProducts
 ProductService.BloodmoonKartProducts = ProductCatalog.BloodmoonKartProducts
+ProductService.EventKartProducts = ProductCatalog.EventKartProducts
 ProductService.MULTIPLIER_TO_PRODUCT = ProductCatalog.MULTIPLIER_TO_PRODUCT
 ProductService.DataStores = {
 	PlayerStats = "PlayerStats_v1",
@@ -28,6 +29,8 @@ local NON_PERSISTED = {
 	Movement_XPGainRate = true,
 	Movement_XPGainInterval = true,
 	Data_Loaded = true,
+	Pet_PaidRandomItemsRestricted = true,
+	Pet_RandomItemPolicyLoaded = true,
 	PlaytimeRewardElapsed = true,
 	PlaytimeRewardsClaimed = true,
 }

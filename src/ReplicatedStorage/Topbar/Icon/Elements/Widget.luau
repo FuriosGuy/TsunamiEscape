@@ -3,6 +3,9 @@
 -- This contains the core components of the icon such as the button, image, label and notice. It's
 -- also responsible for handling the automatic resizing of the widget (based upon image visibility and text length)
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
+
 return function(icon, Icon)
 
 	local widget = Instance.new("Frame")
@@ -290,8 +293,8 @@ return function(icon, Icon)
 			local spotWidthMax = math.max(spotWidth, getItemWidth(iconSpot), iconSpot.AbsoluteSize.X)
 			local widgetWidthMax = math.max(widgetWidth, getItemWidth(widget), widget.AbsoluteSize.X)
 			local SPEED = 750
-			local spotTweenInfo = TweenInfo.new(spotWidthMax/SPEED, style, direction)
-			local widgetTweenInfo = TweenInfo.new(widgetWidthMax/SPEED, style, direction)
+			local spotTweenInfo = TweenConfig.FromParameters(spotWidthMax / SPEED, style, direction)
+			local widgetTweenInfo = TweenConfig.FromParameters(widgetWidthMax / SPEED, style, direction)
 			TweenService:Create(iconSpot, spotTweenInfo, {
 				Position = UDim2.new(0, widgetBorderSize, 0.5, 0),
 				Size = UDim2.new(0, spotWidth, 1, -widgetBorderSize*2),

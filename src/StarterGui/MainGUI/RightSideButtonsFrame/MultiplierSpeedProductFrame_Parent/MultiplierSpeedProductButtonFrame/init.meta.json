@@ -2,8 +2,8 @@
   "className": "Frame",
   "properties": {
     "Attributes": {
-      "isShine": false,
-      "isHover": false
+      "isHover": false,
+      "isShine": false
     },
     "BackgroundColor3": [0.9961, 0.9961, 0.9961],
     "BorderColor3": [0, 0, 0],

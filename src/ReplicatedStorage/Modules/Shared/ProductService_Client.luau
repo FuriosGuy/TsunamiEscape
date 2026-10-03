@@ -16,6 +16,7 @@ local ProductService: { [string]: any } = {}
 ProductService.Gamepasses = ProductCatalog.Gamepasses
 ProductService.DevProducts = ProductCatalog.DevProducts
 ProductService.BloodmoonKartProducts = ProductCatalog.BloodmoonKartProducts
+ProductService.EventKartProducts = ProductCatalog.EventKartProducts
 ProductService.MULTIPLIER_TO_PRODUCT = ProductCatalog.MULTIPLIER_TO_PRODUCT
 
 type CreatorPurchaseFinishedCallback = (purchaseKind: string, productId: number, success: boolean, reason: string) -> ()
@@ -109,10 +110,10 @@ function ProductService.promptGamePassPurchase(player: Player, id: number)
 	end
 end
 
-function ProductService.promptProductPurchase(player: Player, id: number)
+function ProductService.promptProductPurchase(player: Player, id: number): boolean
 	if typeof(id) ~= "number" or id <= 0 then
 		DebugModule.debugWarn("Invalid developer product ID: " .. tostring(id), "ProductService_Client")
-		return
+		return false
 	end
 
 	local isCreatorProduct = ProductService.IsLocalExperienceCreator(player)
@@ -123,7 +124,7 @@ function ProductService.promptProductPurchase(player: Player, id: number)
 			"Developer product request blocked until creator identity is resolved | productId=" .. tostring(id),
 			"ProductService_Client"
 		)
-		return
+		return false
 	end
 
 	DebugModule.debugInfo(
@@ -142,7 +143,7 @@ function ProductService.promptProductPurchase(player: Player, id: number)
 				"Creator developer product request blocked until server service is ready | productId=" .. tostring(id),
 				"ProductService_Client"
 			)
-			return
+			return false
 		end
 
 		local requestOk, requestError = pcall(function()
@@ -150,6 +151,7 @@ function ProductService.promptProductPurchase(player: Player, id: number)
 		end)
 		if requestOk then
 			SoundService.PlayGuiSound("BellRing")
+			return true
 		else
 			DebugModule.debugWarn(
 				"Creator developer product request failed for productId="
@@ -158,8 +160,8 @@ function ProductService.promptProductPurchase(player: Player, id: number)
 					.. tostring(requestError),
 				"ProductService_Client"
 			)
+			return false
 		end
-		return
 	end
 
 	local success, errorMessage = pcall(function()
@@ -167,11 +169,13 @@ function ProductService.promptProductPurchase(player: Player, id: number)
 	end)
 	if success then
 		SoundService.PlayGuiSound("BellRing")
+		return true
 	else
 		DebugModule.debugWarn(
 			"PromptProductPurchase failed for productId=" .. tostring(id) .. ": " .. tostring(errorMessage),
 			"ProductService_Client"
 		)
+		return false
 	end
 end
 

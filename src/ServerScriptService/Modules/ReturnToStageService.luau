@@ -1,11 +1,13 @@
---!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Maid = require(Modules:WaitForChild("Maid"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
+local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 
 local ReturnToStageService = {}
 
@@ -17,6 +19,7 @@ local RETURN_TO_STAGE_DURATION = if returnToStageConfig and typeof(returnToStage
 local RETURN_TO_STAGE_ENABLED = if returnToStageConfig and typeof(returnToStageConfig.enabled) == "boolean"
 	then returnToStageConfig.enabled
 	else true
+local RETURN_TO_STAGE_IMMUNITY_DURATION = 2
 local MODULE_NAME = "ReturnToStageService"
 local isInitialized = false
 local serviceMaid = Maid.new()
@@ -35,12 +38,27 @@ local pendingReturnToStage: {
 		worldName: string,
 		expiresAt: number,
 		promptLocked: boolean?,
+		newRunStarted: boolean,
 		maid: any, -- Rule #3.10: Handle expiration thread
 	},
 } =
 	{}
 
 local pendingReturnOfferRequest: { [Player]: boolean } = {}
+local successfulReturnListeners: { [number]: (player: Player, stage: number, worldName: string) -> () } = {}
+local nextSuccessfulReturnListenerId = 0
+
+local function notifySuccessfulReturn(player: Player, stage: number, worldName: string)
+	for _, listener in pairs(successfulReturnListeners) do
+		local success, errorMessage = pcall(listener, player, stage, worldName)
+		if not success then
+			DebugModule.debugWarn(
+				string.format("Successful return listener failed | player=%s | reason=%s", player.Name, tostring(errorMessage)),
+				MODULE_NAME
+			)
+		end
+	end
+end
 
 local function findNearestTsunamiCover(world: Instance, origin: Vector3): BasePart?
 	local roadsFolder = world:FindFirstChild("Roads")
@@ -142,47 +160,96 @@ function ReturnToStageService.OfferReturnToStage(player: Player)
 			return
 		end
 
-		if currentState.expiresAt == expiresAt and os.clock() >= currentState.expiresAt then
+		if currentState == state and currentState.expiresAt == expiresAt and os.clock() >= currentState.expiresAt then
 			if currentState.promptLocked == true then
 				return
 			end
 
 			DebugModule.debugPrint(string.format("ReturnToStage offer expired for %s", player.Name), MODULE_NAME)
 			pendingReturnToStage[player] = nil
-			player:SetAttribute("CurrentStage", 0)
+			if currentState.newRunStarted ~= true then
+				ValidationService.ResetStageProgress(player, currentState.worldName)
+				player:SetAttribute("CurrentStage", 0)
+			end
 			ReturnToStageOffer:FireClient(player, false)
 		end
 	end)
 end
 
-function ReturnToStageService.HandlePurchase(player: Player, productId: number, isPurchased: boolean)
+function ReturnToStageService.HandlePurchase(player: Player, productId: number, isPurchased: boolean): (boolean, string)
+	if productId ~= ProductService.DevProducts.ReturnToStage then
+		return false, "InvalidProduct"
+	end
 	if not isPurchased then
-		return
+		return false, "NotPurchased"
 	end
 	if not RETURN_TO_STAGE_ENABLED then
 		pendingReturnToStage[player] = nil
 		ReturnToStageOffer:FireClient(player, false)
-		return
+		return false, "Disabled"
 	end
 
 	local state = pendingReturnToStage[player]
 	if not state or (os.clock() > state.expiresAt and state.promptLocked ~= true) then
 		pendingReturnToStage[player] = nil
-		return
+		return false, "OfferUnavailable"
 	end
 
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 	local destination = findReturnStageDestination(state.worldName, state.stage)
 
-	if not character or not humanoid or humanoid.Health <= 0 or not destination then
+	if
+		not character
+		or not humanoid
+		or humanoid.Health <= 0
+		or not rootPart
+		or not rootPart:IsA("BasePart")
+		or not destination
+	then
 		pendingReturnToStage[player] = nil
-		return
+		return false, "CharacterUnavailable"
 	end
 
 	character:PivotTo(destination.CFrame * CFrame.new(0, 3, 0))
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	ValidationService.ResetStageProgress(player, state.worldName)
+	ValidationService.RecordPassedStage(player, state.worldName, state.stage)
+	player:SetAttribute("CurrentStage", state.stage)
+	player:SetAttribute("TsunamiImmunityUntil", Workspace:GetServerTimeNow() + RETURN_TO_STAGE_IMMUNITY_DURATION)
+	ValidationService.MarkServerTeleport(player, RETURN_TO_STAGE_IMMUNITY_DURATION)
+	notifySuccessfulReturn(player, state.stage, state.worldName)
+	DebugModule.debugInfo(
+		string.format(
+			"ReturnToStage completed | player=%s | stage=%d | immunitySeconds=%d",
+			player.Name,
+			state.stage,
+			RETURN_TO_STAGE_IMMUNITY_DURATION
+		),
+		MODULE_NAME
+	)
 	ReturnToStageService.CleanupPlayer(player) -- Full cleanup after success
 	ReturnToStageOffer:FireClient(player, false)
+	return true, "Granted"
+end
+
+function ReturnToStageService.HandleCreatorPurchase(player: Player, productId: number): (boolean, string)
+	if productId ~= ProductService.DevProducts.ReturnToStage then
+		return false, "InvalidProduct"
+	end
+
+	local state = pendingReturnToStage[player]
+	if not state or state.promptLocked ~= true then
+		DebugModule.debugWarn(
+			"Creator ReturnToStage rejected because strict offer is not locked | player=" .. player.Name,
+			MODULE_NAME
+		)
+		return false, "OfferNotLocked"
+	end
+
+	return ReturnToStageService.HandlePurchase(player, productId, true)
 end
 
 function ReturnToStageService.OnDeclined(player: Player)
@@ -192,7 +259,10 @@ function ReturnToStageService.OnDeclined(player: Player)
 	end
 
 	ReturnToStageService.CleanupPlayer(player)
-	player:SetAttribute("CurrentStage", 0)
+	if state.newRunStarted ~= true then
+		ValidationService.ResetStageProgress(player, state.worldName)
+		player:SetAttribute("CurrentStage", 0)
+	end
 	ReturnToStageOffer:FireClient(player, false)
 end
 
@@ -223,7 +293,10 @@ function ReturnToStageService.CancelRewardedReturn(player: Player)
 	state.promptLocked = false
 	if state.expiresAt > 0 and os.clock() >= state.expiresAt then
 		ReturnToStageService.CleanupPlayer(player)
-		player:SetAttribute("CurrentStage", 0)
+		if state.newRunStarted ~= true then
+			ValidationService.ResetStageProgress(player, state.worldName)
+			player:SetAttribute("CurrentStage", 0)
+		end
 		ReturnToStageOffer:FireClient(player, false)
 	end
 end
@@ -243,13 +316,14 @@ function ReturnToStageService.OnRequestOffer(player: Player)
 
 	if typeof(stage) == "number" and stage > 0 and typeof(worldName) == "string" and worldName ~= "" then
 		if not pendingReturnToStage[player] then
-			pendingReturnToStage[player] = {
-				stage = stage,
-				worldName = worldName,
-				expiresAt = 0,
-				promptLocked = false,
-				maid = Maid.new(),
-			}
+		pendingReturnToStage[player] = {
+			stage = stage,
+			worldName = worldName,
+			expiresAt = 0,
+			promptLocked = false,
+			newRunStarted = false,
+			maid = Maid.new(),
+		}
 		end
 		ReturnToStageService.OfferReturnToStage(player)
 	else
@@ -262,13 +336,48 @@ function ReturnToStageService.SetPendingState(player: Player, stage: number, wor
 	if not RETURN_TO_STAGE_ENABLED then
 		return
 	end
+
+	local previousState = pendingReturnToStage[player]
+	if previousState and previousState.maid then
+		previousState.maid:DoCleaning()
+	end
 	pendingReturnToStage[player] = {
 		stage = stage,
 		worldName = worldName,
 		expiresAt = 0,
 		promptLocked = false,
+		newRunStarted = false,
 		maid = Maid.new(),
 	}
+end
+
+-- A checkpoint after respawn proves the player started a fresh run. The old
+-- return offer must not later reset that fresh run when its timer expires.
+function ReturnToStageService.MarkNewRunStarted(player: Player): boolean
+	local state = pendingReturnToStage[player]
+	if not state then
+		return false
+	end
+
+	state.newRunStarted = true
+	if state.promptLocked == true then
+		ReturnToStageOffer:FireClient(player, false)
+		return false
+	end
+
+	DebugModule.debugInfo(
+		string.format(
+			"ReturnToStage offer cancelled because a new run started | player=%s | savedStage=%d",
+			player.Name,
+			state.stage
+		),
+		MODULE_NAME
+	)
+	ReturnToStageService.CleanupPlayer(player)
+	ValidationService.ResetStageProgress(player, state.worldName)
+	player:SetAttribute("CurrentStage", 0)
+	ReturnToStageOffer:FireClient(player, false)
+	return true
 end
 
 function ReturnToStageService.CheckQueuedRequest(player: Player)
@@ -285,6 +394,18 @@ function ReturnToStageService.CleanupPlayer(player: Player)
 	end
 	pendingReturnToStage[player] = nil
 	pendingReturnOfferRequest[player] = nil
+end
+
+function ReturnToStageService.RegisterSuccessfulReturn(
+	listener: (player: Player, stage: number, worldName: string) -> ()
+): ()
+	nextSuccessfulReturnListenerId += 1
+	local listenerId = nextSuccessfulReturnListenerId
+	successfulReturnListeners[listenerId] = listener
+
+	return function()
+		successfulReturnListeners[listenerId] = nil
+	end
 end
 
 function ReturnToStageService.Init()
@@ -306,6 +427,7 @@ function ReturnToStageService.Shutdown()
 	end
 	serviceMaid:DoCleaning()
 	table.clear(pendingReturnOfferRequest)
+	table.clear(successfulReturnListeners)
 	isInitialized = false
 end
 

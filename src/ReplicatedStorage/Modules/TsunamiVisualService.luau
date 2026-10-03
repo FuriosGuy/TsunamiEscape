@@ -1,14 +1,12 @@
---!strict
-
 local RunService = game:GetService("RunService")
 local SoundService = require(game:GetService("ReplicatedStorage").Modules.SoundService)
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
+local TsunamiTrajectory = require(ReplicatedStorage.Modules.TsunamiTrajectory)
 
 type VisualConfig = {
 	enabled: boolean,
@@ -197,6 +195,43 @@ local function cleanupVisual(binding: StateBinding, reason: string)
 	binding.visual = nil
 end
 
+local function updateBoundVisuals(state: ServiceState)
+	local serverTime = Workspace:GetServerTimeNow()
+	for _, worldBinding in pairs(state.worldBindings) do
+		for _, binding in pairs(worldBinding.states) do
+			local visual = binding.visual
+			local startCFrame = binding.startCFrame
+			local targetCFrame = binding.targetCFrame
+			local startServerTime = binding.startServerTime
+			local duration = binding.duration
+			if
+				not visual
+				or not visual.Parent
+				or not startCFrame
+				or not targetCFrame
+				or not startServerTime
+				or not duration
+			then
+				continue
+			end
+
+			local visualCFrame, isComplete = TsunamiTrajectory.Sample(
+				startCFrame,
+				targetCFrame,
+				startServerTime,
+				duration,
+				serverTime
+			)
+			if isComplete then
+				cleanupVisual(binding, "duration.expired")
+				continue
+			end
+
+			visual.CFrame = visualCFrame
+		end
+	end
+end
+
 local function getVisualFolder(binding: WorldBinding): Folder?
 	local existingFolder = binding.world:FindFirstChild("ClientTsunamiVisuals")
 	if existingFolder then
@@ -252,7 +287,8 @@ local function readStateAttributes(state: Folder): (StateData?, string?)
 	local duration = state:GetAttribute("Duration")
 	local visualSize = state:GetAttribute("VisualSize")
 
-	if typeof(templateName) ~= "string"
+	if
+		typeof(templateName) ~= "string"
 		or typeof(startCFrame) ~= "CFrame"
 		or typeof(targetCFrame) ~= "CFrame"
 		or typeof(startServerTime) ~= "number"
@@ -270,7 +306,8 @@ local function readStateAttributes(state: Folder): (StateData?, string?)
 		startServerTime = startServerTime,
 		duration = duration,
 		visualSize = visualSize,
-	}, nil
+	},
+		nil
 end
 
 local function refreshStateVisual(binding: StateBinding, worldBinding: WorldBinding)
@@ -320,7 +357,9 @@ local function refreshStateVisual(binding: StateBinding, worldBinding: WorldBind
 	local duration = stateData.duration
 	local visualSize = stateData.visualSize
 
-	if binding.visual and binding.visual.Parent
+	if
+		binding.visual
+		and binding.visual.Parent
 		and binding.templateName == templateName
 		and binding.startCFrame == startCFrame
 		and binding.targetCFrame == targetCFrame
@@ -380,9 +419,20 @@ local function refreshStateVisual(binding: StateBinding, worldBinding: WorldBind
 	configureVisual(visual, config)
 	applyVisualColor(visual, templateName)
 
-	local clampedElapsed = math.max(0, elapsed)
-	local alpha = math.clamp(clampedElapsed / duration, 0, 1)
-	visual.CFrame = startCFrame:Lerp(targetCFrame, alpha)
+	local initialServerTime = Workspace:GetServerTimeNow()
+	local visualCFrame, isComplete = TsunamiTrajectory.Sample(
+		startCFrame,
+		targetCFrame,
+		startServerTime,
+		duration,
+		initialServerTime
+	)
+	if isComplete then
+		visual:Destroy()
+		return
+	end
+
+	visual.CFrame = visualCFrame
 	visual.Parent = visualFolder
 
 	local visualMaid = Maid.new()
@@ -395,28 +445,8 @@ local function refreshStateVisual(binding: StateBinding, worldBinding: WorldBind
 	binding.startServerTime = startServerTime
 	binding.duration = duration
 
+	local clampedElapsed = math.max(0, initialServerTime - startServerTime)
 	local remaining = duration - clampedElapsed
-	local tween = TweenService:Create(visual, TweenInfo.new(remaining, Enum.EasingStyle.Linear), {
-		CFrame = targetCFrame,
-	})
-	visualMaid:GiveTask(tween)
-	visualMaid:GiveTask(tween.Completed:Connect(function(playbackState)
-		if binding.visual ~= visual then
-			return
-		end
-		DebugModule.debugInfo(
-			string.format(
-				"Visual tween completed | waveId=%s | state=%s | playbackState=%s | visualParent=%s | atTarget=%s",
-				tostring(binding.state:GetAttribute("WaveId") or binding.state.Name),
-				if binding.state.Parent then "present" else "removed",
-				tostring(playbackState),
-				if visual.Parent then visual.Parent:GetFullName() else "nil",
-				tostring((visual.CFrame.Position - targetCFrame.Position).Magnitude <= 0.1)
-			),
-			"TsunamiVisualService"
-		)
-	end))
-	tween:Play()
 
 	if clampedElapsed <= config.soundGraceSeconds then
 		local sound = SoundService.PlayWorkspaceSound("Wave Crash", visual)
@@ -526,7 +556,10 @@ local function bindState(worldBinding: WorldBinding, state: Instance)
 			state:GetFullName(),
 			if state.Parent then state.Parent:GetFullName() else "nil",
 			if typeof(state:GetAttribute("StartServerTime")) == "number"
-				then string.format("%.2fs", Workspace:GetServerTimeNow() - (state:GetAttribute("StartServerTime") :: number))
+				then string.format(
+					"%.2fs",
+					Workspace:GetServerTimeNow() - (state:GetAttribute("StartServerTime") :: number)
+				)
 				else "unknown",
 			getAttributeTypeSummary(state),
 			if worldBinding.activeStatesFolder then #worldBinding.activeStatesFolder:GetChildren() else 0
@@ -864,6 +897,11 @@ function TsunamiVisualService.Start()
 		end
 		state.liveEventState = nil
 	end)
+	state.maid:GiveTask(RunService.PreRender:Connect(function()
+		if state.isRunning then
+			updateBoundVisuals(state)
+		end
+	end))
 
 	DebugModule.debugInfo("Tsunami visual service started", "TsunamiVisualService")
 end

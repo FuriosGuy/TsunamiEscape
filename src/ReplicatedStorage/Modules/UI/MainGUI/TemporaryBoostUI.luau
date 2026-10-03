@@ -1,14 +1,13 @@
---!strict
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
-local ProductService = require(ReplicatedStorage.Modules.ProductService)
+local ProductService = require(ReplicatedStorage.Modules.Shared:WaitForChild("ProductService_Client"))
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
 local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
+local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
 
 local TemporaryBoostUI = {}
 TemporaryBoostUI.__index = TemporaryBoostUI
@@ -21,22 +20,22 @@ type ColorTarget = {
 type BoostBinding = {
 	frame: GuiObject,
 	promptButton: GuiButton,
+	uiScale: UIScale?,
 	image: GuiObject?,
 	statusLabel: TextLabel,
 	timerLabel: TextLabel,
 	endAttributeName: string,
 	productId: number,
 	originalSize: UDim2,
-	hoverSize: UDim2,
-	clickSize: UDim2,
+	originalScale: number,
 	originalRotation: number,
 	isHovering: boolean,
 	isPressed: boolean,
-	sizeTween: Tween?,
+	transformTween: Tween?,
 	rotationTween: Tween?,
 	colorTargets: { ColorTarget },
 	colorTweens: { Tween },
-	pressedColors: { [Instance]: { [string]: Color3 } },
+	baseColors: { [Instance]: { [string]: Color3 } },
 }
 
 type TemporaryBoostUIObject = {
@@ -51,8 +50,8 @@ type TemporaryBoostUIObject = {
 }
 
 local MODULE_NAME = "TemporaryBoostUI"
-local ACTIVE_COLOR = Color3.fromRGB(255, 255, 255)
-local INACTIVE_COLOR = Color3.fromRGB(0, 255, 0)
+local ACTIVE_COLOR = ColorConfig.Colors.White.Color
+local INACTIVE_COLOR = ColorConfig.UI.NotificationThemes.Green.textColor
 
 local function scaledSize(size: UDim2, multiplier: number): UDim2
 	return UDim2.new(
@@ -112,6 +111,22 @@ local function getColorTargets(root: GuiObject, excluded: { [Instance]: boolean 
 	return targets
 end
 
+local function captureBaseColors(colorTargets: { ColorTarget }): { [Instance]: { [string]: Color3 } }
+	local baseColors: { [Instance]: { [string]: Color3 } } = {}
+	for _, target in ipairs(colorTargets) do
+		local color = (target.instance :: any)[target.property]
+		if typeof(color) == "Color3" then
+			local instanceColors = baseColors[target.instance]
+			if not instanceColors then
+				instanceColors = {}
+				baseColors[target.instance] = instanceColors
+			end
+			instanceColors[target.property] = color
+		end
+	end
+	return baseColors
+end
+
 local function formatRemaining(seconds: number): string
 	local totalSeconds = math.max(0, math.ceil(seconds))
 	if totalSeconds >= 60 * 60 then
@@ -157,14 +172,11 @@ function TemporaryBoostUI:refreshBinding(binding: BoostBinding)
 
 	binding.timerLabel.Text = formatRemaining(remainingSeconds)
 	binding.statusLabel.Text = if isActive then "2x" else "+"
-	binding.statusLabel.TextColor3 = if binding.isPressed then darkenColor(statusColor, 0.75) else statusColor
-
-	if binding.isPressed then
-		local pressedStatusColors = binding.pressedColors[binding.statusLabel]
-		if pressedStatusColors then
-			pressedStatusColors.TextColor3 = statusColor
-		end
+	local statusColors = binding.baseColors[binding.statusLabel]
+	if statusColors then
+		statusColors.TextColor3 = statusColor
 	end
+	binding.statusLabel.TextColor3 = if binding.isPressed then darkenColor(statusColor, 0.75) else statusColor
 end
 
 function TemporaryBoostUI:refresh()
@@ -178,14 +190,21 @@ function TemporaryBoostUI:refresh()
 end
 
 function TemporaryBoostUI:createBinding(
-		speedMultiFrame: GuiObject,
-		frameName: string,
-		endAttributeName: string,
-		productId: number
-	): BoostBinding?
-	local frame = speedMultiFrame:FindFirstChild(frameName)
+	root: Instance,
+	frameName: string,
+	endAttributeName: string,
+	productId: number
+): BoostBinding?
+	local frame = root:FindFirstChild(frameName, true)
 	local promptButton = frame and frame:FindFirstChild("PromptButton")
 	local image = frame and (frame:FindFirstChild("RotateImage") or frame:FindFirstChild("Image"))
+	local uiScale: UIScale? = nil
+	if frame then
+		local uiScaleInstance = frame:FindFirstChild("UIScale")
+		if uiScaleInstance and uiScaleInstance:IsA("UIScale") then
+			uiScale = uiScaleInstance
+		end
+	end
 	local statusLabel = frame and frame:FindFirstChild("TextLabel")
 	local timerLabel = frame and frame:FindFirstChild("TimerLabel")
 
@@ -208,37 +227,46 @@ function TemporaryBoostUI:createBinding(
 	if image and not image:IsA("GuiObject") then
 		image = nil
 	end
+	local colorTargets = getColorTargets(frame, {})
 
 	local binding: BoostBinding = {
 		frame = frame,
 		promptButton = promptButton,
+		uiScale = uiScale,
 		image = image :: GuiObject?,
 		statusLabel = statusLabel,
 		timerLabel = timerLabel,
 		endAttributeName = endAttributeName,
 		productId = productId,
 		originalSize = frame.Size,
-		hoverSize = scaledSize(frame.Size, 1.1),
-		clickSize = scaledSize(frame.Size, 0.95),
+		originalScale = if uiScale then uiScale.Scale else 1,
 		originalRotation = if image then image.Rotation else 0,
 		isHovering = false,
 		isPressed = false,
-		sizeTween = nil,
+		transformTween = nil,
 		rotationTween = nil,
-		colorTargets = getColorTargets(frame, {}),
+		colorTargets = colorTargets,
 		colorTweens = {},
-		pressedColors = {},
+		baseColors = captureBaseColors(colorTargets),
 	}
 
 	frame.Active = true
 	promptButton.Active = true
 
-	local function tweenVisuals(size: UDim2, rotation: number, tweenInfo: TweenInfo)
-		if binding.sizeTween then
-			binding.sizeTween:Cancel()
+	local function tweenVisuals(scaleMultiplier: number, rotation: number, tweenInfo: TweenInfo)
+		if binding.transformTween then
+			binding.transformTween:Cancel()
 		end
-		binding.sizeTween = TweenService:Create(frame, tweenInfo, { Size = size })
-		binding.sizeTween:Play()
+		if binding.uiScale then
+			binding.transformTween = TweenService:Create(binding.uiScale, tweenInfo, {
+				Scale = binding.originalScale * scaleMultiplier,
+			})
+		else
+			binding.transformTween = TweenService:Create(frame, tweenInfo, {
+				Size = scaledSize(binding.originalSize, scaleMultiplier),
+			})
+		end
+		binding.transformTween:Play()
 
 		if binding.image then
 			if binding.rotationTween then
@@ -258,36 +286,34 @@ function TemporaryBoostUI:createBinding(
 
 	local function darkenPressedColors()
 		cancelColorTweens()
-		table.clear(binding.pressedColors)
 
 		for _, target in ipairs(binding.colorTargets) do
-			local instance = target.instance
-			local instanceAny = instance :: any
-			local currentColor = instanceAny[target.property] :: Color3
-			local colors = binding.pressedColors[instance]
-			if not colors then
-				colors = {}
-				binding.pressedColors[instance] = colors
+			local colors = binding.baseColors[target.instance]
+			local baseColor = colors and colors[target.property]
+			if baseColor then
+				local tween = TweenService:Create(target.instance, TweenConfig.Click, {
+					[target.property] = darkenColor(baseColor, 0.75),
+				})
+				table.insert(binding.colorTweens, tween)
+				tween:Play()
 			end
-			colors[target.property] = currentColor
-
-			local tween = TweenService:Create(instance, TweenConfig.Click, {
-				[target.property] = darkenColor(currentColor, 0.75),
-			})
-			table.insert(binding.colorTweens, tween)
-			tween:Play()
 		end
 	end
 
 	local function restorePressedColors()
 		cancelColorTweens()
 
-		for instance, colors in pairs(binding.pressedColors) do
-			local tween = TweenService:Create(instance, TweenConfig.Click, colors)
-			table.insert(binding.colorTweens, tween)
-			tween:Play()
+		for _, target in ipairs(binding.colorTargets) do
+			local colors = binding.baseColors[target.instance]
+			local baseColor = colors and colors[target.property]
+			if baseColor then
+				local tween = TweenService:Create(target.instance, TweenConfig.Click, {
+					[target.property] = baseColor,
+				})
+				table.insert(binding.colorTweens, tween)
+				tween:Play()
+			end
 		end
-		table.clear(binding.pressedColors)
 	end
 
 	local function showHover()
@@ -296,7 +322,7 @@ function TemporaryBoostUI:createBinding(
 		end
 		binding.isHovering = true
 		SoundService.PlayGuiSound("Hover")
-		tweenVisuals(binding.hoverSize, binding.originalRotation + 15, TweenConfig.Hover)
+		tweenVisuals(1.1, binding.originalRotation + 15, TweenConfig.Hover)
 	end
 
 	local function showPressed()
@@ -306,14 +332,14 @@ function TemporaryBoostUI:createBinding(
 		binding.isPressed = true
 		SoundService.PlayGuiSound("Click")
 		darkenPressedColors()
-		tweenVisuals(binding.clickSize, binding.originalRotation - 15, TweenConfig.Click)
+		tweenVisuals(0.95, binding.originalRotation - 15, TweenConfig.Click)
 	end
 
 	local function restoreVisuals()
 		binding.isPressed = false
 		binding.isHovering = false
 		restorePressedColors()
-		tweenVisuals(binding.originalSize, binding.originalRotation, TweenConfig.Hover)
+		tweenVisuals(1, binding.originalRotation, TweenConfig.Hover)
 	end
 
 	self.maid:GiveTask(promptButton.MouseEnter:Connect(showHover))
@@ -323,7 +349,7 @@ function TemporaryBoostUI:createBinding(
 		binding.isPressed = false
 		restorePressedColors()
 		if binding.isHovering then
-			tweenVisuals(binding.hoverSize, binding.originalRotation + 15, TweenConfig.Hover)
+			tweenVisuals(1.1, binding.originalRotation + 15, TweenConfig.Hover)
 		else
 			restoreVisuals()
 		end
@@ -341,7 +367,7 @@ function TemporaryBoostUI:createBinding(
 			if binding.isHovering then
 				binding.isPressed = false
 				restorePressedColors()
-				tweenVisuals(binding.hoverSize, binding.originalRotation + 15, TweenConfig.Hover)
+				tweenVisuals(1.1, binding.originalRotation + 15, TweenConfig.Hover)
 			else
 				restoreVisuals()
 			end
@@ -369,14 +395,8 @@ function TemporaryBoostUI:Init()
 	end
 	self.initialized = true
 
-	local speedMultiFrame = self.screenGui:FindFirstChild("SpeedMultiFrame", true)
-	if not speedMultiFrame or not speedMultiFrame:IsA("GuiObject") then
-		DebugModule.debugWarn("SpeedMultiFrame was not found", MODULE_NAME)
-		return
-	end
-
 	local speedBinding = self:createBinding(
-		speedMultiFrame,
+		self.screenGui,
 		"TempSpeedBoostBuyFrame",
 		"TemporarySpeedBoostEndUnix",
 		ProductService.DevProducts.TempSpeedBoost
@@ -386,7 +406,7 @@ function TemporaryBoostUI:Init()
 	end
 
 	local winBinding = self:createBinding(
-		speedMultiFrame,
+		self.screenGui,
 		"TempWinBoostBuyFrame",
 		"TemporaryWinBoostEndUnix",
 		ProductService.DevProducts.TempWinBoost
@@ -411,8 +431,8 @@ function TemporaryBoostUI:Destroy()
 
 	self.alive = false
 	for _, binding in ipairs(self.bindings) do
-		if binding.sizeTween then
-			binding.sizeTween:Cancel()
+		if binding.transformTween then
+			binding.transformTween:Cancel()
 		end
 		if binding.rotationTween then
 			binding.rotationTween:Cancel()
@@ -421,7 +441,13 @@ function TemporaryBoostUI:Destroy()
 			tween:Cancel()
 		end
 		table.clear(binding.colorTweens)
-		table.clear(binding.pressedColors)
+		for _, target in ipairs(binding.colorTargets) do
+			local colors = binding.baseColors[target.instance]
+			local baseColor = colors and colors[target.property]
+			if baseColor then
+				(target.instance :: any)[target.property] = baseColor
+			end
+		end
 	end
 	if self.updateThread and coroutine.status(self.updateThread) ~= "dead" then
 		pcall(task.cancel, self.updateThread)

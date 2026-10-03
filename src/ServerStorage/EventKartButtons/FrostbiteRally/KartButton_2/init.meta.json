@@ -1,0 +1,12 @@
+{
+  "className": "Model",
+  "properties": {
+    "Attributes": {
+      "DisplayName": "Snowmobile",
+      "EventName": "FrostbiteRally",
+      "KartName": "2_Snowmobile",
+      "WinsRequired": 40
+    },
+    "ModelStreamingMode": "Persistent"
+  }
+}

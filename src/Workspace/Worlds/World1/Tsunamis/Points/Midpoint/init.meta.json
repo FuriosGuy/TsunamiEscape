@@ -3,8 +3,8 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [-24, 8, -3617, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "CanCollide": false,
+    "CFrame": [-24, 8, -1569, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Color": [196, 40, 28],
     "Locked": true,
     "PivotOffset": [0, -0.5, -1, 1, 0, 0, 0, 1, 0, 0, 0, 1],

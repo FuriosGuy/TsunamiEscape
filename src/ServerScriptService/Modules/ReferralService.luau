@@ -1,15 +1,16 @@
---!strict
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local ProductService = require(Modules:WaitForChild("ProductService"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local FunnelAnalytics = require(Modules:WaitForChild("FunnelAnalytics"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
+local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local FunnelAnalytics =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("FunnelAnalytics_Server"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
+local DataStoreRequestGate = require(script.Parent:WaitForChild("DataStoreRequestGate"))
 
 local ProductServerService = require(script.Parent:WaitForChild("ProductServerService"))
 
@@ -17,6 +18,11 @@ local ReferralService = {}
 
 local MODULE_NAME = "ReferralService"
 local socialConfig = CoreConfig.social
+local persistenceConfig = CoreConfig.persistence
+local DATASTORE_BUDGET_WAIT_SECONDS = if persistenceConfig
+		and typeof(persistenceConfig.datastoreBudgetWaitSeconds) == "number"
+	then math.max(0.25, persistenceConfig.datastoreBudgetWaitSeconds)
+	else 5
 local FRIEND_INVITE_MULTIPLIER_STEP = if socialConfig
 		and typeof(socialConfig.friendInviteMultiplierStep) == "number"
 	then math.max(0, socialConfig.friendInviteMultiplierStep)
@@ -53,14 +59,26 @@ end
 local function tryClaimReferralReward(inviteeUserId: number, referrerUserId: number): boolean
 	local claimedReferral = false
 	local success, err = pcall(function()
-		friendReferralClaimsStore:UpdateAsync(tostring(inviteeUserId), function(existingValue)
-			if existingValue ~= nil then
-				return existingValue
-			end
+		local gateOk, gateResult = DataStoreRequestGate.Run(
+			"StandardUpdate",
+			"ClaimReferral",
+			function()
+				return friendReferralClaimsStore:UpdateAsync(tostring(inviteeUserId), function(existingValue)
+					if existingValue ~= nil then
+						return existingValue
+					end
 
-			claimedReferral = true
-			return referrerUserId
-		end)
+					claimedReferral = true
+					return referrerUserId
+				end)
+			end,
+			{
+				maxWaitSeconds = DATASTORE_BUDGET_WAIT_SECONDS,
+			}
+		)
+		if not gateOk then
+			error(gateResult)
+		end
 	end)
 
 	if not success then

@@ -6,10 +6,10 @@
       "Stage": 3
     },
     "BottomSurface": "Smooth",
-    "CFrame": [-24, 32, -424.5, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "CanCollide": false,
+    "CFrame": [-24, 32, -424.5, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Locked": true,
-    "Size": [176, 48, 1],
+    "Size": [176, 48, 10],
     "TopSurface": "Smooth",
     "Transparency": 1
   }

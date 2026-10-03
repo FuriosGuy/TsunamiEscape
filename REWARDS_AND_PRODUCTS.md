@@ -130,7 +130,8 @@ When a player reaches the valid final stage and touches the final WinButton:
 | Maximum Bloodmoon Wins | 100 |
 | Normal movement/treadmill XP event multiplier | 1.5x |
 | Walkspeed while active | 75% of normal |
-| Active duration | 3 days |
+| Preserved current active window | 3 days, one time |
+| Later-cycle active duration | 2 days |
 | Later-cycle grace period | 2 days |
 | Pre-event countdown | 24 hours |
 

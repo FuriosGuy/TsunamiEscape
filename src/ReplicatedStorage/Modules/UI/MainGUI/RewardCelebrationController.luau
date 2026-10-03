@@ -1,9 +1,8 @@
---!strict
-
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ConfettiBurstPlayer = require(ReplicatedStorage.Modules.UI:WaitForChild("ConfettiBurstPlayer"))
+local TweenConfig = require(ReplicatedStorage.Modules.UI:WaitForChild("TweenConfig"))
 
 local RewardCelebrationController = {}
 RewardCelebrationController.__index = RewardCelebrationController
@@ -117,7 +116,7 @@ function RewardCelebrationController:StartRebirthButtonPulse(buttonFrame: GuiObj
 
 		local tween = TweenService:Create(
 			uiScale,
-			TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+			TweenConfig.RewardPulse,
 			{ Scale = targetScale }
 		)
 		self.activeTween = tween

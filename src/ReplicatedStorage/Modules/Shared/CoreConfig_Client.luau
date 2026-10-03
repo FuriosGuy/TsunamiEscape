@@ -21,6 +21,7 @@ CoreConfig.bloodmoonParticle = {
 	positionMovementThreshold = 2, -- Minimum grounded movement in studs before another position update.
 	rotationThresholdDegrees = 20, -- Minimum grounded rotation before another orientation update.
 	groundRaycastInterval = 0.25, -- Minimum time between ground raycasts while the player is moving.
+	mobileRateMultiplier = 0.55, -- Stronger local event-particle reduction on Phone and Tablet clients.
 }
 
 -- Client environment transition settings.
@@ -29,20 +30,45 @@ CoreConfig.environment = {
 	atmosphereLeadSeconds = 0.5, -- Starts atmosphere before ambient and remaining environment values.
 }
 
+-- World geometry tint overrides for active live events.
+CoreConfig.eventWorldVisuals = {
+	frostbiteRally = {
+		enabled = true,
+		eventId = "FrostbiteRally",
+		targetColor = Color3.fromRGB(202, 203, 209),
+	},
+}
+
 -- Client-side distance culling for non-gameplay visuals.
 CoreConfig.clientCulling = {
 	enabled = true, -- Master toggle for CollectionService-based client visual culling.
 	updateInterval = 0.25, -- Seconds between culling visibility passes.
-	mobileDistanceMultiplier = 0.65, -- Scales culling distances down on touch-only mobile clients.
+	mobileDistanceMultiplier = 0.65, -- Scales culling distances down on Phone and Tablet clients.
+	mobileParticleDistanceMultiplier = 0.5, -- Tighter particle-only distance scale on Phone and Tablet clients.
+	mobileParticleReducedRateMultiplier = 0.4, -- Lower reduced-rate particle budget on Phone and Tablet clients.
 	autoTagBillboards = true, -- Automatically tags BillboardGuis so lobby labels can be culled by distance.
 	autoTagSurfaceGuis = true, -- Automatically tags SurfaceGuis in Workspace so world panels can be culled by distance.
 	autoTagDecorativeEffects = true, -- Automatically tags safe Workspace particles/lights/beams/trails for distance culling.
 	billboardDistance = 450, -- BillboardGui distance before it is disabled.
 	surfaceGuiDistance = 450, -- SurfaceGui distance before it is disabled.
 	particleDistance = 260, -- ParticleEmitter distance before tagged emitters are disabled.
+	particleReducedDistance = 140, -- ParticleEmitter distance before tagged emitters use reduced rate.
+	particleReducedRateMultiplier = 0.55, -- Reduced-rate particle budget before full particle disable.
+	cullHysteresisDistance = 24, -- Prevents visual pop-in when an object hovers near a cull boundary.
 	lightDistance = 320, -- Light distance before tagged lights are disabled.
 	beamDistance = 360, -- Beam distance before tagged beams are disabled.
 	trailDistance = 300, -- Trail distance before tagged trails are disabled.
+	autoTagDecorativeTextures = true, -- Culls only decorative Terrain, Decorations, and VIPRooms textures/decals.
+	textureDistance = 600, -- Decorative Texture/Decal distance before local transparency is applied.
+	autoCullDecorativeShadows = true, -- Culls CastShadow only on distant decorative Terrain, Decorations, and VIPRooms parts.
+	shadowDistance = 400, -- Decorative part distance before local CastShadow is disabled.
+	remoteTrailEnabled = true, -- Enables client-only quality budgeting for observed player trails.
+	remoteTrailUpdateInterval = 0.25, -- Seconds between observed remote trail quality passes.
+	remoteTrailMobileDistanceMultiplier = 0.65, -- Scales remote trail distances on Phone and Tablet clients.
+	remoteTrailFullDistance = 120, -- Nearby remote trails retain full effect quality.
+	remoteTrailDisableDistance = 360, -- Remote trails beyond this hard radius are disabled; mid-range trails are reduced.
+	remoteTrailReducedRateMultiplier = 0.5, -- Rate applied to mid-range remote trail emitters.
+	remoteTrailMaxVisiblePlayers = 6, -- Safety cap for active remote trail owners.
 }
 
 -- Client-owned tsunami visuals; server replicates state only, not moving geometry.
@@ -99,16 +125,32 @@ CoreConfig.promptBuy = {
 	minMinutes = 2,
 	maxMinutes = 5,
 	shortIntervalSelectionWeight = 2, -- Makes 2-3 minute rolls twice as likely as longer rolls.
-	displayDurationSeconds = 15,
+	displayDurationSeconds = 10,
 	temporaryBoostSelectionWeight = 4, -- Makes temporary boosts more likely in timed product prompts.
 	bloodmoonKartSelectionWeight = 3, -- Blood Moon karts are strongly biased during the event.
+	premiumPromptSelectionWeight = 1, -- Include Roblox Plus as a low-frequency random prompt offer.
 	studioAlwaysShow = false, -- Studio-only prompt test; live servers still use death/time triggers.
 	studioShowOwnedProducts = false, -- Studio-only preview: include already-owned permanent offers in the prompt.
-	visiblePosition = UDim2.new(0.873, 0, 0.874, 0),
-	hiddenPosition = UDim2.new(2, 0, 0.874, 0),
+	visiblePosition = UDim2.new(0.897, 0, 0.21, 0),
+	hiddenPosition = UDim2.new(2, 0, 0.21, 0),
+	premiumPrompt = {
+		productImage = "rbxassetid://106963890821116",
+		title = "ROBLOX PLUS",
+		description = "Get permanent 1.25x XP Speed and Wins multipliers with Roblox Plus.",
+	},
 	excludedDevProductKeys = {
 		ReturnToStage = true, -- Return-to-stage uses its own strict offer flow.
 		TrollPlayer = true, -- Requires a selected target from TrollFrame.
+		PetLuck2x = true, -- Cumulative luck tiers must only appear in the dedicated next-tier purchase flow.
+		PetLuck4x = true,
+		PetLuck6x = true,
+		PetLuck8x = true,
+		PetLuck10x = true,
+	},
+	-- Only Neon/Frostbite pet Lucky Block products require their event to be active; Blood Moon stays available.
+		gatedDevProductKeyPrefixes = {
+			PetNeonRushLuckyBlockRoll = "NeonRush",
+			PetFrostbiteRallyLuckyBlockRoll = "FrostbiteRally",
 	},
 	permanentDevProductKeys = {
 		GalaxyTrail = "Trail",

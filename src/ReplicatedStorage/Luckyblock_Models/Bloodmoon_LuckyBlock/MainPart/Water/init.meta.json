@@ -1,0 +1,32 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Brightness": 10,
+    "Color": [{
+        "color": [1.0, 0.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.0, 0.0],
+        "time": 1.0
+      }],
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.4, 0.8],
+    "LightEmission": -2,
+    "LockedToPart": true,
+    "Rate": 60,
+    "Rotation": [-360, 360],
+    "Size": [{
+        "envelope": 0.6431,
+        "time": 0.0,
+        "value": 1.2861
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 1.9292
+      }],
+    "Speed": [0.0013, 0.0013],
+    "Texture": "rbxassetid://15057892718",
+    "ZOffset": -0.3
+  }
+}

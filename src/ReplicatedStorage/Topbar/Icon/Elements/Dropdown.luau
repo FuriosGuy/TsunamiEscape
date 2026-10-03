@@ -1,6 +1,8 @@
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Themes = require(script.Parent.Parent.Features.Themes)
+local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 local PADDING = 0 -- used to be 8
 return function(icon)
 	
@@ -147,10 +149,9 @@ return function(icon)
 		if currentSpeedMultiplier and currentSpeedMultiplier == speedMultiplier and currentTweenInfo then
 			return currentTweenInfo
 		end
-		local newTweenInfo = TweenInfo.new(
+		local newTweenInfo = TweenConfig.WithDuration(
 			TweenDuration.Value * speedMultiplier,
-			Enum.EasingStyle.Exponential,
-			Enum.EasingDirection.Out
+			TweenConfig.DropdownOpen
 		)
 		currentTweenInfo = newTweenInfo
 		currentSpeedMultiplier = speedMultiplier
@@ -181,7 +182,7 @@ return function(icon)
 				openTween = nil
 			end)
 		else
-			local closeTweenInfo = TweenInfo.new(0)
+			local closeTweenInfo = TweenConfig.Instant
 			closeTween = TweenService:Create(dropdown, closeTweenInfo, {Size = UDim2.new(0, dropdown.Size.X.Offset, 0, 0)})
 			closeTween:Play()
 			closeTween.Completed:Connect(function()

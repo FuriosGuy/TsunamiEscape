@@ -1,0 +1,13 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-30.9586, 8.7596, 43.1729, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [230, 232, 239],
+    "Massless": true,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "Shape": "Cylinder",
+    "Size": [1.2154, 0.9115, 0.9115]
+  }
+}

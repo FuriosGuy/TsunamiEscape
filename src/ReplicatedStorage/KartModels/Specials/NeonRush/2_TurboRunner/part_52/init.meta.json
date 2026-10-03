@@ -1,0 +1,14 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-12.9148, 10.6377, 2.8054, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "Color": [82, 124, 174],
+    "InitialSize": [0.7829, 1.1722, 1.2698],
+    "Massless": true,
+    "Material": "Neon",
+    "MaterialVariant": "2022 Inlet",
+    "MeshContent": "rbxassetid://118713662209083",
+    "Size": [0.7829, 1.1722, 1.2698]
+  }
+}

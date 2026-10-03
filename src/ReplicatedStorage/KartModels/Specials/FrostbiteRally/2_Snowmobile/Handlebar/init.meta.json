@@ -1,0 +1,21 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "CFrame": [-24.1181, 11.037, -49.3086, 0.9995, -0.0315, 0, 0.0315, 0.9995, 0, 0, 0, 1],
+    "Color": [17, 17, 17],
+    "CustomPhysicalProperties": {
+      "acousticAbsorption": 1.0,
+      "density": 0.0001,
+      "elasticity": 0.0,
+      "elasticityWeight": 0.0,
+      "friction": 0.0,
+      "frictionWeight": 0.0
+    },
+    "EnableFluidForces": false,
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Inlet",
+    "Sandboxed": true,
+    "Size": [3.2525, 2.206, 0.8868],
+    "UsePartColor": true
+  }
+}

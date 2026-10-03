@@ -1,0 +1,34 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/2024-03-31_15-25-23_Snowflake4x4",
+  "properties": {
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [1.5, 1.5],
+    "LightEmission": 1,
+    "LightInfluence": 1,
+    "Rate": 10,
+    "Rotation": [-360, 360],
+    "RotSpeed": [15, 15],
+    "Size": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 1.3125
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "SpreadAngle": [360, 360],
+    "Texture": "rbxassetid://111395970734311",
+    "Transparency": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 0.75
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }]
+  }
+}

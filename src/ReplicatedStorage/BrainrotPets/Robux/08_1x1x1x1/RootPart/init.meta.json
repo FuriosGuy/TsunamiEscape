@@ -1,0 +1,12 @@
+{
+  "className": "Part",
+  "properties": {
+    "CFrame": [102.2032, 188.6874, 99.7029, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "CollisionGroup": "Brainrots",
+    "CollisionGroupId": -1,
+    "Massless": true,
+    "Size": [2, 2, 1],
+    "Tags": ["BrainrotSetup"],
+    "Transparency": 1
+  }
+}

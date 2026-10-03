@@ -1,11 +1,9 @@
---!strict
-
 local BadgeService = game:GetService("BadgeService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
-local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
+local CoreConfig = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("CoreConfig_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
 
 local BadgeAwardService = {}
 BadgeAwardService.__index = BadgeAwardService

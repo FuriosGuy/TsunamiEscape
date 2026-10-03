@@ -1,17 +1,21 @@
---!strict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
-local DebugModule = require(Modules:WaitForChild("DebugModule"))
-local SystemChatService = require(Modules:WaitForChild("SystemChatService"))
-local VerifyRewardCalculator = require(Modules:WaitForChild("VerifyRewardCalculator"))
-local FunnelAnalytics = require(Modules:WaitForChild("FunnelAnalytics"))
+local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local SystemChatService =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("SystemChatService_Server"))
+local VerifyRewardCalculator =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("VerifyRewardCalculator_Server"))
+local FunnelAnalytics =
+	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("FunnelAnalytics_Server"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local ConfigFolder = Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local ValidationService = require(script.Parent:WaitForChild("ValidationService"))
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
+local WorldSpawnService = require(SharedFolder:WaitForChild("WorldSpawnService_Server"))
 local EconomyAnalytics = require(script.Parent:WaitForChild("EconomyAnalytics"))
 
 local LevelingService = {}
@@ -87,9 +91,10 @@ local function startVerifyRewardFunnel(player: Player): string?
 		nextClaimCount = 0
 	end
 
-	local sessionId = FunnelAnalytics.OpenRecurringFunnel(player, VERIFY_REWARD_FUNNEL_NAME, "Verify Reward Requested", {
-		customField01 = tostring(nextClaimCount + 1),
-	})
+	local sessionId =
+		FunnelAnalytics.OpenRecurringFunnel(player, VERIFY_REWARD_FUNNEL_NAME, "Verify Reward Requested", {
+			customField01 = tostring(nextClaimCount + 1),
+		})
 	verifyRewardFunnelSessions[player] = sessionId or ""
 	return sessionId
 end
@@ -230,11 +235,10 @@ local function sendPlayerToWorld1Spawn(player: Player)
 		return
 	end
 
-	local worldsFolder = workspace:FindFirstChild("Worlds")
-	local world1 = worldsFolder and worldsFolder:FindFirstChild("World1")
-	local spawnLocation = world1 and world1:FindFirstChild("SpawnLocation")
-	if spawnLocation and spawnLocation:IsA("BasePart") then
+	local spawnLocation = WorldSpawnService.Get("World1")
+	if spawnLocation then
 		character:PivotTo(spawnLocation:GetPivot() * CFrame.new(0, 3, 0))
+		ValidationService.MarkServerTeleport(player)
 	end
 end
 
@@ -252,6 +256,9 @@ function LevelingService.OnMovementAction(player: Player)
 		return
 	end
 	if player:GetAttribute("Treadmill_Active") == true then
+		return
+	end
+	if not ValidationService.ValidateRewardEligibility(player, "MovementXP") then
 		return
 	end
 
@@ -280,17 +287,10 @@ function LevelingService.PerformRebirth(player: Player, isPurchase: boolean)
 		playRebirthConfetti(player)
 		SystemChatService.BroadcastLocalRebirth(player, rebirths)
 		if rebirthSessionId then
-			FunnelAnalytics.LogRecurringStep(
-				player,
-				REBIRTH_FUNNEL_NAME,
-				rebirthSessionId,
-				2,
-				"Rebirth Completed",
-				{
-					customField01 = tostring(rebirths),
-					customField02 = if isPurchase then "Purchased" else "Normal",
-				}
-			)
+			FunnelAnalytics.LogRecurringStep(player, REBIRTH_FUNNEL_NAME, rebirthSessionId, 2, "Rebirth Completed", {
+				customField01 = tostring(rebirths),
+				customField02 = if isPurchase then "Purchased" else "Normal",
+			})
 			rebirthFunnelSessions[player] = nil
 		end
 		DebugModule.debugInfo(
@@ -341,6 +341,11 @@ function LevelingService.OnVerifyRewardRequest(player: Player)
 		return
 	end
 
+	if not ValidationService.ValidateRewardEligibility(player, "VerifyReward") then
+		VerifyRewardResult:FireClient(player, false, getVerifyRewardNextClaimUnix(player))
+		return
+	end
+
 	if VERIFY_DEBUG_IGNORE_COOLDOWN_IN_STUDIO then
 		clearVerifyCooldownForStudioDebug(player)
 	else
@@ -371,7 +376,7 @@ function LevelingService.OnVerifyRewardRequest(player: Player)
 	end
 
 	local success, inGroup = pcall(function()
-		return player:IsInGroup(VERIFY_GROUP_ID)
+		return player:IsInGroupAsync(VERIFY_GROUP_ID)
 	end)
 
 	if not success or not inGroup then

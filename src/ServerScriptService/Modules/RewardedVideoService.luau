@@ -1,14 +1,12 @@
---!strict
-
 local AdService = game:GetService("AdService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local CoreConfig = require(Modules.Config.CoreConfig)
-local DebugModule = require(Modules.DebugModule)
+local CoreConfig = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("CoreConfig_Server"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
 local Maid = require(Modules.Maid)
-local ProductService = require(Modules.ProductService)
+local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
 local ReturnToStageService = require(script.Parent.ReturnToStageService)
 
 local RewardedVideoService = {}

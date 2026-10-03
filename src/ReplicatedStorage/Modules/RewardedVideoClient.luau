@@ -1,10 +1,9 @@
---!strict
-
 local AdService = game:GetService("AdService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
-local CoreConfig = require(ReplicatedStorage.Modules.Config.CoreConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
 
 local RewardedVideoClient = {}
 
@@ -23,14 +22,13 @@ export type ResultCallback = (
 ) -> ()
 
 local function getRemote(name: string): RemoteEvent
-
 	local remote = remotes:WaitForChild(name)
 	assert(remote:IsA("RemoteEvent"), string.format("%s must be a RemoteEvent", name))
 	return remote
 end
 
 function RewardedVideoClient.IsAvailable(): boolean
-	if not ENABLED then
+	if not ENABLED or RunService:IsStudio() then
 		return false
 	end
 
@@ -38,10 +36,7 @@ function RewardedVideoClient.IsAvailable(): boolean
 		return AdService:GetAdAvailabilityNowAsync(Enum.AdFormat.RewardedVideo)
 	end)
 	if not success or typeof(result) ~= "table" then
-		DebugModule.debugWarn(
-			"Rewarded video availability check failed: " .. tostring(result),
-			MODULE_NAME
-		)
+		DebugModule.debugWarn("Rewarded video availability check failed: " .. tostring(result), MODULE_NAME)
 		return false
 	end
 
@@ -54,10 +49,7 @@ function RewardedVideoClient.Request(placementName: string): boolean
 	end
 
 	if not RewardedVideoClient.IsAvailable() then
-		DebugModule.debugInfo(
-			"Rewarded video unavailable | placement=" .. placementName,
-			MODULE_NAME
-		)
+		DebugModule.debugInfo("Rewarded video unavailable | placement=" .. placementName, MODULE_NAME)
 		return false
 	end
 

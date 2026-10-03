@@ -1,12 +1,12 @@
---!strict
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
-local ConfigFolder = ReplicatedStorage.Modules:WaitForChild("Config")
-local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig"))
+local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local TsunamiTrajectory = require(ReplicatedStorage.Modules.TsunamiTrajectory)
+local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
+local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 
 local TsunamiSystem = {}
 
@@ -66,38 +66,20 @@ local tsunamiRollOrder = {
 
 local activeStates: { [Folder]: ActiveTsunamiState } = {}
 local disabledWorlds: { [string]: number } = {}
-local recoveryBatchTokens: { [string]: number } = {}
-local recoveryBatchKickoffThreads: { [string]: thread } = {}
-local recoveryBatchThreads: { [string]: thread } = {}
+local disableExpiryThreads: { [string]: thread } = {}
+local disableGenerations: { [string]: number } = {}
 local hitEvaluationConnection: RBXScriptConnection? = nil
 local hitEvaluationAccumulator = 0
 local nextWaveId = 0
+local recoverySerial = 0
 local tsunamiTemplatesFolder = ReplicatedStorage:WaitForChild("Tsunamis")
 local tsunamiSystemConfig = if CoreConfig.server and CoreConfig.server.tsunamiSystem
 	then CoreConfig.server.tsunamiSystem
 	else nil
-local MIN_RANDOM_PATH_DISTANCE = if tsunamiSystemConfig and typeof(tsunamiSystemConfig.minRandomPathDistance) == "number"
+local MIN_RANDOM_PATH_DISTANCE = if tsunamiSystemConfig
+		and typeof(tsunamiSystemConfig.minRandomPathDistance) == "number"
 	then math.max(0, tsunamiSystemConfig.minRandomPathDistance)
 	else 200
-local DISABLE_WAVES_RECOVERY_BATCH_COUNT = if tsunamiSystemConfig
-		and typeof(tsunamiSystemConfig.disableWavesRecoveryBatchCount) == "number"
-	then
-		math.max(1, math.floor(tsunamiSystemConfig.disableWavesRecoveryBatchCount))
-	else
-		20
-local DISABLE_WAVES_RECOVERY_BATCH_INTERVAL = if tsunamiSystemConfig
-		and typeof(tsunamiSystemConfig.disableWavesRecoveryBatchInterval) == "number"
-	then
-		math.max(0, tsunamiSystemConfig.disableWavesRecoveryBatchInterval)
-	else
-		5
-local DISABLE_WAVES_RECOVERY_TSUNAMIS = if tsunamiSystemConfig
-		and typeof(tsunamiSystemConfig.disableWavesRecoveryTsunamis) == "table"
-		and #tsunamiSystemConfig.disableWavesRecoveryTsunamis > 0
-	then
-		tsunamiSystemConfig.disableWavesRecoveryTsunamis
-	else
-		{ "Medium", "Fast", "Very Fast", "Extremely Fast" }
 local HIT_EVALUATION_INTERVAL = if tsunamiSystemConfig
 		and typeof(tsunamiSystemConfig.hitEvaluationInterval) == "number"
 	then math.clamp(tsunamiSystemConfig.hitEvaluationInterval, 0.025, 0.25)
@@ -238,9 +220,7 @@ end
 
 local function cleanupActiveState(state: Folder, reason: string)
 	local activeState = activeStates[state]
-	local elapsed = if activeState
-		then math.max(0, Workspace:GetServerTimeNow() - activeState.startServerTime)
-		else -1
+	local elapsed = if activeState then math.max(0, Workspace:GetServerTimeNow() - activeState.startServerTime) else -1
 	DebugModule.debugInfo(
 		string.format(
 			"Cleanup state | waveId=%s | reason=%s | elapsed=%.2fs | duration=%.2fs | parent=%s",
@@ -279,14 +259,8 @@ local function isPointInsideAxisAlignedBox(point: Vector3, halfExtents: Vector3)
 		and math.abs(point.Z) <= halfExtents.Z
 end
 
-local function isSegmentInsideAxisAlignedBox(
-	startPoint: Vector3,
-	endPoint: Vector3,
-	halfExtents: Vector3
-): boolean
-	if isPointInsideAxisAlignedBox(startPoint, halfExtents)
-		or isPointInsideAxisAlignedBox(endPoint, halfExtents)
-	then
+local function isSegmentInsideAxisAlignedBox(startPoint: Vector3, endPoint: Vector3, halfExtents: Vector3): boolean
+	if isPointInsideAxisAlignedBox(startPoint, halfExtents) or isPointInsideAxisAlignedBox(endPoint, halfExtents) then
 		return true
 	end
 
@@ -357,15 +331,25 @@ local function evaluateActiveStates()
 			continue
 		end
 
-		local elapsed = now - activeState.startServerTime
-		local hasExpired = elapsed >= activeState.duration
-		local sampleElapsed = math.clamp(elapsed, 0, activeState.duration)
-		local alpha = sampleElapsed / activeState.duration
-		local waveCFrame = activeState.startCFrame:Lerp(activeState.targetCFrame, alpha)
+		local waveCFrame, hasExpired = TsunamiTrajectory.Sample(
+			activeState.startCFrame,
+			activeState.targetCFrame,
+			activeState.startServerTime,
+			activeState.duration,
+			now
+		)
 		local previousWaveCFrame = activeState.previousWaveCFrame or waveCFrame
 		for _, player in ipairs(players) do
 			local humanoid, currentPosition = getLivingRootPosition(player)
 			if humanoid and currentPosition and player:GetAttribute("Current_World") == activeState.worldName then
+				local immunityUntil = player:GetAttribute("TsunamiImmunityUntil")
+				if typeof(immunityUntil) == "number" and immunityUntil > now then
+					activeState.previousPlayerPositions[player] = currentPosition
+					continue
+				elseif typeof(immunityUntil) == "number" and immunityUntil > 0 then
+					player:SetAttribute("TsunamiImmunityUntil", 0)
+				end
+
 				local currentLocalPosition = waveCFrame:PointToObjectSpace(currentPosition)
 				local previousPosition = activeState.previousPlayerPositions[player] or currentPosition
 				local previousLocalPosition = previousWaveCFrame:PointToObjectSpace(previousPosition)
@@ -484,119 +468,79 @@ function TsunamiSystem.IsWorldDisabled(worldName: string): boolean
 	end
 
 	if os.clock() >= disabledUntil then
-		disabledWorlds[worldName] = nil
-		return false
+		-- Keep expired disable state until recovery consumes it. This prevents
+		-- the normal scheduler from racing the immediate recovery wave.
+		return true
 	end
 
 	return true
 end
 
-local function cancelRecoveryBatchKickoffThread(worldName: string)
-	local kickoffThread = recoveryBatchKickoffThreads[worldName]
-	if kickoffThread then
-		if coroutine.status(kickoffThread) ~= "dead" then
-			task.cancel(kickoffThread)
-		end
-		recoveryBatchKickoffThreads[worldName] = nil
+function TsunamiSystem.SpawnRecoveryTsunami(worldName: string): Folder?
+	local disabledUntil = disabledWorlds[worldName]
+	if not disabledUntil or os.clock() < disabledUntil then
+		return nil
 	end
+
+	disabledWorlds[worldName] = nil
+	disableExpiryThreads[worldName] = nil
+	disableGenerations[worldName] = nil
+	recoverySerial += 1
+
+	local world = getWorld(worldName)
+	local canSpawn = world ~= nil and (worldName ~= "Minigame" or world:GetAttribute("RaceState") == "Racing")
+	if not canSpawn then
+		return nil
+	end
+
+	return TsunamiSystem.SpawnCycleForWorld(worldName)
 end
 
-local function cancelRecoveryBatchThread(worldName: string)
-	local batchThread = recoveryBatchThreads[worldName]
-	if batchThread then
-		if coroutine.status(batchThread) ~= "dead" then
-			task.cancel(batchThread)
-		end
-		recoveryBatchThreads[worldName] = nil
-	end
+function TsunamiSystem.GetRecoverySerial(): number
+	return recoverySerial
 end
 
 function TsunamiSystem.DisableWorldTsunamis(worldName: string, duration: number)
 	local durationSeconds = math.max(0, duration)
-	recoveryBatchTokens[worldName] = (recoveryBatchTokens[worldName] or 0) + 1
-	local disableToken = recoveryBatchTokens[worldName]
+	local previousExpiryThread = disableExpiryThreads[worldName]
+	if previousExpiryThread then
+		pcall(task.cancel, previousExpiryThread)
+		disableExpiryThreads[worldName] = nil
+	end
 
-	cancelRecoveryBatchKickoffThread(worldName)
-	cancelRecoveryBatchThread(worldName)
+	local generation = (disableGenerations[worldName] or 0) + 1
+	disableGenerations[worldName] = generation
+	local disabledUntil = os.clock() + durationSeconds
+	disabledWorlds[worldName] = disabledUntil
 
-	disabledWorlds[worldName] = os.clock() + durationSeconds
 	DebugModule.debugPrint(
 		string.format("Disabled tsunami spawning in %s for %.1f seconds", worldName, duration),
 		"TsunamiSystem"
 	)
 
-	if DISABLE_WAVES_RECOVERY_BATCH_COUNT <= 0 then
-		return
-	end
-
 	if durationSeconds <= 0 then
-		TsunamiSystem.StartDisableWavesRecoveryBatch(worldName)
-		return
-	end
-
-	recoveryBatchKickoffThreads[worldName] = task.spawn(function()
-		task.wait(durationSeconds)
-		recoveryBatchKickoffThreads[worldName] = nil
-
-		if recoveryBatchTokens[worldName] ~= disableToken then
-			return
-		end
-
-		TsunamiSystem.StartDisableWavesRecoveryBatch(worldName)
-	end)
-end
-
-function TsunamiSystem.StartDisableWavesRecoveryBatch(worldName: string, count: number?, interval: number?)
-	local batchCount = math.max(0, math.floor(count or DISABLE_WAVES_RECOVERY_BATCH_COUNT))
-	local batchInterval = math.max(0, interval or DISABLE_WAVES_RECOVERY_BATCH_INTERVAL)
-	if batchCount <= 0 then
-		return
-	end
-
-	local token = (recoveryBatchTokens[worldName] or 0) + 1
-	recoveryBatchTokens[worldName] = token
-	disabledWorlds[worldName] = os.clock() + (batchCount * batchInterval) + 0.25
-
-	cancelRecoveryBatchKickoffThread(worldName)
-	cancelRecoveryBatchThread(worldName)
-
-	recoveryBatchThreads[worldName] = task.spawn(function()
-		for spawnIndex = 1, batchCount do
-			if recoveryBatchTokens[worldName] ~= token then
-				if recoveryBatchThreads[worldName] == coroutine.running() then
-					recoveryBatchThreads[worldName] = nil
-				end
-				return
-			end
-
-			local tsunamiName = DISABLE_WAVES_RECOVERY_TSUNAMIS[math.random(1, #DISABLE_WAVES_RECOVERY_TSUNAMIS)]
-			TsunamiSystem.SpawnTsunami(worldName, tsunamiName)
-
-			if spawnIndex < batchCount then
-				task.wait(batchInterval)
-			end
-		end
-
-		if recoveryBatchTokens[worldName] ~= token then
-			if recoveryBatchThreads[worldName] == coroutine.running() then
-				recoveryBatchThreads[worldName] = nil
-			end
-			return
-		end
-
-		recoveryBatchTokens[worldName] = nil
 		disabledWorlds[worldName] = nil
-		if recoveryBatchThreads[worldName] == coroutine.running() then
-			recoveryBatchThreads[worldName] = nil
+		disableGenerations[worldName] = nil
+		return
+	end
+
+	disableExpiryThreads[worldName] = task.delay(durationSeconds, function()
+		if disableGenerations[worldName] ~= generation then
+			return
 		end
-		DebugModule.debugPrint(
-			string.format(
-				"Disable waves recovery batch finished in %s after %d spawns",
-				worldName,
-				batchCount
-			),
-			"TsunamiSystem"
-		)
+
+		local currentDisabledUntil = disabledWorlds[worldName]
+		if currentDisabledUntil ~= disabledUntil then
+			return
+		end
+
+		local recoveryWave = TsunamiSystem.SpawnRecoveryTsunami(worldName)
+		if recoveryWave then
+			DebugModule.debugPrint(
+				"Spawned recovery tsunami after disable-waves cooldown | world=" .. worldName,
+				"TsunamiSystem"
+			)
+		end
 	end)
 end
 
@@ -629,13 +573,6 @@ function TsunamiSystem.ClearWorldTsunamis(worldName: string)
 end
 
 function TsunamiSystem.Destroy()
-	for worldName in pairs(recoveryBatchKickoffThreads) do
-		cancelRecoveryBatchKickoffThread(worldName)
-	end
-	for worldName in pairs(recoveryBatchThreads) do
-		cancelRecoveryBatchThread(worldName)
-	end
-
 	stopHitEvaluator()
 	for state in pairs(activeStates) do
 		cleanupActiveState(state, "system.destroy")
@@ -643,9 +580,12 @@ function TsunamiSystem.Destroy()
 
 	table.clear(activeStates)
 	table.clear(disabledWorlds)
-	table.clear(recoveryBatchTokens)
-	table.clear(recoveryBatchKickoffThreads)
-	table.clear(recoveryBatchThreads)
+	recoverySerial = 0
+	for worldName, expiryThread in pairs(disableExpiryThreads) do
+		pcall(task.cancel, expiryThread)
+		disableExpiryThreads[worldName] = nil
+		disableGenerations[worldName] = nil
+	end
 	DebugModule.debugPrint("TsunamiSystem destroyed active runtime state", "TsunamiSystem")
 end
 
@@ -734,10 +674,8 @@ function TsunamiSystem.SpawnTsunami(
 	end
 
 	local direction = pathVector.Unit
-	local startPivot = CFrame.lookAt(startPosition, startPosition + direction)
-		* CFrame.Angles(0, math.rad(-90), 0)
-	local targetPivot = CFrame.lookAt(endPosition, endPosition + direction)
-		* CFrame.Angles(0, math.rad(-90), 0)
+	local startPivot = CFrame.lookAt(startPosition, startPosition + direction) * CFrame.Angles(0, math.rad(-90), 0)
+	local targetPivot = CFrame.lookAt(endPosition, endPosition + direction) * CFrame.Angles(0, math.rad(-90), 0)
 	local pivotToPartOffset = template:GetPivot():ToObjectSpace(template.CFrame)
 	local startPartCFrame = startPivot * pivotToPartOffset
 	local targetPartCFrame = targetPivot * pivotToPartOffset

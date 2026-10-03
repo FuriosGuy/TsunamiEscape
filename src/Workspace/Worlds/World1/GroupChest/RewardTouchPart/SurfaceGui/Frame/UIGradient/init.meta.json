@@ -4,13 +4,13 @@
     "Offset": [0, 0.1],
     "Rotation": 90,
     "Transparency": [{
+        "envelope": 0.0,
         "time": 0.0,
-        "value": 1.0,
-        "envelope": 0.0
+        "value": 1.0
       }, {
+        "envelope": 0.0,
         "time": 1.0,
-        "value": 0.5,
-        "envelope": 0.0
+        "value": 0.5
       }]
   }
 }

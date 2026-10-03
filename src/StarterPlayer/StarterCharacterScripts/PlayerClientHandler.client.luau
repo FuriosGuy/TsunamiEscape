@@ -1,4 +1,3 @@
---!strict
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -10,15 +9,20 @@ local UserInputService = game:GetService("UserInputService")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
-local PlayerHandler = require(ReplicatedStorage.Modules.PlayerHandler)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
+local ClientDeviceProfile = require(ReplicatedStorage.Modules.ClientDeviceProfile)
+local PlayerHandler = require(ReplicatedStorage.Modules.Shared:WaitForChild("PlayerHandler_Client"))
 local MainFunctions = require(ReplicatedStorage.Modules.UI.MainFunctions)
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
+local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
 
 local player = Players.LocalPlayer
 local character = script.Parent
 local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 local camera = Workspace.CurrentCamera
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local KartVisualResync = Remotes:WaitForChild("KartVisualResync") :: RemoteEvent
 local PLAYER_CLIENT_HANDLER_SINGLETON_KEY = "SpeedBrainrotPlayerClientHandlerState"
 
 type PlayerClientHandlerSingletonState = {
@@ -39,73 +43,100 @@ local handlerToken = string.format("%s:%d", tostring(os.clock()), math.random(1,
 local previousHandlerCleanup = singletonState.cleanup
 singletonState.ownerToken = handlerToken
 
-local KART_CANT_AFFORD_COLOR = Color3.fromRGB(117, 0, 0)
-local KART_AVAILABLE_COLOR = Color3.fromRGB(213, 115, 61)
-local KART_EQUIPPED_COLOR = Color3.fromRGB(0, 255, 0)
-local DEFAULT_FOV = if camera then camera.FieldOfView else 70
-local TREADMILL_FOV = 100
-local SPEED_FOV_MAX = 95
-local FOV_TWEEN_TIME = 0.2
-local MUSIC_FADE_TIME = 0.35
-local LOBBY_MUSIC_VOLUME = 0.3
-local RECOVERY_FORCE_UPRIGHT_WINDOW = 0.35
-local POLICE_LIGHT_PHASE_DURATION = 0.25
-local POLICE_SPOTLIGHT_STROBE_CYCLE = 0.35
-local POLICE_SPOTLIGHT_ON_DURATION = 0.25
-local KART_ENGINE_REFERENCE_SPEED = 120
-local CLIENT_KART_ENGINE_SOUND_NAME = "ClientKartEngineLocal"
-local CLIENT_KART_SMOKE_NAME_PREFIX = "ClientKartSmoke_"
-local TREADMILL_TEXTURE_SCROLL_SPEED = 16
-local TREADMILL_TEXTURE_UPDATE_INTERVAL = 1 / 60
-local TREADMILL_TEXTURE_NEAR_DISTANCE = 90
-local TREADMILL_TEXTURE_FAR_DISTANCE = 180
-local TREADMILL_TEXTURE_PAUSE_DISTANCE = 260
-local TREADMILL_TEXTURE_FAR_UPDATE_INTERVAL = 1 / 30
-local TREADMILL_HIGHLIGHT_UPDATE_INTERVAL = 0.1
-local TREADMILL_HIGHLIGHT_MAX_DISTANCE = 25
-local TREADMILL_HIGHLIGHT_FILL_COLOR = Color3.fromRGB(0, 0, 0)
-local TREADMILL_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
-local TRAIL_VISUAL_UPDATE_INTERVAL = 0.1
-local WORLD_MUSIC_UPDATE_INTERVAL = 0.3
-local KART_VISUAL_FRAMELOCK_INTERVAL = 1 / 60
-local KART_SHOWCASE_FRAMELOCK_INTERVAL = 1 / 30
-local REMOTE_KART_WHEEL_UPDATE_INTERVAL = 1 / 30
-local FOV_UPDATE_INTERVAL = 1 / 30
-local KART_VISUAL_HOLDER_NAME = "EquippedKarts"
-local KART_SHOWCASE_MODEL_NAME = "KartShowcaseModel"
-local EQUIPPED_KART_MODEL_NAME = "EquippedKart"
-local CLIENT_TRAIL_ATTACHMENT0_NAME = "ClientTrailAttachment0"
-local CLIENT_TRAIL_ATTACHMENT1_NAME = "ClientTrailAttachment1"
-local CLIENT_TRAIL_VISUAL_PREFIX = "ClientTrailVisual_"
-local TRAIL_VISUAL_MISSING_GRACE = 2
-local POLICE_BLUE_COLOR = Color3.fromRGB(9, 137, 207)
-local POLICE_RED_COLOR = Color3.fromRGB(196, 40, 28)
-local KART_VISUAL_NEAR_DISTANCE = 512
-local KART_VISUAL_FAR_DISTANCE = 1024
-local KART_VISUAL_MID_INTERVAL = 0.08
-local KART_VISUAL_FAR_INTERVAL = 0.2
-local KART_VISUAL_OFFSCREEN_INTERVAL = 0.35
-local KART_STATE_REFRESH_INTERVAL = 0.2
-local KART_STATE_REFRESH_MID_INTERVAL = 0.5
-local KART_STATE_REFRESH_FAR_INTERVAL = 1.0
-local KART_CAMERA_BUCKET_REFRESH_INTERVAL = 0.2
-local REMOTE_KART_IDLE_EFFECT_INTERVAL = 0.35
-local KART_SHOWCASE_NEAR_DISTANCE = 256
-local KART_SHOWCASE_FAR_DISTANCE = 384
-local KART_SHOWCASE_PAUSE_DISTANCE = 512
-local KART_SHOWCASE_FULL_RATE_DISTANCE = 64
-local KART_SHOWCASE_TARGET_FPS_FULL = 60
-local KART_SHOWCASE_TARGET_FPS_NEAR = 30
-local KART_SHOWCASE_TARGET_FPS_FAR = 15
-local KART_SHOWCASE_TARGET_FPS_VERY_FAR = 10
-local FREECAM_BLOCK_ACTION = "SB_BlockRobloxFreecamToggle"
+local CLIENT_HANDLER_CONFIG = table.freeze({
+	DEFAULT_FOV = if camera then camera.FieldOfView else 70,
+	TREADMILL_FOV = 100,
+	SPEED_FOV_MAX = 95,
+	FOV_TWEEN_TIME = 0.2,
+	MUSIC_FADE_TIME = 0.35,
+	LOBBY_MUSIC_VOLUME = 0.3,
+	RECOVERY_FORCE_UPRIGHT_WINDOW = 0.35,
+	KART_SHOWCASE_BOB_AMPLITUDE = 1,
+	POLICE_LIGHT_PHASE_DURATION = 0.25,
+	POLICE_SPOTLIGHT_STROBE_CYCLE = 0.35,
+	POLICE_SPOTLIGHT_ON_DURATION = 0.25,
+	KART_ENGINE_REFERENCE_SPEED = 120,
+	LOCAL_KART_SOUND_MISSING_GRACE = 0.75,
+	CLIENT_KART_ENGINE_SOUND_NAME = "ClientKartEngineLocal",
+	CLIENT_KART_SMOKE_NAME_PREFIX = "ClientKartSmoke_",
+	TREADMILL_TEXTURE_SCROLL_SPEED = 16,
+	TREADMILL_TEXTURE_UPDATE_INTERVAL = 1 / 60,
+	TREADMILL_TEXTURE_NEAR_DISTANCE = 90,
+	TREADMILL_TEXTURE_FAR_DISTANCE = 180,
+	TREADMILL_TEXTURE_PAUSE_DISTANCE = 260,
+	TREADMILL_TEXTURE_FAR_UPDATE_INTERVAL = 1 / 30,
+	TREADMILL_HIGHLIGHT_UPDATE_INTERVAL = 0.1,
+	TREADMILL_HIGHLIGHT_MAX_DISTANCE = 25,
+	TREADMILL_HIGHLIGHT_FILL_COLOR = Color3.fromRGB(0, 0, 0),
+	TREADMILL_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 255, 255),
+	WORLD_MUSIC_UPDATE_INTERVAL = 0.3,
+	KART_VISUAL_FRAMELOCK_INTERVAL = 1 / 60,
+	KART_SHOWCASE_FRAMELOCK_INTERVAL = 1 / 30,
+	REMOTE_KART_WHEEL_UPDATE_INTERVAL = 1 / 30,
+	FOV_UPDATE_INTERVAL = 1 / 30,
+	KART_VISUAL_HOLDER_NAME = "EquippedKarts",
+	SHOWCASE_MODEL_CONFIG = table.freeze({
+		kartModelName = "KartShowcaseModel",
+		luckyBlockFolderName = "LuckyBlocks",
+		luckyBlockRotationDuration = 15,
+		luckyBlockModelNames = table.freeze({
+			Tier1_LuckyBlock = true,
+			Tier2_LuckyBlock = true,
+			Tier3_LuckyBlock = true,
+			Bloodmoon_LuckyBlock = true,
+			Robux_LuckyBlock = true,
+			Neon_LuckyBlock = true,
+			Frostbite_LuckyBlock = true,
+		}),
+	}),
+	EQUIPPED_KART_MODEL_NAME = "EquippedKart",
+	CLIENT_TRAIL_ATTACHMENT0_NAME = "ClientTrailAttachment0",
+	CLIENT_TRAIL_ATTACHMENT1_NAME = "ClientTrailAttachment1",
+	CLIENT_TRAIL_VISUAL_PREFIX = "ClientTrailVisual_",
+	TRAIL_VISUAL_MISSING_GRACE = 2,
+	POLICE_BLUE_COLOR = Color3.fromRGB(9, 137, 207),
+	POLICE_RED_COLOR = Color3.fromRGB(196, 40, 28),
+	KART_VISUAL_NEAR_DISTANCE = 512,
+	KART_VISUAL_FAR_DISTANCE = 1024,
+	KART_VISUAL_MID_INTERVAL = 0.08,
+	KART_VISUAL_FAR_INTERVAL = 0.2,
+	KART_VISUAL_OFFSCREEN_INTERVAL = 0.35,
+	KART_STATE_REFRESH_INTERVAL = 0.2,
+	KART_STATE_REFRESH_MID_INTERVAL = 0.5,
+	KART_STATE_REFRESH_FAR_INTERVAL = 1.0,
+	KART_CAMERA_BUCKET_REFRESH_INTERVAL = 0.2,
+	REMOTE_KART_IDLE_EFFECT_INTERVAL = 0.35,
+	KART_CLIENT_VISUAL_HEALTH_INTERVAL = 0.25,
+	KART_CLIENT_VISUAL_MISSING_GRACE = 0.5,
+	KART_CLIENT_VISUAL_RESYNC_COOLDOWN = 5,
+	KART_SHOWCASE_NEAR_DISTANCE = 256,
+	KART_SHOWCASE_FAR_DISTANCE = 384,
+	KART_SHOWCASE_PAUSE_DISTANCE = 512,
+	KART_SHOWCASE_FULL_RATE_DISTANCE = 64,
+	KART_SHOWCASE_TARGET_FPS_FULL = 60,
+	KART_SHOWCASE_TARGET_FPS_NEAR = 30,
+	KART_SHOWCASE_TARGET_FPS_FAR = 15,
+	KART_SHOWCASE_TARGET_FPS_VERY_FAR = 10,
+	FREECAM_BLOCK_ACTION = "SB_BlockRobloxFreecamToggle",
+})
 
 type VisualDistanceBucket = "near" | "mid" | "far" | "offscreen"
+
+type ShowcasePartState = {
+	part: BasePart,
+	relativeCFrame: CFrame,
+}
 
 type ShowcaseVisualState = {
 	model: Model,
 	basePivot: CFrame,
 	visualOffset: number,
+	rotationDuration: number,
+	parts: { ShowcasePartState },
+	trackedParts: { [BasePart]: boolean },
+	usePartCFrameAnimation: boolean,
+	descendantAddedConnection: RBXScriptConnection?,
+	descendantRemovingConnection: RBXScriptConnection?,
 	visualUpdateAccumulator: number,
 	cameraBucket: VisualDistanceBucket?,
 	cameraBucketDistance: number?,
@@ -159,9 +190,28 @@ type ObservedTrailVisualState = {
 	attachment1: Attachment?,
 	trails: { Trail },
 	emitters: { ParticleEmitter },
+	emitterRates: { [ParticleEmitter]: number },
 	emitterSpeeds: { [ParticleEmitter]: NumberRange },
 	lastMoving: boolean?,
 	missingUntil: number?,
+	quality: "full" | "reduced" | "disabled"?,
+}
+
+type RemoteTrailQuality = "full" | "reduced" | "disabled"
+
+type RemoteTrailBudgetConfig = {
+	enabled: boolean,
+	updateInterval: number,
+	mobileDistanceMultiplier: number,
+	fullDistance: number,
+	disableDistance: number,
+	reducedRateMultiplier: number,
+	maxVisiblePlayers: number,
+}
+
+type RemoteTrailCandidate = {
+	state: ObservedTrailVisualState,
+	distance: number,
 }
 
 type TreadmillTextureVisualState = {
@@ -176,6 +226,8 @@ local recoveryUntil = 0
 local registeredRainbowGradients: { [UIGradient]: boolean } = {}
 local observedKartShowcases: { [Model]: ShowcaseVisualState } = {}
 local observedEquippedKarts: { [Model]: EquippedKartVisualState } = {}
+local localKartEngineSound: Sound? = nil
+local localKartEngineSoundLastSeenAt: number? = nil
 local observedTrailVisuals: { [Player]: ObservedTrailVisualState } = {}
 local observedTreadmillTextures: { [Texture]: TreadmillTextureVisualState } = {}
 local observedTreadmillTouchParts: { [BasePart]: Instance } = {}
@@ -186,16 +238,19 @@ local trailVisualUpdateAccumulator = 0
 local worldMusicUpdateAccumulator = 0
 local kartVisualFrameAccumulator = 0
 local kartShowcaseFrameAccumulator = 0
+local kartVisualHealthAccumulator = 0
 local treadmillTextureUpdateAccumulator = 0
 local cachedCharacterRootPart: BasePart? = nil
 local fovUpdateAccumulator = 0
+local localKartVisualMissingSince: number? = nil
+local lastKartVisualResyncAt = 0
 local lobbyMusicSound = RobloxSoundService:FindFirstChild("LobbyMusic") :: Sound?
 if not lobbyMusicSound then
 	lobbyMusicSound = Instance.new("Sound")
 	lobbyMusicSound.Name = "LobbyMusic"
 	lobbyMusicSound.Parent = RobloxSoundService
 end
-lobbyMusicSound.Volume = LOBBY_MUSIC_VOLUME
+lobbyMusicSound.Volume = CLIENT_HANDLER_CONFIG.LOBBY_MUSIC_VOLUME
 lobbyMusicSound.PlaybackSpeed = 1
 lobbyMusicSound.Looped = false
 local currentMusicPlaylistKey: string? = nil
@@ -303,7 +358,7 @@ local function logKartRespawnProbe(reason: string)
 				equippedKartCount += 1
 			end
 		elseif descendant:IsA("Motor6D") and string.match(descendant.Name, "_Motor$") then
-			local equippedKartModel = descendant:FindFirstAncestor(EQUIPPED_KART_MODEL_NAME)
+			local equippedKartModel = descendant:FindFirstAncestor(CLIENT_HANDLER_CONFIG.EQUIPPED_KART_MODEL_NAME)
 			if equippedKartModel and equippedKartModel:IsA("Model") then
 				local ownerUserId = equippedKartModel:GetAttribute("OwnerUserId")
 				if typeof(ownerUserId) == "number" and ownerUserId == player.UserId then
@@ -311,7 +366,7 @@ local function logKartRespawnProbe(reason: string)
 					table.insert(motorNames, descendant.Name)
 				end
 			end
-		elseif descendant:IsA("Sound") and descendant.Name == CLIENT_KART_ENGINE_SOUND_NAME then
+		elseif descendant:IsA("Sound") and descendant.Name == CLIENT_HANDLER_CONFIG.CLIENT_KART_ENGINE_SOUND_NAME then
 			local equippedKartModel = descendant:FindFirstAncestor("EquippedKart")
 			local ownerUserId = equippedKartModel and equippedKartModel:GetAttribute("OwnerUserId")
 			if typeof(ownerUserId) == "number" and ownerUserId == player.UserId then
@@ -393,7 +448,7 @@ end
 
 local function destroyClientKartSmokeEmitters(rootPart: BasePart)
 	for _, child in ipairs(rootPart:GetChildren()) do
-		if child:IsA("ParticleEmitter") and string.find(child.Name, CLIENT_KART_SMOKE_NAME_PREFIX, 1, true) == 1 then
+		if child:IsA("ParticleEmitter") and string.find(child.Name, CLIENT_HANDLER_CONFIG.CLIENT_KART_SMOKE_NAME_PREFIX, 1, true) == 1 then
 			child:Destroy()
 		end
 	end
@@ -418,7 +473,7 @@ local function createClientKartSmokeEmitters(
 		if descendant:IsA("ParticleEmitter") then
 			emitterIndex += 1
 			local clone = descendant:Clone()
-			clone.Name = CLIENT_KART_SMOKE_NAME_PREFIX .. tostring(emitterIndex)
+			clone.Name = CLIENT_HANDLER_CONFIG.CLIENT_KART_SMOKE_NAME_PREFIX .. tostring(emitterIndex)
 			clone.Enabled = false
 			clone.Parent = rootPart
 			table.insert(smokeEmitters, clone)
@@ -429,35 +484,34 @@ local function createClientKartSmokeEmitters(
 	return smokeEmitters, emitterSpeeds
 end
 
-local function createOrUpdateClientKartEngineSound(parent: BasePart, soundIdValue: string): Sound?
-	local existing = parent:FindFirstChild(CLIENT_KART_ENGINE_SOUND_NAME)
+local function createOrUpdateClientKartEngineSound(parent: Instance, soundIdValue: string): Sound?
+	local existing = parent:FindFirstChild(CLIENT_HANDLER_CONFIG.CLIENT_KART_ENGINE_SOUND_NAME)
 	local sound = if existing and existing:IsA("Sound") then existing else nil
 	if not sound then
-		sound = Instance.new("Sound")
-		sound.Name = CLIENT_KART_ENGINE_SOUND_NAME
-		sound.Parent = parent
+		sound = SoundService.CreateSound(parent, "KartEngine", {
+			SoundId = normalizeSoundId(soundIdValue),
+		})
+		if not sound then
+			return nil
+		end
+		sound.Name = CLIENT_HANDLER_CONFIG.CLIENT_KART_ENGINE_SOUND_NAME
 	end
 
-	local kartEngineConfig = (SoundService.Sounds :: any).KartEngine
-	if not kartEngineConfig then
-		return sound
+	local soundTemplateFolder = ReplicatedStorage:FindFirstChild("Sounds")
+	local soundTemplate = soundTemplateFolder and soundTemplateFolder:FindFirstChild("KartEngine")
+	if soundTemplate and soundTemplate:IsA("Sound") then
+		sound.Volume = soundTemplate.Volume
+		sound.Looped = soundTemplate.Looped
+		sound.PlaybackSpeed = soundTemplate.PlaybackSpeed
+		sound.RollOffMode = soundTemplate.RollOffMode
+		sound.RollOffMinDistance = soundTemplate.RollOffMinDistance
+		sound.RollOffMaxDistance = soundTemplate.RollOffMaxDistance
 	end
 
-	sound.SoundId = normalizeSoundId(soundIdValue)
-	sound.Volume = kartEngineConfig.Volume or 1
-	sound.PlaybackSpeed = kartEngineConfig.PlaybackSpeed or kartEngineConfig.Pitch or 1
-	sound.Looped = kartEngineConfig.Looped == true
-
-	if kartEngineConfig.RollOffMode then
-		sound.RollOffMode = kartEngineConfig.RollOffMode
-	end
-
-	if kartEngineConfig.RollOffMinDistance then
-		sound.RollOffMinDistance = kartEngineConfig.RollOffMinDistance
-	end
-
-	if kartEngineConfig.RollOffMaxDistance then
-		sound.RollOffMaxDistance = kartEngineConfig.RollOffMaxDistance
+	local normalizedSoundId = normalizeSoundId(soundIdValue)
+	if sound.SoundId ~= normalizedSoundId then
+		sound:Stop()
+		sound.SoundId = normalizedSoundId
 	end
 
 	if not sound.IsPlaying then
@@ -474,22 +528,22 @@ local function applyPoliceKartVisuals(
 	spotlightLensL: BasePart?,
 	spotlightLensR: BasePart?
 )
-	local alternatePhase = math.floor(phaseTime / POLICE_LIGHT_PHASE_DURATION) % 2
+	local alternatePhase = math.floor(phaseTime / CLIENT_HANDLER_CONFIG.POLICE_LIGHT_PHASE_DURATION) % 2
 	local blueOn = alternatePhase == 0
 	local redOn = not blueOn
 
 	if lightBarBlue then
-		lightBarBlue.Color = if blueOn then POLICE_BLUE_COLOR else POLICE_RED_COLOR
+		lightBarBlue.Color = if blueOn then CLIENT_HANDLER_CONFIG.POLICE_BLUE_COLOR else CLIENT_HANDLER_CONFIG.POLICE_RED_COLOR
 		lightBarBlue.Transparency = 0
 	end
 
 	if lightBarRed then
-		lightBarRed.Color = if redOn then POLICE_BLUE_COLOR else POLICE_RED_COLOR
+		lightBarRed.Color = if redOn then CLIENT_HANDLER_CONFIG.POLICE_BLUE_COLOR else CLIENT_HANDLER_CONFIG.POLICE_RED_COLOR
 		lightBarRed.Transparency = 0
 	end
 
-	local strobeCycle = phaseTime % POLICE_SPOTLIGHT_STROBE_CYCLE
-	local spotlightOn = strobeCycle < POLICE_SPOTLIGHT_ON_DURATION
+	local strobeCycle = phaseTime % CLIENT_HANDLER_CONFIG.POLICE_SPOTLIGHT_STROBE_CYCLE
+	local spotlightOn = strobeCycle < CLIENT_HANDLER_CONFIG.POLICE_SPOTLIGHT_ON_DURATION
 
 	if spotlightLensL then
 		spotlightLensL.Transparency = if spotlightOn then 0 else 1
@@ -552,7 +606,7 @@ local function registerTreadmillTexture(instance: Instance)
 	end
 
 	observedTreadmillTextures[instance] = {
-		scrollSpeed = TREADMILL_TEXTURE_SCROLL_SPEED,
+		scrollSpeed = CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_SCROLL_SPEED,
 		updateAccumulator = 0,
 		worldPosition = movementPart.Position,
 	}
@@ -593,9 +647,9 @@ local function setActiveTreadmillHighlightAdornee(adornee: Instance?)
 		local highlight = Instance.new("Highlight")
 		highlight.Name = "ClientActiveTreadmillHighlight"
 		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
-		highlight.FillColor = TREADMILL_HIGHLIGHT_FILL_COLOR
+		highlight.FillColor = CLIENT_HANDLER_CONFIG.TREADMILL_HIGHLIGHT_FILL_COLOR
 		highlight.FillTransparency = 1
-		highlight.OutlineColor = TREADMILL_HIGHLIGHT_OUTLINE_COLOR
+		highlight.OutlineColor = CLIENT_HANDLER_CONFIG.TREADMILL_HIGHLIGHT_OUTLINE_COLOR
 		highlight.OutlineTransparency = 0
 		highlight.Enabled = false
 		highlight.Parent = Workspace
@@ -652,7 +706,7 @@ local function getCurrentTreadmillHighlightAdornee(): Instance?
 		end
 
 		local distance = distanceFromPointToPartBounds(touchPart, rootPart.Position)
-		if distance <= TREADMILL_HIGHLIGHT_MAX_DISTANCE and distance < closestDistance then
+		if distance <= CLIENT_HANDLER_CONFIG.TREADMILL_HIGHLIGHT_MAX_DISTANCE and distance < closestDistance then
 			closestDistance = distance
 			closestAdornee = adornee
 		end
@@ -663,7 +717,7 @@ end
 
 local function updateTreadmillHighlight(dt: number)
 	treadmillHighlightUpdateAccumulator += dt
-	if treadmillHighlightUpdateAccumulator < TREADMILL_HIGHLIGHT_UPDATE_INTERVAL then
+	if treadmillHighlightUpdateAccumulator < CLIENT_HANDLER_CONFIG.TREADMILL_HIGHLIGHT_UPDATE_INTERVAL then
 		return
 	end
 
@@ -687,14 +741,14 @@ local function onBlockRobloxFreecamAction(
 	local shiftHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
 		or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
 	if shiftHeld then
-		return Enum.ContextActionResult.Sink
+		return Enum.ContextActionResult.Pass
 	end
 
-	return Enum.ContextActionResult.Pass
+	return Enum.ContextActionResult.Sink
 end
 
 local function cleanupObservedEquippedKart(state: EquippedKartVisualState)
-	if state.engineSound and state.engineSound.Parent then
+	if state.engineSound and state.engineSound ~= localKartEngineSound and state.engineSound.Parent then
 		state.engineSound:Destroy()
 	end
 
@@ -756,6 +810,75 @@ local function cleanupObservedTrailPlayerBindings(playerToCleanup: Player)
 	observedTrailPlayerMaids[playerToCleanup] = nil
 end
 
+local function getRemoteTrailBudgetConfig(): RemoteTrailBudgetConfig
+	local rawConfig = CoreConfig.clientCulling
+	if typeof(rawConfig) ~= "table" then
+		return {
+			enabled = true,
+			updateInterval = 0.25,
+			mobileDistanceMultiplier = 0.65,
+			fullDistance = 120,
+			disableDistance = 360,
+			reducedRateMultiplier = 0.5,
+			maxVisiblePlayers = 6,
+		}
+	end
+
+	local function readNumber(value: any, fallback: number): number
+		return if typeof(value) == "number" then value else fallback
+	end
+
+	return {
+		enabled = rawConfig.remoteTrailEnabled ~= false,
+		updateInterval = math.max(0.1, readNumber(rawConfig.remoteTrailUpdateInterval, 0.25)),
+		mobileDistanceMultiplier = math.clamp(
+			readNumber(rawConfig.remoteTrailMobileDistanceMultiplier, 0.65),
+			0.1,
+			1
+		),
+		fullDistance = math.max(0, readNumber(rawConfig.remoteTrailFullDistance, 120)),
+		disableDistance = math.max(
+			readNumber(rawConfig.remoteTrailDisableDistance, 360),
+			readNumber(rawConfig.remoteTrailFullDistance, 120)
+		),
+		reducedRateMultiplier = math.clamp(
+			readNumber(rawConfig.remoteTrailReducedRateMultiplier, 0.5),
+			0.1,
+			1
+		),
+		maxVisiblePlayers = math.max(0, math.floor(readNumber(rawConfig.remoteTrailMaxVisiblePlayers, 6))),
+	}
+end
+
+local function setObservedTrailQuality(
+	state: ObservedTrailVisualState,
+	quality: RemoteTrailQuality,
+	reducedRateMultiplier: number
+)
+	if state.quality == quality then
+		return
+	end
+
+	local isEnabled = quality ~= "disabled"
+	for _, trail in ipairs(state.trails) do
+		if trail.Parent then
+			trail.Enabled = isEnabled
+		end
+	end
+
+	for _, emitter in ipairs(state.emitters) do
+		if emitter.Parent then
+			emitter.Enabled = isEnabled
+			local baseRate = state.emitterRates[emitter] or emitter.Rate
+			emitter.Rate = if quality == "reduced"
+				then baseRate * reducedRateMultiplier
+				else baseRate
+		end
+	end
+
+	state.quality = quality
+end
+
 local function syncObservedTrailVisual(playerToSync: Player)
 	local equippedTrail = playerToSync:GetAttribute("Trail_Equipped")
 	local characterToSync = playerToSync.Character
@@ -768,7 +891,7 @@ local function syncObservedTrailVisual(playerToSync: Player)
 	if not rootPart then
 		local existingState = observedTrailVisuals[playerToSync]
 		if existingState then
-			existingState.missingUntil = existingState.missingUntil or (os.clock() + TRAIL_VISUAL_MISSING_GRACE)
+			existingState.missingUntil = existingState.missingUntil or (os.clock() + CLIENT_HANDLER_CONFIG.TRAIL_VISUAL_MISSING_GRACE)
 		end
 		return
 	end
@@ -793,23 +916,24 @@ local function syncObservedTrailVisual(playerToSync: Player)
 	end
 
 	local attachment0 = Instance.new("Attachment")
-	attachment0.Name = CLIENT_TRAIL_ATTACHMENT0_NAME
+	attachment0.Name = CLIENT_HANDLER_CONFIG.CLIENT_TRAIL_ATTACHMENT0_NAME
 	attachment0.Position = Vector3.new(0, rootPart.Size.Y * 0.5, 0)
 	attachment0.Parent = rootPart
 
 	local attachment1 = Instance.new("Attachment")
-	attachment1.Name = CLIENT_TRAIL_ATTACHMENT1_NAME
+	attachment1.Name = CLIENT_HANDLER_CONFIG.CLIENT_TRAIL_ATTACHMENT1_NAME
 	attachment1.Position = Vector3.new(0, -rootPart.Size.Y * 0.5, 0)
 	attachment1.Parent = rootPart
 
 	local clonedTrails = {}
 	local clonedEmitters = {}
+	local emitterRates: { [ParticleEmitter]: number } = {}
 	local emitterSpeeds: { [ParticleEmitter]: NumberRange } = {}
 
 	for _, descendant in ipairs(trailFolder:GetDescendants()) do
 		if descendant:IsA("Trail") then
 			local clone = descendant:Clone()
-			clone.Name = CLIENT_TRAIL_VISUAL_PREFIX .. descendant.Name
+			clone.Name = CLIENT_HANDLER_CONFIG.CLIENT_TRAIL_VISUAL_PREFIX .. descendant.Name
 			clone.Attachment0 = attachment0
 			clone.Attachment1 = attachment1
 			clone.Enabled = true
@@ -817,10 +941,11 @@ local function syncObservedTrailVisual(playerToSync: Player)
 			table.insert(clonedTrails, clone)
 		elseif descendant:IsA("ParticleEmitter") then
 			local clone = descendant:Clone()
-			clone.Name = CLIENT_TRAIL_VISUAL_PREFIX .. descendant.Name
+			clone.Name = CLIENT_HANDLER_CONFIG.CLIENT_TRAIL_VISUAL_PREFIX .. descendant.Name
 			clone.Enabled = true
 			clone.Parent = rootPart
 			table.insert(clonedEmitters, clone)
+			emitterRates[clone] = clone.Rate
 			emitterSpeeds[clone] = clone.Speed
 		end
 	end
@@ -834,9 +959,11 @@ local function syncObservedTrailVisual(playerToSync: Player)
 		attachment1 = attachment1,
 		trails = clonedTrails,
 		emitters = clonedEmitters,
+		emitterRates = emitterRates,
 		emitterSpeeds = emitterSpeeds,
 		lastMoving = nil,
 		missingUntil = nil,
+		quality = nil,
 	}
 end
 
@@ -902,7 +1029,7 @@ local function bindObservedTrailPlayer(playerToBind: Player)
 	playerMaid:GiveTask(playerToBind.CharacterRemoving:Connect(function()
 		local existingState = observedTrailVisuals[playerToBind]
 		if existingState then
-			existingState.missingUntil = os.clock() + TRAIL_VISUAL_MISSING_GRACE
+			existingState.missingUntil = os.clock() + CLIENT_HANDLER_CONFIG.TRAIL_VISUAL_MISSING_GRACE
 		end
 	end))
 
@@ -926,35 +1053,135 @@ local function registerKartShowcase(model: Model)
 	if observedKartShowcases[model] then
 		return
 	end
-	if model:GetAttribute("IsPoliceKart") ~= true then
-		return
-	end
 
-	local basePivot = if typeof(model:GetAttribute("ShowcaseBasePivot")) == "CFrame"
+	local parent = model.Parent
+	local isLuckyBlockShowcase = CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockModelNames[model.Name] == true
+		and parent ~= nil
+		and parent.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockFolderName
+	local basePivot = if not isLuckyBlockShowcase and typeof(model:GetAttribute("ShowcaseBasePivot")) == "CFrame"
 		then model:GetAttribute("ShowcaseBasePivot") :: CFrame
 		else model:GetPivot()
+	local usePartCFrameAnimation = model:GetAttribute("UsePartCFrameAnimation") == true
+	local parts: { ShowcasePartState } = {}
+	local trackedParts: { [BasePart]: boolean } = {}
+	if usePartCFrameAnimation then
+		for _, descendant in ipairs(model:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				local relativeCFrame = descendant:GetAttribute("ShowcaseRelativeCFrame")
+				table.insert(parts, {
+					part = descendant,
+					relativeCFrame = if not isLuckyBlockShowcase and typeof(relativeCFrame) == "CFrame"
+						then relativeCFrame :: CFrame
+						else basePivot:ToObjectSpace(descendant.CFrame),
+				})
+				trackedParts[descendant] = true
+			end
+		end
+	end
 
-	observedKartShowcases[model] = {
+	local configuredRotationDuration = model:GetAttribute("ShowcaseRotationDuration")
+	local configuredVisualOffset = model:GetAttribute("VisualOffset")
+	local rotationDuration = if typeof(configuredRotationDuration) == "number"
+		then math.max(0, configuredRotationDuration)
+		elseif isLuckyBlockShowcase then CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockRotationDuration
+		else 0
+	local visualOffset = if typeof(configuredVisualOffset) == "number"
+		then configuredVisualOffset
+		elseif isLuckyBlockShowcase then math.random()
+		else 0
+
+	local showcaseState: ShowcaseVisualState = {
 		model = model,
 		basePivot = basePivot,
-		visualOffset = model:GetAttribute("VisualOffset") or 0,
+		visualOffset = visualOffset,
+		rotationDuration = rotationDuration,
+		parts = parts,
+		trackedParts = trackedParts,
+		usePartCFrameAnimation = usePartCFrameAnimation,
+		descendantAddedConnection = nil,
+		descendantRemovingConnection = nil,
 		visualUpdateAccumulator = 0,
 		cameraBucket = nil,
 		cameraBucketDistance = nil,
 		cameraBucketOnScreen = nil,
-		cameraBucketAccumulator = KART_CAMERA_BUCKET_REFRESH_INTERVAL,
+		cameraBucketAccumulator = CLIENT_HANDLER_CONFIG.KART_CAMERA_BUCKET_REFRESH_INTERVAL,
 		isPoliceKart = model:GetAttribute("IsPoliceKart") == true,
 		lightBarBlue = findBasePartByName(model, "LightBarBlue"),
 		lightBarRed = findBasePartByName(model, "LightBarRed"),
 		spotlightLensL = findBasePartByName(model, "SpotlightLensL"),
 		spotlightLensR = findBasePartByName(model, "SpotlightLensR"),
 	}
+	observedKartShowcases[model] = showcaseState
+
+	if usePartCFrameAnimation then
+		showcaseState.descendantAddedConnection = model.DescendantAdded:Connect(function(descendant)
+			if not descendant:IsA("BasePart") or showcaseState.trackedParts[descendant] then
+				return
+			end
+
+			local relativeCFrame = descendant:GetAttribute("ShowcaseRelativeCFrame")
+			table.insert(showcaseState.parts, {
+				part = descendant,
+				relativeCFrame = if not isLuckyBlockShowcase and typeof(relativeCFrame) == "CFrame"
+					then relativeCFrame :: CFrame
+					else basePivot:ToObjectSpace(descendant.CFrame),
+			})
+			showcaseState.trackedParts[descendant] = true
+		end)
+		showcaseState.descendantRemovingConnection = model.DescendantRemoving:Connect(function(descendant)
+			if not descendant:IsA("BasePart") then
+				return
+			end
+
+			showcaseState.trackedParts[descendant] = nil
+			for index = #showcaseState.parts, 1, -1 do
+				if showcaseState.parts[index].part == descendant then
+					table.remove(showcaseState.parts, index)
+				end
+			end
+		end)
+	end
+end
+
+local function cleanupKartShowcase(model: Model, restoreBasePose: boolean)
+	local showcaseState = observedKartShowcases[model]
+	if not showcaseState then
+		return
+	end
+
+	if showcaseState.descendantAddedConnection then
+		showcaseState.descendantAddedConnection:Disconnect()
+		showcaseState.descendantAddedConnection = nil
+	end
+	if showcaseState.descendantRemovingConnection then
+		showcaseState.descendantRemovingConnection:Disconnect()
+		showcaseState.descendantRemovingConnection = nil
+	end
+
+	if restoreBasePose and model.Parent then
+		if showcaseState.usePartCFrameAnimation then
+			for _, partState in ipairs(showcaseState.parts) do
+				if partState.part.Parent then
+					partState.part.CFrame = showcaseState.basePivot * partState.relativeCFrame
+				end
+			end
+		else
+			model:PivotTo(showcaseState.basePivot)
+		end
+	end
+
+	observedKartShowcases[model] = nil
 end
 
 local function getKartOwner(model: Model): Player?
 	local ownerUserId = model:GetAttribute("OwnerUserId")
 	if typeof(ownerUserId) == "number" then
 		return Players:GetPlayerByUserId(ownerUserId)
+	end
+
+	local taggedOwnerUserId = model:GetAttribute("KartOwnerUserId")
+	if typeof(taggedOwnerUserId) == "number" then
+		return Players:GetPlayerByUserId(taggedOwnerUserId)
 	end
 
 	-- Fallback to legacy character parenting
@@ -972,6 +1199,23 @@ local function registerEquippedKart(model: Model)
 	local rootPart = ownerCharacter and (ownerCharacter:FindFirstChild("HumanoidRootPart") :: BasePart?) or nil
 	local engineParent = getEngineParent(model)
 	local engineSoundId = model:GetAttribute("EngineSoundId")
+	local engineSoundParent = if owner == player then rootPart else engineParent
+	if
+		owner == player
+		and localKartEngineSound
+		and localKartEngineSound.Parent
+		and rootPart
+		and localKartEngineSound.Parent ~= rootPart
+	then
+		localKartEngineSound.Parent = rootPart
+	end
+	local engineSound = if engineSoundParent and typeof(engineSoundId) == "string" and engineSoundId ~= ""
+		then createOrUpdateClientKartEngineSound(engineSoundParent, engineSoundId)
+		else nil
+	if owner == player and engineSound then
+		localKartEngineSound = engineSound
+		localKartEngineSoundLastSeenAt = os.clock()
+	end
 	local smokeEmitters = {}
 	local emitterSpeeds: { [ParticleEmitter]: NumberRange } = {}
 	if rootPart then
@@ -985,11 +1229,7 @@ local function registerEquippedKart(model: Model)
 		ownerHumanoid = ownerHumanoid,
 		rootPart = rootPart,
 		engineParent = engineParent,
-		engineSound = if engineParent
-				and typeof(engineSoundId) == "string"
-				and engineSoundId ~= ""
-			then createOrUpdateClientKartEngineSound(engineParent, engineSoundId)
-			else nil,
+		engineSound = engineSound,
 		engineSoundId = if typeof(engineSoundId) == "string" then engineSoundId else nil,
 		smokeEmitters = smokeEmitters,
 		emitterSpeeds = emitterSpeeds,
@@ -1008,7 +1248,7 @@ local function registerEquippedKart(model: Model)
 		cameraBucket = nil,
 		cameraBucketDistance = nil,
 		cameraBucketOnScreen = nil,
-		cameraBucketAccumulator = KART_CAMERA_BUCKET_REFRESH_INTERVAL,
+		cameraBucketAccumulator = CLIENT_HANDLER_CONFIG.KART_CAMERA_BUCKET_REFRESH_INTERVAL,
 		lastMoving = nil,
 		lastPlaybackSpeed = nil,
 		offscreenEffectsDisabled = false,
@@ -1033,7 +1273,7 @@ local function registerEquippedKart(model: Model)
 			if owner then owner.Name else "nil",
 			tostring(rootPart ~= nil),
 			tostring(engineParent ~= nil),
-			tostring(engineSoundId ~= nil and engineParent ~= nil),
+			tostring(engineSound ~= nil),
 			#smokeEmitters,
 			#observedEquippedKarts[model].wheelMotors
 		),
@@ -1042,24 +1282,41 @@ local function registerEquippedKart(model: Model)
 end
 
 local function registerObservedKartVisual(instance: Instance)
-	local showcaseModel = if instance:IsA("Model") and instance.Name == KART_SHOWCASE_MODEL_NAME
+	local showcaseModel = if instance:IsA("Model") and instance.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.kartModelName
 		then instance
-		else instance:FindFirstAncestor(KART_SHOWCASE_MODEL_NAME)
+		else instance:FindFirstAncestor(CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.kartModelName)
+	if not showcaseModel and instance:IsA("Model") then
+		local parent = instance.Parent
+		if CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockModelNames[instance.Name] == true
+			and parent ~= nil
+			and parent.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockFolderName then
+			showcaseModel = instance
+		end
+	end
 	if showcaseModel and showcaseModel:IsA("Model") then
 		registerKartShowcase(showcaseModel)
 	end
 
-	local equippedKartModel = if instance:IsA("Model") and instance.Name == EQUIPPED_KART_MODEL_NAME
+	local equippedKartModel = if instance:IsA("Model") and instance.Name == CLIENT_HANDLER_CONFIG.EQUIPPED_KART_MODEL_NAME
 		then instance
-		else instance:FindFirstAncestor(EQUIPPED_KART_MODEL_NAME)
+		else instance:FindFirstAncestor(CLIENT_HANDLER_CONFIG.EQUIPPED_KART_MODEL_NAME)
 	if equippedKartModel and equippedKartModel:IsA("Model") then
 		registerEquippedKart(equippedKartModel)
 	end
 end
 
 local function isKartVisualModel(instance: Instance): boolean
-	return instance:IsA("Model")
-		and (instance.Name == KART_SHOWCASE_MODEL_NAME or instance.Name == EQUIPPED_KART_MODEL_NAME)
+	if not instance:IsA("Model") then
+		return false
+	end
+	local parent = instance.Parent
+	return instance.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.kartModelName
+		or instance.Name == CLIENT_HANDLER_CONFIG.EQUIPPED_KART_MODEL_NAME
+		or (
+			CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockModelNames[instance.Name] == true
+			and parent ~= nil
+			and parent.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockFolderName
+		)
 end
 
 local function beginSourceRootBinding(root: Instance, bindings: { [Instance]: Maid }): Maid
@@ -1099,8 +1356,12 @@ local function bindKartVisualSourceRoot(root: Instance)
 		end
 	end))
 	rootMaid:GiveTask(root.DescendantRemoving:Connect(function(descendant)
-		if descendant:IsA("Model") and descendant.Name == KART_SHOWCASE_MODEL_NAME then
-			observedKartShowcases[descendant] = nil
+		if descendant:IsA("Model")
+			and (
+				descendant.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.kartModelName
+				or CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockModelNames[descendant.Name] == true
+			) then
+			cleanupKartShowcase(descendant, true)
 		end
 	end))
 
@@ -1119,13 +1380,91 @@ local function refreshKartVisualSourceBindings()
 			if kartButtonsFolder then
 				bindKartVisualSourceRoot(kartButtonsFolder)
 			end
+
+			local eventKartButtonsFolder = world:FindFirstChild("EventKartButtons")
+			if eventKartButtonsFolder then
+				bindKartVisualSourceRoot(eventKartButtonsFolder)
+			end
+
+			local luckyBlocksFolder = world:FindFirstChild(CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockFolderName)
+			if luckyBlocksFolder then
+				bindKartVisualSourceRoot(luckyBlocksFolder)
+			end
 		end
 	end
 
-	local kartHolderFolder = Workspace:FindFirstChild(KART_VISUAL_HOLDER_NAME)
+	local kartHolderFolder = Workspace:FindFirstChild(CLIENT_HANDLER_CONFIG.KART_VISUAL_HOLDER_NAME)
 	if kartHolderFolder then
 		bindKartVisualSourceRoot(kartHolderFolder)
 	end
+end
+
+local function findLocalEquippedKartModel(): Model?
+	local kartHolder = Workspace:FindFirstChild(CLIENT_HANDLER_CONFIG.KART_VISUAL_HOLDER_NAME)
+	if not kartHolder then
+		return nil
+	end
+
+	for _, child in ipairs(kartHolder:GetChildren()) do
+		if child:IsA("Model") and child.Name == CLIENT_HANDLER_CONFIG.EQUIPPED_KART_MODEL_NAME then
+			local ownerUserId = child:GetAttribute("OwnerUserId")
+			local taggedOwnerUserId = child:GetAttribute("KartOwnerUserId")
+			if ownerUserId == player.UserId or taggedOwnerUserId == player.UserId then
+				return child
+			end
+		end
+	end
+
+	return nil
+end
+
+local function isClientKartVisualHealthy(model: Model?): boolean
+	if not model or not model:IsDescendantOf(Workspace) then
+		return false
+	end
+
+	local seatBase = model:FindFirstChild("SeatBase", true)
+	return seatBase ~= nil
+		and seatBase:IsA("BasePart")
+		and model:FindFirstChildWhichIsA("BasePart", true) ~= nil
+end
+
+local function reconcileLocalKartVisual()
+	if isCleaningUp or player:GetAttribute("Data_Loaded") ~= true or humanoid.Health <= 0 then
+		localKartVisualMissingSince = nil
+		return
+	end
+
+	local model = findLocalEquippedKartModel()
+	if model then
+		registerObservedKartVisual(model)
+	end
+
+	if isClientKartVisualHealthy(model) then
+		localKartVisualMissingSince = nil
+		return
+	end
+
+	local now = os.clock()
+	local missingSince = localKartVisualMissingSince
+	if missingSince == nil then
+		localKartVisualMissingSince = now
+		return
+	end
+
+	if now - missingSince < CLIENT_HANDLER_CONFIG.KART_CLIENT_VISUAL_MISSING_GRACE then
+		return
+	end
+	if now - lastKartVisualResyncAt < CLIENT_HANDLER_CONFIG.KART_CLIENT_VISUAL_RESYNC_COOLDOWN then
+		return
+	end
+
+	lastKartVisualResyncAt = now
+	KartVisualResync:FireServer()
+	DebugModule.debugWarn(
+		"Client equipped kart visual incomplete; requested server resync | model=" .. tostring(model ~= nil),
+		"PlayerClientHandler"
+	)
 end
 
 local function refreshEquippedKartState(state: EquippedKartVisualState)
@@ -1188,11 +1527,8 @@ local function refreshEquippedKartState(state: EquippedKartVisualState)
 	end
 
 	if nextEngineParent ~= state.engineParent then
-		if state.engineSound and state.engineSound.Parent then
-			state.engineSound:Destroy()
-		end
-		state.engineSound = nil
 		state.engineParent = nextEngineParent
+		state.wheelMotors = getClientWheelMotors(nextEngineParent)
 		state.lastPlaybackSpeed = nil
 
 		DebugModule.debugInfo(
@@ -1206,17 +1542,31 @@ local function refreshEquippedKartState(state: EquippedKartVisualState)
 		)
 	end
 
-	if typeof(nextEngineSoundId) == "string" and nextEngineSoundId ~= "" and nextEngineParent then
+	local nextEngineSoundParent = if owner == player then nextRootPart else nextEngineParent
+	if
+		owner == player
+		and localKartEngineSound
+		and localKartEngineSound.Parent
+		and nextRootPart
+		and localKartEngineSound.Parent ~= nextRootPart
+	then
+		localKartEngineSound.Parent = nextRootPart
+	end
+	if typeof(nextEngineSoundId) == "string" and nextEngineSoundId ~= "" and nextEngineSoundParent then
 		if
 			state.engineSoundId ~= nextEngineSoundId
 			or not state.engineSound
-			or state.engineSound.Parent ~= nextEngineParent
+			or state.engineSound.Parent ~= nextEngineSoundParent
 		then
-			if state.engineSound and state.engineSound.Parent then
+			if state.engineSound and state.engineSound ~= localKartEngineSound and state.engineSound.Parent then
 				state.engineSound:Destroy()
 			end
-			state.engineSound = createOrUpdateClientKartEngineSound(nextEngineParent, nextEngineSoundId)
+			state.engineSound = createOrUpdateClientKartEngineSound(nextEngineSoundParent, nextEngineSoundId)
 			state.engineSoundId = nextEngineSoundId
+			if owner == player and state.engineSound then
+				localKartEngineSound = state.engineSound
+				localKartEngineSoundLastSeenAt = os.clock()
+			end
 
 			DebugModule.debugInfo(
 				string.format(
@@ -1224,13 +1574,17 @@ local function refreshEquippedKartState(state: EquippedKartVisualState)
 					tostring(player:GetAttribute("Kart_Equipped")),
 					state.model:GetFullName(),
 					nextEngineSoundId,
-					nextEngineParent:GetFullName()
+					nextEngineSoundParent:GetFullName()
 				),
 				"PlayerClientHandler"
 			)
 		end
-	elseif state.engineSound and state.engineSound.Parent then
+	elseif state.engineSound and state.engineSound ~= localKartEngineSound and state.engineSound.Parent then
 		state.engineSound:Destroy()
+		state.engineSound = nil
+		state.engineSoundId = nil
+		state.lastPlaybackSpeed = nil
+	elseif state.engineSound == localKartEngineSound then
 		state.engineSound = nil
 		state.engineSoundId = nil
 		state.lastPlaybackSpeed = nil
@@ -1283,24 +1637,24 @@ local function getKartVisualUpdateIntervalForBucket(bucket: VisualDistanceBucket
 		return 0
 	end
 	if bucket == "mid" then
-		return KART_VISUAL_MID_INTERVAL
+		return CLIENT_HANDLER_CONFIG.KART_VISUAL_MID_INTERVAL
 	end
 	if bucket == "far" then
-		return KART_VISUAL_FAR_INTERVAL
+		return CLIENT_HANDLER_CONFIG.KART_VISUAL_FAR_INTERVAL
 	end
 
-	return KART_VISUAL_OFFSCREEN_INTERVAL
+	return CLIENT_HANDLER_CONFIG.KART_VISUAL_OFFSCREEN_INTERVAL
 end
 
 local function getKartStateRefreshIntervalForBucket(bucket: VisualDistanceBucket): number
 	if bucket == "near" then
-		return KART_STATE_REFRESH_INTERVAL
+		return CLIENT_HANDLER_CONFIG.KART_STATE_REFRESH_INTERVAL
 	end
 	if bucket == "mid" then
-		return KART_STATE_REFRESH_MID_INTERVAL
+		return CLIENT_HANDLER_CONFIG.KART_STATE_REFRESH_MID_INTERVAL
 	end
 
-	return KART_STATE_REFRESH_FAR_INTERVAL
+	return CLIENT_HANDLER_CONFIG.KART_STATE_REFRESH_FAR_INTERVAL
 end
 
 local function getShowcaseVisualUpdateInterval(distance: number, onScreen: boolean): number
@@ -1308,28 +1662,28 @@ local function getShowcaseVisualUpdateInterval(distance: number, onScreen: boole
 		return math.huge
 	end
 
-	if distance <= KART_SHOWCASE_FULL_RATE_DISTANCE then
-		return 1 / KART_SHOWCASE_TARGET_FPS_FULL
+	if distance <= CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FULL_RATE_DISTANCE then
+		return 1 / CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_FULL
 	end
 
 	local targetFps: number
-	if distance <= KART_SHOWCASE_NEAR_DISTANCE then
-		local nearSpan = math.max(KART_SHOWCASE_NEAR_DISTANCE - KART_SHOWCASE_FULL_RATE_DISTANCE, 1)
-		local nearAlpha = math.clamp((distance - KART_SHOWCASE_FULL_RATE_DISTANCE) / nearSpan, 0, 1)
-		targetFps = KART_SHOWCASE_TARGET_FPS_FULL
-			+ ((KART_SHOWCASE_TARGET_FPS_FAR - KART_SHOWCASE_TARGET_FPS_FULL) * nearAlpha)
-	elseif distance <= KART_SHOWCASE_FAR_DISTANCE then
-		local farSpan = math.max(KART_SHOWCASE_FAR_DISTANCE - KART_SHOWCASE_NEAR_DISTANCE, 1)
-		local farAlpha = math.clamp((distance - KART_SHOWCASE_NEAR_DISTANCE) / farSpan, 0, 1)
-		targetFps = KART_SHOWCASE_TARGET_FPS_FAR
-			+ ((KART_SHOWCASE_TARGET_FPS_VERY_FAR - KART_SHOWCASE_TARGET_FPS_FAR) * farAlpha)
-	elseif distance <= KART_SHOWCASE_PAUSE_DISTANCE then
-		targetFps = KART_SHOWCASE_TARGET_FPS_VERY_FAR
+	if distance <= CLIENT_HANDLER_CONFIG.KART_SHOWCASE_NEAR_DISTANCE then
+		local nearSpan = math.max(CLIENT_HANDLER_CONFIG.KART_SHOWCASE_NEAR_DISTANCE - CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FULL_RATE_DISTANCE, 1)
+		local nearAlpha = math.clamp((distance - CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FULL_RATE_DISTANCE) / nearSpan, 0, 1)
+		targetFps = CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_FULL
+			+ ((CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_FAR - CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_FULL) * nearAlpha)
+	elseif distance <= CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FAR_DISTANCE then
+		local farSpan = math.max(CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FAR_DISTANCE - CLIENT_HANDLER_CONFIG.KART_SHOWCASE_NEAR_DISTANCE, 1)
+		local farAlpha = math.clamp((distance - CLIENT_HANDLER_CONFIG.KART_SHOWCASE_NEAR_DISTANCE) / farSpan, 0, 1)
+		targetFps = CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_FAR
+			+ ((CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_VERY_FAR - CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_FAR) * farAlpha)
+	elseif distance <= CLIENT_HANDLER_CONFIG.KART_SHOWCASE_PAUSE_DISTANCE then
+		targetFps = CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_VERY_FAR
 	else
 		return math.huge
 	end
 
-	local clampedTargetFps = math.clamp(targetFps, KART_SHOWCASE_TARGET_FPS_VERY_FAR, KART_SHOWCASE_TARGET_FPS_FULL)
+	local clampedTargetFps = math.clamp(targetFps, CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_VERY_FAR, CLIENT_HANDLER_CONFIG.KART_SHOWCASE_TARGET_FPS_FULL)
 	return 1 / clampedTargetFps
 end
 
@@ -1348,7 +1702,7 @@ local function computeEquippedKartCameraBucket(
 
 	local distance = (rootPart.Position - currentCamera.CFrame.Position).Magnitude
 	local _, onScreen = currentCamera:WorldToViewportPoint(rootPart.Position)
-	local bucket = resolveVisualDistanceBucket(distance, onScreen, KART_VISUAL_NEAR_DISTANCE, KART_VISUAL_FAR_DISTANCE)
+	local bucket = resolveVisualDistanceBucket(distance, onScreen, CLIENT_HANDLER_CONFIG.KART_VISUAL_NEAR_DISTANCE, CLIENT_HANDLER_CONFIG.KART_VISUAL_FAR_DISTANCE)
 	return bucket, distance, onScreen
 end
 
@@ -1359,7 +1713,7 @@ local function getCachedEquippedKartCameraBucket(
 	kartState.cameraBucketAccumulator += dt
 	if
 		kartState.cameraBucket ~= nil
-		and kartState.cameraBucketAccumulator < KART_CAMERA_BUCKET_REFRESH_INTERVAL
+		and kartState.cameraBucketAccumulator < CLIENT_HANDLER_CONFIG.KART_CAMERA_BUCKET_REFRESH_INTERVAL
 		and kartState.cameraBucketDistance ~= nil
 		and kartState.cameraBucketOnScreen ~= nil
 	then
@@ -1384,7 +1738,7 @@ local function computeShowcaseCameraBucket(showcaseState: ShowcaseVisualState): 
 	local distance = (showcasePosition - currentCamera.CFrame.Position).Magnitude
 	local _, onScreen = currentCamera:WorldToViewportPoint(showcasePosition)
 	local bucket =
-		resolveVisualDistanceBucket(distance, onScreen, KART_SHOWCASE_NEAR_DISTANCE, KART_SHOWCASE_FAR_DISTANCE)
+		resolveVisualDistanceBucket(distance, onScreen, CLIENT_HANDLER_CONFIG.KART_SHOWCASE_NEAR_DISTANCE, CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FAR_DISTANCE)
 	return bucket, distance, onScreen
 end
 
@@ -1395,7 +1749,7 @@ local function getCachedShowcaseCameraBucket(
 	showcaseState.cameraBucketAccumulator += dt
 	if
 		showcaseState.cameraBucket ~= nil
-		and showcaseState.cameraBucketAccumulator < KART_CAMERA_BUCKET_REFRESH_INTERVAL
+		and showcaseState.cameraBucketAccumulator < CLIENT_HANDLER_CONFIG.KART_CAMERA_BUCKET_REFRESH_INTERVAL
 		and showcaseState.cameraBucketDistance ~= nil
 		and showcaseState.cameraBucketOnScreen ~= nil
 	then
@@ -1417,16 +1771,20 @@ local function getWheelMotorUpdateInterval(kartState: EquippedKartVisualState, v
 
 	local effectiveVisualInterval = if visualUpdateInterval > 0
 		then visualUpdateInterval
-		else KART_VISUAL_FRAMELOCK_INTERVAL
-	return math.max(REMOTE_KART_WHEEL_UPDATE_INTERVAL, effectiveVisualInterval)
+		else CLIENT_HANDLER_CONFIG.KART_VISUAL_FRAMELOCK_INTERVAL
+	return math.max(CLIENT_HANDLER_CONFIG.REMOTE_KART_WHEEL_UPDATE_INTERVAL, effectiveVisualInterval)
 end
 
 local function updateObservedKartShowcases(dt: number)
+	if next(observedKartShowcases) == nil then
+		return
+	end
+
 	local syncedTime = Workspace:GetServerTimeNow()
 
 	for model, showcaseState in pairs(observedKartShowcases) do
 		if not model.Parent then
-			observedKartShowcases[model] = nil
+			cleanupKartShowcase(model, false)
 			continue
 		end
 
@@ -1438,10 +1796,25 @@ local function updateObservedKartShowcases(dt: number)
 		end
 		showcaseState.visualUpdateAccumulator = 0
 
-		local shouldUpdateShowcasePoliceLights = not (
-			showcaseBucket == "offscreen" and showcaseDistance > KART_SHOWCASE_FAR_DISTANCE
-		)
-		if showcaseState.isPoliceKart and shouldUpdateShowcasePoliceLights then
+		local bobOffset = math.sin((syncedTime + showcaseState.visualOffset) * 2) * CLIENT_HANDLER_CONFIG.KART_SHOWCASE_BOB_AMPLITUDE
+		local showcasePivot = showcaseState.basePivot * CFrame.new(0, bobOffset, 0)
+		if showcaseState.rotationDuration > 0 then
+			local rotationAlpha = ((syncedTime + showcaseState.visualOffset) % showcaseState.rotationDuration)
+				/ showcaseState.rotationDuration
+			showcasePivot *= CFrame.Angles(0, math.rad(rotationAlpha * 360), 0)
+		end
+
+		if showcaseState.usePartCFrameAnimation then
+			for _, partState in ipairs(showcaseState.parts) do
+				if partState.part.Parent then
+					partState.part.CFrame = showcasePivot * partState.relativeCFrame
+				end
+			end
+		else
+			showcaseState.model:PivotTo(showcasePivot)
+		end
+
+		if showcaseState.isPoliceKart and showcaseOnScreen then
 			applyPoliceKartVisuals(
 				syncedTime + showcaseState.visualOffset,
 				showcaseState.lightBarBlue,
@@ -1455,6 +1828,7 @@ end
 
 local function updateObservedEquippedKartVisuals(dt: number)
 	local syncedTime = Workspace:GetServerTimeNow()
+	local localKartObserved = false
 
 	for model, kartState in pairs(observedEquippedKarts) do
 		if not model.Parent then
@@ -1485,6 +1859,10 @@ local function updateObservedEquippedKartVisuals(dt: number)
 			kartState.cameraBucketDistance = cameraDistance
 			kartState.cameraBucketOnScreen = refreshedOnScreen
 			kartState.cameraBucketAccumulator = 0
+		end
+		if kartState.owner == player then
+			localKartObserved = true
+			localKartEngineSoundLastSeenAt = os.clock()
 		end
 
 		local isRemoteOffscreen = kartState.owner ~= player and cameraBucket == "offscreen"
@@ -1559,7 +1937,7 @@ local function updateObservedEquippedKartVisuals(dt: number)
 		if not shouldRunEffectsUpdate then
 			if kartState.owner ~= player and not moving and not treadmillActive then
 				kartState.idleEffectsAccumulator += effectiveDt
-				if kartState.idleEffectsAccumulator >= REMOTE_KART_IDLE_EFFECT_INTERVAL then
+				if kartState.idleEffectsAccumulator >= CLIENT_HANDLER_CONFIG.REMOTE_KART_IDLE_EFFECT_INTERVAL then
 					kartState.idleEffectsAccumulator = 0
 					shouldRunEffectsUpdate = true
 				end
@@ -1572,13 +1950,13 @@ local function updateObservedEquippedKartVisuals(dt: number)
 		end
 
 		if shouldRunEffectsUpdate and kartState.engineSound and kartState.engineSound.Parent then
-			local normalizedSpeed = math.clamp(horizontalVelocity / KART_ENGINE_REFERENCE_SPEED, 0, 1)
+			local normalizedSpeed = math.clamp(horizontalVelocity / CLIENT_HANDLER_CONFIG.KART_ENGINE_REFERENCE_SPEED, 0, 1)
 			local playbackSpeed = 0.5 + (normalizedSpeed * 1.5)
 			if treadmillActive then
 				playbackSpeed = 2.0
 			end
 			if humanoidForSpeed and treadmillActive and horizontalVelocity < 0.05 then
-				local walkSpeedNormalized = math.clamp(humanoidForSpeed.WalkSpeed / KART_ENGINE_REFERENCE_SPEED, 0, 1)
+				local walkSpeedNormalized = math.clamp(humanoidForSpeed.WalkSpeed / CLIENT_HANDLER_CONFIG.KART_ENGINE_REFERENCE_SPEED, 0, 1)
 				playbackSpeed = 0.5 + (walkSpeedNormalized * 1.5)
 				playbackSpeed = math.max(playbackSpeed, 2.0)
 			end
@@ -1599,7 +1977,7 @@ local function updateObservedEquippedKartVisuals(dt: number)
 
 		local shouldUpdatePoliceLights = kartState.owner == player
 			or cameraBucket ~= "offscreen"
-			or cameraDistance <= KART_VISUAL_FAR_DISTANCE
+			or cameraDistance <= CLIENT_HANDLER_CONFIG.KART_VISUAL_FAR_DISTANCE
 		if kartState.isPoliceKart and shouldUpdatePoliceLights then
 			applyPoliceKartVisuals(
 				syncedTime + kartState.visualOffset,
@@ -1609,6 +1987,17 @@ local function updateObservedEquippedKartVisuals(dt: number)
 				kartState.spotlightLensR
 			)
 		end
+	end
+
+	if localKartObserved then
+		localKartEngineSoundLastSeenAt = os.clock()
+	elseif localKartEngineSound
+		and localKartEngineSound.IsPlaying
+		and localKartEngineSoundLastSeenAt
+		and os.clock() - localKartEngineSoundLastSeenAt >= CLIENT_HANDLER_CONFIG.LOCAL_KART_SOUND_MISSING_GRACE
+	then
+		localKartEngineSound:Stop()
+		localKartEngineSoundLastSeenAt = nil
 	end
 end
 
@@ -1633,27 +2022,27 @@ local function getTreadmillTextureUpdateInterval(rootPart: BasePart?, texturePos
 	end
 
 	local distance = (rootPart.Position - texturePosition).Magnitude
-	if distance > TREADMILL_TEXTURE_PAUSE_DISTANCE then
+	if distance > CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_PAUSE_DISTANCE then
 		return math.huge
 	end
 
 	local currentCamera = Workspace.CurrentCamera
-	if currentCamera and distance > TREADMILL_TEXTURE_NEAR_DISTANCE then
+	if currentCamera and distance > CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_NEAR_DISTANCE then
 		local _, onScreen = currentCamera:WorldToViewportPoint(texturePosition)
 		if not onScreen then
 			return math.huge
 		end
 	end
 
-	if distance <= TREADMILL_TEXTURE_NEAR_DISTANCE then
-		return TREADMILL_TEXTURE_UPDATE_INTERVAL
+	if distance <= CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_NEAR_DISTANCE then
+		return CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_UPDATE_INTERVAL
 	end
 
-	if distance <= TREADMILL_TEXTURE_FAR_DISTANCE then
-		return TREADMILL_TEXTURE_FAR_UPDATE_INTERVAL
+	if distance <= CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_FAR_DISTANCE then
+		return CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_FAR_UPDATE_INTERVAL
 	end
 
-	return TREADMILL_TEXTURE_FAR_UPDATE_INTERVAL * 2
+	return CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_FAR_UPDATE_INTERVAL * 2
 end
 
 local function updateTreadmillTextureVisuals(dt: number)
@@ -1687,6 +2076,13 @@ local function updateTreadmillTextureVisuals(dt: number)
 end
 
 local function updateObservedTrailVisuals()
+	local budget = getRemoteTrailBudgetConfig()
+	local localRootPart = getCurrentCharacterRootPart()
+	local distanceMultiplier = if ClientDeviceProfile.IsMobile() then budget.mobileDistanceMultiplier else 1
+	local fullDistance = budget.fullDistance * distanceMultiplier
+	local disableDistance = math.max(budget.disableDistance * distanceMultiplier, fullDistance)
+	local candidates: { RemoteTrailCandidate } = {}
+
 	for targetPlayer, trailState in pairs(observedTrailVisuals) do
 		local equippedTrail = targetPlayer:GetAttribute("Trail_Equipped")
 		if typeof(equippedTrail) ~= "string" or equippedTrail == "" or equippedTrail == "None" then
@@ -1697,7 +2093,7 @@ local function updateObservedTrailVisuals()
 		local characterToSync = targetPlayer.Character
 		local rootPart = characterToSync and (characterToSync:FindFirstChild("HumanoidRootPart") :: BasePart?) or nil
 		if not targetPlayer.Parent or not characterToSync or not rootPart then
-			trailState.missingUntil = trailState.missingUntil or (os.clock() + TRAIL_VISUAL_MISSING_GRACE)
+			trailState.missingUntil = trailState.missingUntil or (os.clock() + CLIENT_HANDLER_CONFIG.TRAIL_VISUAL_MISSING_GRACE)
 			if os.clock() > trailState.missingUntil then
 				cleanupObservedTrailVisual(targetPlayer)
 			end
@@ -1709,6 +2105,15 @@ local function updateObservedTrailVisuals()
 		if characterToSync ~= trailState.character or rootPart ~= trailState.rootPart then
 			syncObservedTrailVisual(targetPlayer)
 			continue
+		end
+
+		if targetPlayer ~= player and budget.enabled and localRootPart then
+			table.insert(candidates, {
+				state = trailState,
+				distance = (rootPart.Position - localRootPart.Position).Magnitude,
+			})
+		elseif targetPlayer == player or not budget.enabled or not localRootPart then
+			setObservedTrailQuality(trailState, "full", budget.reducedRateMultiplier)
 		end
 
 		local horizontalVelocity =
@@ -1726,6 +2131,25 @@ local function updateObservedTrailVisuals()
 					else NumberRange.new(0)
 			end
 		end
+	end
+
+	table.sort(candidates, function(left, right)
+		return left.distance < right.distance
+	end)
+
+	for index, candidate in ipairs(candidates) do
+		local quality: RemoteTrailQuality
+		if index > budget.maxVisiblePlayers or candidate.distance > disableDistance then
+			quality = "disabled"
+		elseif candidate.distance <= fullDistance then
+			quality = "full"
+		elseif candidate.distance <= disableDistance then
+			quality = "reduced"
+		else
+			quality = "disabled"
+		end
+
+		setObservedTrailQuality(candidate.state, quality, budget.reducedRateMultiplier)
 	end
 end
 
@@ -1780,8 +2204,8 @@ local function playNextLobbyTrack(token: number)
 		activeMusicTween:Cancel()
 	end
 
-	activeMusicTween = TweenService:Create(lobbyMusicSound, TweenInfo.new(MUSIC_FADE_TIME), {
-		Volume = LOBBY_MUSIC_VOLUME,
+	activeMusicTween = TweenService:Create(lobbyMusicSound, TweenConfig.WithDuration(CLIENT_HANDLER_CONFIG.MUSIC_FADE_TIME, TweenConfig.MusicFade), {
+		Volume = CLIENT_HANDLER_CONFIG.LOBBY_MUSIC_VOLUME,
 	})
 	activeMusicTween:Play()
 
@@ -1839,6 +2263,11 @@ local function getCurrentMusicType(currentWorld: string): string
 end
 
 local function updateWorldMusic()
+	if player:GetAttribute("MusicEnabled") == false then
+		stopLobbyMusic()
+		return
+	end
+
 	local currentWorld = player:GetAttribute("Current_World")
 	if typeof(currentWorld) ~= "string" then
 		stopLobbyMusic()
@@ -1880,7 +2309,7 @@ local function updateWorldMusic()
 	end
 
 	if lobbyMusicSound.IsPlaying and lobbyMusicSound.Volume > 0 then
-		activeMusicTween = TweenService:Create(lobbyMusicSound, TweenInfo.new(MUSIC_FADE_TIME), {
+		activeMusicTween = TweenService:Create(lobbyMusicSound, TweenConfig.WithDuration(CLIENT_HANDLER_CONFIG.MUSIC_FADE_TIME, TweenConfig.MusicFade), {
 			Volume = 0,
 		})
 		activeMusicTween:Play()
@@ -1915,16 +2344,23 @@ local function teardownPlayerClientHandler(reason: string)
 	lastTargetFov = nil
 	local currentCamera = Workspace.CurrentCamera
 	if currentCamera then
-		currentCamera.FieldOfView = DEFAULT_FOV
+		currentCamera.FieldOfView = CLIENT_HANDLER_CONFIG.DEFAULT_FOV
 	end
 
 	stopMovementDetection()
 	movementLifecycleMaid:DoCleaning()
 	topLevelMaid:DoCleaning()
-
 	for model, kartState in pairs(observedEquippedKarts) do
 		cleanupObservedEquippedKart(kartState)
 		observedEquippedKarts[model] = nil
+	end
+	if reason ~= "ReplacedByNewCharacterScript" then
+		if localKartEngineSound then
+			localKartEngineSound:Stop()
+			localKartEngineSound:Destroy()
+			localKartEngineSound = nil
+		end
+		localKartEngineSoundLastSeenAt = nil
 	end
 
 	for trackedPlayer in pairs(observedTrailPlayerMaids) do
@@ -1941,12 +2377,17 @@ local function teardownPlayerClientHandler(reason: string)
 		gradientMaid:DoCleaning()
 	end
 
-	table.clear(observedKartShowcases)
+	for model in pairs(table.clone(observedKartShowcases)) do
+		cleanupKartShowcase(model, true)
+	end
 	table.clear(observedTreadmillTextures)
 	table.clear(observedTreadmillTouchParts)
 	table.clear(observedKartVisualSourceRoots)
 	cachedCharacterRootPart = nil
 	kartVisualFrameAccumulator = 0
+	kartVisualHealthAccumulator = 0
+	localKartVisualMissingSince = nil
+	lastKartVisualResyncAt = 0
 	setActiveTreadmillHighlightAdornee(nil)
 	if activeTreadmillHighlight then
 		activeTreadmillHighlight:Destroy()
@@ -1986,7 +2427,7 @@ movementLifecycleMaid:GiveTask(character.AncestryChanged:Connect(function(_, par
 end))
 
 local function scheduleHumanoidRecovery()
-	recoveryUntil = tick() + RECOVERY_FORCE_UPRIGHT_WINDOW
+	recoveryUntil = tick() + CLIENT_HANDLER_CONFIG.RECOVERY_FORCE_UPRIGHT_WINDOW
 	deferTopLevel(function()
 		if humanoid.Health <= 0 then
 			return
@@ -2019,7 +2460,10 @@ end
 
 setupRecoveryStates()
 
-local function updateVIPDoorCollision()
+
+local WorldSourceBindings = {}
+
+function WorldSourceBindings.updateVIPDoorCollision()
 	PlayerHandler.UpdateVIPRoomCollision(player)
 end
 
@@ -2038,7 +2482,11 @@ local function tweenCameraFov(targetFov: number)
 		activeFovTween:Cancel()
 	end
 
-	activeFovTween = TweenService:Create(currentCamera, TweenInfo.new(FOV_TWEEN_TIME), { FieldOfView = targetFov })
+	activeFovTween = TweenService:Create(
+		currentCamera,
+		TweenConfig.WithDuration(CLIENT_HANDLER_CONFIG.FOV_TWEEN_TIME, TweenConfig.CameraFov),
+		{ FieldOfView = targetFov }
+	)
 	activeFovTween:Play()
 end
 
@@ -2050,12 +2498,12 @@ local function updateDynamicFov()
 	end
 
 	if player:GetAttribute("Ui_TrollFrameOpen") == true then
-		tweenCameraFov(DEFAULT_FOV)
+		tweenCameraFov(CLIENT_HANDLER_CONFIG.DEFAULT_FOV)
 		return
 	end
 
 	if player:GetAttribute("Treadmill_Active") == true then
-		tweenCameraFov(TREADMILL_FOV)
+		tweenCameraFov(CLIENT_HANDLER_CONFIG.TREADMILL_FOV)
 		return
 	end
 
@@ -2063,143 +2511,16 @@ local function updateDynamicFov()
 		Vector3.new(rootPart.AssemblyLinearVelocity.X, 0, rootPart.AssemblyLinearVelocity.Z).Magnitude
 	local maxSpeed = math.max(player:GetAttribute("Max_Player_Speed") or humanoid.WalkSpeed, 1)
 	local normalizedSpeed = math.clamp(horizontalVelocity / maxSpeed, 0, 1)
-	local targetFov = DEFAULT_FOV + ((SPEED_FOV_MAX - DEFAULT_FOV) * normalizedSpeed)
+	local targetFov = CLIENT_HANDLER_CONFIG.DEFAULT_FOV + ((CLIENT_HANDLER_CONFIG.SPEED_FOV_MAX - CLIENT_HANDLER_CONFIG.DEFAULT_FOV) * normalizedSpeed)
 	tweenCameraFov(targetFov)
 end
 
-local function isVIPRoomDescendant(instance: Instance): boolean
+function WorldSourceBindings.isVIPRoomDescendant(instance: Instance): boolean
 	local vipRooms = instance:FindFirstAncestor("VIPRooms")
 	return vipRooms ~= nil
 end
 
-local function getKartModelNameByNumber(worldName: string, kartNumber: number): string?
-	local kartModelsFolder = ReplicatedStorage:FindFirstChild("KartModels")
-	local worldKartFolder = kartModelsFolder and kartModelsFolder:FindFirstChild(worldName)
-	if not worldKartFolder then
-		return nil
-	end
-
-	local prefix = tostring(kartNumber) .. "_"
-	for _, child in ipairs(worldKartFolder:GetChildren()) do
-		if child:IsA("Model") and string.find(child.Name, prefix, 1, true) == 1 then
-			return child.Name
-		end
-	end
-
-	return nil
-end
-
-local function getGamepassKartModelName(kartButton: Instance): string?
-	local kartName = string.match(kartButton.Name, "^KartButton_(.+)$")
-	if typeof(kartName) ~= "string" or kartName == "" then
-		return nil
-	end
-
-	local kartModelsFolder = ReplicatedStorage:FindFirstChild("KartModels")
-	local gamepassFolder = kartModelsFolder and kartModelsFolder:FindFirstChild("Gamepasses")
-	if not gamepassFolder then
-		return nil
-	end
-
-	local directMatch = gamepassFolder:FindFirstChild(kartName)
-	if directMatch and directMatch:IsA("Model") then
-		return directMatch.Name
-	end
-
-	for _, child in ipairs(gamepassFolder:GetChildren()) do
-		if child:IsA("Model") then
-			local displayName = string.match(child.Name, "^[^_]+_(.+)$")
-			if displayName == kartName then
-				return child.Name
-			end
-		end
-	end
-
-	return nil
-end
-
-local function applyKartButtonColor(kartButton: Instance, color: Color3)
-	local buttonPart = kartButton:FindFirstChild("Button")
-	if buttonPart and buttonPart:IsA("BasePart") then
-		buttonPart.Color = color
-	end
-end
-
-local function updateKartButtonVisuals()
-	local currentWorld = player:GetAttribute("Current_World")
-	if typeof(currentWorld) ~= "string" then
-		return
-	end
-
-	local dataLoaded = player:GetAttribute("Data_Loaded") == true
-	local worldsFolder = Workspace:FindFirstChild("Worlds")
-	local world = worldsFolder and worldsFolder:FindFirstChild(currentWorld)
-	local kartButtonsFolder = world and world:FindFirstChild("KartButtons")
-	if not world then
-		return
-	end
-
-	local ownedKarts = PlayerHandler.GetOwnedKarts(player)
-	local equippedKart = player:GetAttribute("Kart_Equipped")
-	local currentWins = player:GetAttribute("WinCount") or 0
-	local bloodmoonWins = player:GetAttribute("BloodmoonWins") or 0
-
-	local function updateKartButtonFolder(buttonsFolder: Instance, isBloodmoonFolder: boolean)
-		for _, kartButton in ipairs(buttonsFolder:GetChildren()) do
-			local kartNumber = kartButton:GetAttribute("KartNumber")
-			local winsRequired = kartButton:GetAttribute("WinsRequired")
-			local eventKartName = kartButton:GetAttribute("KartName")
-			local isBloodmoonWinKart = isBloodmoonFolder
-				and kartButton:GetAttribute("EventName") == "Bloodmoon"
-				and typeof(eventKartName) == "string"
-				and typeof(winsRequired) == "number"
-				and typeof(kartButton:GetAttribute("ProductKey")) ~= "string"
-			local isGamepassKart = not isBloodmoonWinKart and kartNumber == nil -- no KartNumber = gamepass kart
-			local kartModelName = if isBloodmoonWinKart
-				then eventKartName
-				elseif typeof(kartNumber) == "number"
-					then getKartModelNameByNumber(currentWorld, kartNumber)
-					else getGamepassKartModelName(kartButton)
-			if not kartModelName or typeof(kartModelName) ~= "string" then
-				applyKartButtonColor(kartButton, KART_CANT_AFFORD_COLOR)
-				continue
-			end
-
-			if isGamepassKart then
-				continue -- skip color changes for gamepass karts
-			end
-
-			local color = KART_CANT_AFFORD_COLOR
-			if equippedKart == kartModelName then
-				color = KART_EQUIPPED_COLOR
-			elseif dataLoaded then
-				color = KART_AVAILABLE_COLOR
-				local availableWins = if isBloodmoonWinKart then bloodmoonWins else currentWins
-				if
-					typeof(winsRequired) == "number"
-					and not ownedKarts[kartModelName]
-					and availableWins < winsRequired
-				then
-					color = KART_CANT_AFFORD_COLOR
-				end
-			end
-
-			applyKartButtonColor(kartButton, color)
-		end
-	end
-
-	if kartButtonsFolder then
-		updateKartButtonFolder(kartButtonsFolder, false)
-	end
-	if currentWorld == "World1" then
-		local eventKartButtonsFolder = world:FindFirstChild("EventKartButtons")
-		if eventKartButtonsFolder then
-			updateKartButtonFolder(eventKartButtonsFolder, true)
-		end
-	end
-end
-
-local function registerRainbowGradient(instance: Instance)
+function WorldSourceBindings.registerRainbowGradient(instance: Instance)
 	if not instance:IsA("UIGradient") or instance.Name ~= "RainbowGradient" then
 		return
 	end
@@ -2231,14 +2552,22 @@ local function registerRainbowGradient(instance: Instance)
 	VisualFunctions.SetupRainbowGradient(instance)
 end
 
-local function bindWorldSourceRoot(root: Instance)
+function WorldSourceBindings.bindWorldSourceRoot(root: Instance)
 	if observedWorldSourceRoots[root] or not root:IsDescendantOf(Workspace) then
 		return
 	end
 
 	local rootMaid = beginSourceRootBinding(root, observedWorldSourceRoots)
 	rootMaid:GiveTask(root.DescendantAdded:Connect(function(descendant)
-		if descendant:IsA("BasePart") and descendant.Name == "VIPDoor" and isVIPRoomDescendant(descendant) then
+		if descendant:IsA("Folder") and descendant.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockFolderName then
+			bindKartVisualSourceRoot(descendant)
+		end
+
+		if
+			descendant:IsA("BasePart")
+			and descendant.Name == "VIPDoor"
+			and WorldSourceBindings.isVIPRoomDescendant(descendant)
+		then
 			local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 			local distanceText = "unknown distance"
 			if rootPart then
@@ -2253,62 +2582,58 @@ local function bindWorldSourceRoot(root: Instance)
 				),
 				"PlayerClientHandler"
 			)
-			deferTopLevel(updateVIPDoorCollision)
+			deferTopLevel(WorldSourceBindings.updateVIPDoorCollision)
 		end
 
-		local kartButton = descendant:FindFirstAncestor("KartButton")
-		if kartButton then
-			deferTopLevel(updateKartButtonVisuals)
-		end
-
-		registerRainbowGradient(descendant)
+		WorldSourceBindings.registerRainbowGradient(descendant)
 		registerTreadmillTexture(descendant)
 		registerTreadmillTouchPart(descendant)
 	end))
 
 	for _, descendant in ipairs(root:GetDescendants()) do
-		registerRainbowGradient(descendant)
+		if descendant:IsA("Folder") and descendant.Name == CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockFolderName then
+			bindKartVisualSourceRoot(descendant)
+		end
+
+		WorldSourceBindings.registerRainbowGradient(descendant)
 		registerTreadmillTexture(descendant)
 		registerTreadmillTouchPart(descendant)
 	end
 end
 
-local function refreshWorldSourceBindings()
+function WorldSourceBindings.refreshWorldSourceBindings()
 	local worldsFolder = Workspace:FindFirstChild("Worlds")
 	if worldsFolder then
-		bindWorldSourceRoot(worldsFolder)
+		WorldSourceBindings.bindWorldSourceRoot(worldsFolder)
 	end
 end
 
 if not RunService:IsStudio() then
-	ContextActionService:UnbindAction(FREECAM_BLOCK_ACTION)
+	ContextActionService:UnbindAction(CLIENT_HANDLER_CONFIG.FREECAM_BLOCK_ACTION)
 	ContextActionService:BindActionAtPriority(
-		FREECAM_BLOCK_ACTION,
+		CLIENT_HANDLER_CONFIG.FREECAM_BLOCK_ACTION,
 		onBlockRobloxFreecamAction,
 		false,
 		Enum.ContextActionPriority.High.Value,
 		Enum.KeyCode.P
 	)
 	topLevelMaid:GiveTask(function()
-		ContextActionService:UnbindAction(FREECAM_BLOCK_ACTION)
+		ContextActionService:UnbindAction(CLIENT_HANDLER_CONFIG.FREECAM_BLOCK_ACTION)
 	end)
 else
-	ContextActionService:UnbindAction(FREECAM_BLOCK_ACTION)
+	ContextActionService:UnbindAction(CLIENT_HANDLER_CONFIG.FREECAM_BLOCK_ACTION)
 end
 
-topLevelMaid:GiveTask(player:GetAttributeChangedSignal("HasVIPPass"):Connect(updateVIPDoorCollision))
+topLevelMaid:GiveTask(
+	player:GetAttributeChangedSignal("HasVIPPass"):Connect(WorldSourceBindings.updateVIPDoorCollision)
+)
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Treadmill_Active"):Connect(updateDynamicFov))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Treadmill_Active"):Connect(function()
-	treadmillHighlightUpdateAccumulator = TREADMILL_HIGHLIGHT_UPDATE_INTERVAL
+	treadmillHighlightUpdateAccumulator = CLIENT_HANDLER_CONFIG.TREADMILL_HIGHLIGHT_UPDATE_INTERVAL
 	setActiveTreadmillHighlightAdornee(getCurrentTreadmillHighlightAdornee())
 end))
-topLevelMaid:GiveTask(player:GetAttributeChangedSignal("OwnedKarts"):Connect(updateKartButtonVisuals))
-topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Kart_Equipped"):Connect(updateKartButtonVisuals))
-topLevelMaid:GiveTask(player:GetAttributeChangedSignal("WinCount"):Connect(updateKartButtonVisuals))
-topLevelMaid:GiveTask(player:GetAttributeChangedSignal("BloodmoonWins"):Connect(updateKartButtonVisuals))
-topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Current_World"):Connect(updateKartButtonVisuals))
-topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Data_Loaded"):Connect(updateKartButtonVisuals))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Current_World"):Connect(updateWorldMusic))
+topLevelMaid:GiveTask(player:GetAttributeChangedSignal("MusicEnabled"):Connect(updateWorldMusic))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("CurrentStage"):Connect(updateWorldMusic))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("MinigameParticipant"):Connect(updateWorldMusic))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("MinigameState"):Connect(updateWorldMusic))
@@ -2321,78 +2646,85 @@ topLevelMaid:GiveTask(Players.PlayerRemoving:Connect(function(removingPlayer)
 	cleanupObservedTrailPlayerBindings(removingPlayer)
 end))
 
-for _, targetPlayer in ipairs(Players:GetPlayers()) do
-	bindObservedTrailPlayer(targetPlayer)
-end
+deferTopLevel(function()
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		bindObservedTrailPlayer(targetPlayer)
+	end
+end)
 
 topLevelMaid:GiveTask(Workspace.ChildAdded:Connect(function(child)
 	if child.Name == "Worlds" then
-		deferTopLevel(updateVIPDoorCollision)
-		deferTopLevel(updateKartButtonVisuals)
-		deferTopLevel(refreshWorldSourceBindings)
+		deferTopLevel(WorldSourceBindings.updateVIPDoorCollision)
+		deferTopLevel(WorldSourceBindings.refreshWorldSourceBindings)
 	end
-	if child.Name == "Worlds" or child.Name == KART_VISUAL_HOLDER_NAME then
+	if child.Name == "Worlds" or child.Name == CLIENT_HANDLER_CONFIG.KART_VISUAL_HOLDER_NAME then
 		deferTopLevel(refreshKartVisualSourceBindings)
 	end
 end))
 
-deferTopLevel(updateVIPDoorCollision)
-deferTopLevel(updateKartButtonVisuals)
+deferTopLevel(WorldSourceBindings.updateVIPDoorCollision)
 deferTopLevel(updateDynamicFov)
 deferTopLevel(updateWorldMusic)
 deferTopLevel(refreshKartVisualSourceBindings)
-deferTopLevel(refreshWorldSourceBindings)
+deferTopLevel(WorldSourceBindings.refreshWorldSourceBindings)
 
 scheduleKartRespawnProbe("postSpawn.0.25s", 0.25)
 scheduleKartRespawnProbe("postSpawn.1.5s", 1.5)
 
 topLevelMaid:GiveTask(RunService.Heartbeat:Connect(function(dt)
-	fovUpdateAccumulator = math.min(fovUpdateAccumulator + dt, FOV_UPDATE_INTERVAL * 2)
-	if fovUpdateAccumulator >= FOV_UPDATE_INTERVAL then
+	kartVisualHealthAccumulator += dt
+	if kartVisualHealthAccumulator >= CLIENT_HANDLER_CONFIG.KART_CLIENT_VISUAL_HEALTH_INTERVAL then
+		kartVisualHealthAccumulator = 0
+		reconcileLocalKartVisual()
+	end
+
+	fovUpdateAccumulator = math.min(fovUpdateAccumulator + dt, CLIENT_HANDLER_CONFIG.FOV_UPDATE_INTERVAL * 2)
+	if fovUpdateAccumulator >= CLIENT_HANDLER_CONFIG.FOV_UPDATE_INTERVAL then
 		updateDynamicFov()
 		fovUpdateAccumulator = 0
 	end
 
-	kartShowcaseFrameAccumulator = math.min(kartShowcaseFrameAccumulator + dt, KART_SHOWCASE_FRAMELOCK_INTERVAL * 2)
-	if kartShowcaseFrameAccumulator >= KART_SHOWCASE_FRAMELOCK_INTERVAL then
+	kartShowcaseFrameAccumulator = math.min(kartShowcaseFrameAccumulator + dt, CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FRAMELOCK_INTERVAL * 2)
+	if kartShowcaseFrameAccumulator >= CLIENT_HANDLER_CONFIG.KART_SHOWCASE_FRAMELOCK_INTERVAL then
 		local showcaseDt = kartShowcaseFrameAccumulator
 		kartShowcaseFrameAccumulator = 0
 		updateObservedKartShowcases(showcaseDt)
 	end
 
-	kartVisualFrameAccumulator = math.min(kartVisualFrameAccumulator + dt, KART_VISUAL_FRAMELOCK_INTERVAL * 3)
+	kartVisualFrameAccumulator = math.min(kartVisualFrameAccumulator + dt, CLIENT_HANDLER_CONFIG.KART_VISUAL_FRAMELOCK_INTERVAL * 3)
 	local kartVisualSteps = 0
-	while kartVisualFrameAccumulator >= KART_VISUAL_FRAMELOCK_INTERVAL and kartVisualSteps < 2 do
-		kartVisualFrameAccumulator -= KART_VISUAL_FRAMELOCK_INTERVAL
-		updateObservedEquippedKartVisuals(KART_VISUAL_FRAMELOCK_INTERVAL)
+	while kartVisualFrameAccumulator >= CLIENT_HANDLER_CONFIG.KART_VISUAL_FRAMELOCK_INTERVAL and kartVisualSteps < 2 do
+		kartVisualFrameAccumulator -= CLIENT_HANDLER_CONFIG.KART_VISUAL_FRAMELOCK_INTERVAL
+		updateObservedEquippedKartVisuals(CLIENT_HANDLER_CONFIG.KART_VISUAL_FRAMELOCK_INTERVAL)
 		kartVisualSteps += 1
 	end
-	if kartVisualSteps >= 2 and kartVisualFrameAccumulator >= KART_VISUAL_FRAMELOCK_INTERVAL then
+	if kartVisualSteps >= 2 and kartVisualFrameAccumulator >= CLIENT_HANDLER_CONFIG.KART_VISUAL_FRAMELOCK_INTERVAL then
 		kartVisualFrameAccumulator = 0
 	end
 
 	treadmillTextureUpdateAccumulator =
-		math.min(treadmillTextureUpdateAccumulator + dt, TREADMILL_TEXTURE_UPDATE_INTERVAL * 3)
+		math.min(treadmillTextureUpdateAccumulator + dt, CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_UPDATE_INTERVAL * 3)
 	local treadmillTextureSteps = 0
-	while treadmillTextureUpdateAccumulator >= TREADMILL_TEXTURE_UPDATE_INTERVAL and treadmillTextureSteps < 2 do
-		treadmillTextureUpdateAccumulator -= TREADMILL_TEXTURE_UPDATE_INTERVAL
-		updateTreadmillTextureVisuals(TREADMILL_TEXTURE_UPDATE_INTERVAL)
+	while treadmillTextureUpdateAccumulator >= CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_UPDATE_INTERVAL and treadmillTextureSteps < 2 do
+		treadmillTextureUpdateAccumulator -= CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_UPDATE_INTERVAL
+		updateTreadmillTextureVisuals(CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_UPDATE_INTERVAL)
 		treadmillTextureSteps += 1
 	end
-	if treadmillTextureSteps >= 2 and treadmillTextureUpdateAccumulator >= TREADMILL_TEXTURE_UPDATE_INTERVAL then
+	if treadmillTextureSteps >= 2 and treadmillTextureUpdateAccumulator >= CLIENT_HANDLER_CONFIG.TREADMILL_TEXTURE_UPDATE_INTERVAL then
 		treadmillTextureUpdateAccumulator = 0
 	end
 
 	updateTreadmillHighlight(dt)
 
 	trailVisualUpdateAccumulator += dt
-	if trailVisualUpdateAccumulator >= TRAIL_VISUAL_UPDATE_INTERVAL then
+	local remoteTrailUpdateInterval = getRemoteTrailBudgetConfig().updateInterval
+	if trailVisualUpdateAccumulator >= remoteTrailUpdateInterval then
 		trailVisualUpdateAccumulator = 0
 		updateObservedTrailVisuals()
 	end
 
 	worldMusicUpdateAccumulator += dt
-	if worldMusicUpdateAccumulator >= WORLD_MUSIC_UPDATE_INTERVAL then
+	if worldMusicUpdateAccumulator >= CLIENT_HANDLER_CONFIG.WORLD_MUSIC_UPDATE_INTERVAL then
 		worldMusicUpdateAccumulator = 0
 		updateWorldMusic()
 	end

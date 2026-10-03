@@ -67,7 +67,7 @@ local function findProductKey(products: { [string]: any }, productId: number): s
 	return nil
 end
 
-local function isBloodmoonActive(): boolean
+local function isLiveEventActive(eventName: string): boolean
 	local stateFolder = ReplicatedStorage:FindFirstChild("LiveEventState")
 	if not stateFolder or not stateFolder:IsA("Folder") then
 		return false
@@ -75,16 +75,20 @@ local function isBloodmoonActive(): boolean
 
 	local activeEventIds = stateFolder:GetAttribute("ActiveEventIds")
 	return typeof(activeEventIds) == "string"
-		and string.find("," .. activeEventIds .. ",", ",Bloodmoon,", 1, true) ~= nil
+		and string.find("," .. activeEventIds .. ",", "," .. eventName .. ",", 1, true) ~= nil
 end
 
 local function isEventProductAvailable(productKey: string): boolean
-	local bloodmoonProduct = ProductService.BloodmoonKartProducts[productKey]
-	if bloodmoonProduct == nil then
-		return true
+	local eventKartProducts = ProductService.EventKartProducts
+	if typeof(eventKartProducts) == "table" then
+		for eventName, eventProducts in pairs(eventKartProducts) do
+			if typeof(eventProducts) == "table" and eventProducts[productKey] ~= nil then
+				return isLiveEventActive(tostring(eventName))
+			end
+		end
 	end
 
-	return isBloodmoonActive()
+	return true
 end
 
 local function sendResult(player: Player, purchaseKind: string, productId: number, success: boolean, reason: string)

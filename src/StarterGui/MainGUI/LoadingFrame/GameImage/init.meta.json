@@ -11,6 +11,7 @@
     "ScaleType": "Fit",
     "Size": [[0.1958, 0.0], [0.3489, 0.0]],
     "TileSize": [[0.0, 100.0], [0.0, 100.0]],
+    "Visible": false,
     "ZIndex": 3
   }
 }

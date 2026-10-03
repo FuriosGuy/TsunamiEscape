@@ -1,5 +1,3 @@
---!strict
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ClientGraphicsService = require(ReplicatedStorage.Modules.ClientGraphicsService)
 

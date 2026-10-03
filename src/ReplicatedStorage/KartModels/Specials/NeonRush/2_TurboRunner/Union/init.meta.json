@@ -1,0 +1,11 @@
+{
+  "className": "UnionOperation",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-12.3733, 9.2971, -2.5769, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [17, 17, 17],
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Stud",
+    "Size": [1.2533, 1.85, 3.656]
+  }
+}

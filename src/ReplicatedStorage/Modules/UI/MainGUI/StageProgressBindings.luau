@@ -1,5 +1,3 @@
---!strict
-
 local StageProgressBindings = {}
 
 type BindOptions = {
@@ -50,7 +48,6 @@ function StageProgressBindings.Bind(options: BindOptions)
 			task.defer(options.tryRefreshStageProgress)
 		end
 	end))
-
 end
 
 return StageProgressBindings
