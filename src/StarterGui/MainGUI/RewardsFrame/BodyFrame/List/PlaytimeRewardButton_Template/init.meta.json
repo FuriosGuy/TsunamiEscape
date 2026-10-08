@@ -4,6 +4,7 @@
     "AnchorPoint": [0.5, 0.5],
     "Attributes": {
       "isHover": false,
+      "isRotate": false,
       "isShine": false
     },
     "BackgroundColor3": [0, 1, 0],

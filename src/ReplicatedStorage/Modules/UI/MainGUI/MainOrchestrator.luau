@@ -73,8 +73,21 @@ local PET_INTERACTION_FRAME_NAMES: { [string]: boolean } = table.freeze({
 	ConfirmButton = true,
 	CancelButton = true,
 })
+local function stopNotificationBadgeAnimation(badgeState: any)
+	local stopAnimation = badgeState.animationCleanup
+	badgeState.animationCleanup = nil
+	if typeof(stopAnimation) == "function" then
+		stopAnimation()
+	end
+end
 
-local function applyReturnToStageAdLayout(frame: Frame, adAvailable: boolean)
+local function ensureNotificationBadgeAnimation(badgeState: any, badge: GuiObject)
+	if typeof(badgeState.animationCleanup) ~= "function" then
+		badgeState.animationCleanup = VisualFunctions.StartNotificationBadgeAnimation(badge)
+	end
+end
+
+local function applyReturnToStageAdLayout(frame: GuiObject, adAvailable: boolean)
 	local paidButton = frame:FindFirstChild("ReturnToStageButton", true)
 	if paidButton and paidButton:IsA("GuiObject") then
 		paidButton.Position = if adAvailable
@@ -135,14 +148,14 @@ local function formatTrailMultiplier(multiplier: number): string
 	return text
 end
 
-local function getOrCreateEquipButton(entryFrame: Frame): Frame?
+local function getOrCreateEquipButton(entryFrame: Frame): GuiObject?
 	local existing = entryFrame:FindFirstChild("EquipButton")
-	if existing and existing:IsA("Frame") then
+	if existing and existing:IsA("GuiObject") then
 		return existing
 	end
 
 	local buyButton = entryFrame:FindFirstChild("BuyButton")
-	if not buyButton or not buyButton:IsA("Frame") then
+	if not buyButton or not buyButton:IsA("GuiObject") then
 		return nil
 	end
 
@@ -158,24 +171,31 @@ local function getOrCreateEquipButton(entryFrame: Frame): Frame?
 	return equipButton
 end
 
-local function applyGradientStyle(frame: Frame, style: ColorConfig.GradientStyle)
-	frame.BackgroundColor3 = style.BackgroundColor
-	local gradient = frame:FindFirstChildOfClass("UIGradient")
+local function applyGradientStyle(frame: GuiObject, style: ColorConfig.GradientStyle)
+	local styleTarget = frame
+	if frame:IsA("CanvasGroup") then
+		local main = frame:FindFirstChild("Main")
+		if main and main:IsA("GuiObject") then
+			styleTarget = main
+		end
+	end
+	styleTarget.BackgroundColor3 = style.BackgroundColor
+	local gradient = styleTarget:FindFirstChildOfClass("UIGradient")
 	if not gradient then
 		gradient = Instance.new("UIGradient")
-		gradient.Parent = frame
+		gradient.Parent = styleTarget
 	end
 	gradient.Rotation = 90
 	gradient.Color = style.Gradient
-	VisualFunctions.RefreshFrameInteractionColors(frame)
+	VisualFunctions.RefreshFrameInteractionColors(styleTarget)
 end
 
-local function applyWheelStyle(frame: Frame)
+local function applyWheelStyle(frame: GuiObject)
 	frame:SetAttribute("OriginalDisabledBaseColor", nil)
 	applyGradientStyle(frame, WHEEL_STYLE)
 end
 
-local function applyEquipStyle(frame: Frame)
+local function applyEquipStyle(frame: GuiObject)
 	applyGradientStyle(frame, EQUIP_STYLE)
 end
 
@@ -199,7 +219,7 @@ local function bindPetInventoryNotifications(
 		badge = nil :: GuiObject?,
 		refresh = nil :: (() -> ())?,
 	}
-	local petFrame: Frame? = nil
+	local petFrame: GuiObject? = nil
 	local baselineReady = false
 	local knownPetUids: { [string]: boolean } = {}
 	local unreadPetUids: { [string]: boolean } = {}
@@ -277,7 +297,7 @@ local function bindPetInventoryNotifications(
 		elseif instance.Name == "PetsButtonFrame" then
 			badgeState.buttonFrame = instance
 			refreshBadge()
-		elseif instance.Name == "PetFrame" and instance:IsA("Frame") then
+		elseif instance.Name == "PetFrame" and instance:IsA("GuiObject") then
 			petFrame = instance
 			maid:GiveTask(instance:GetPropertyChangedSignal("Visible"):Connect(function()
 				if petFrame == instance and instance.Visible then
@@ -432,7 +452,7 @@ function MainOrchestrator.Init(root: Instance)
 	local canUseTrollFrame = true
 	local allowSelfTargetingInTrollDebug = RunService:IsStudio() and DEBUG_TROLL_FRAME_ONLY_FOR_ME
 
-	local trollFrame: Frame? = nil
+	local trollFrame: GuiObject? = nil
 	local trollNameLabel: TextLabel? = nil
 	local trollPreviousButton: GuiButton? = nil
 	local trollNextButton: GuiButton? = nil
@@ -471,7 +491,7 @@ function MainOrchestrator.Init(root: Instance)
 			autoRotate = nil,
 			onLoadingComplete = function() end,
 		}
-	local loadingFrame: Frame? = nil
+	local loadingFrame: GuiObject? = nil
 	local loadingImage: ImageLabel? = nil
 	local loadingGameImage: ImageLabel? = nil
 	local loadingLightRay: ImageLabel? = nil
@@ -481,7 +501,7 @@ function MainOrchestrator.Init(root: Instance)
 	local loadingCurrentLabel: TextLabel? = nil
 	local loadingSkipButtonFrame: GuiObject? = nil
 	local loadingSkipButton: GuiButton? = nil
-	local loadingDataRecoveryFrame: Frame? = nil
+	local loadingDataRecoveryFrame: GuiObject? = nil
 	local loadingDataRecoveryWarningLabel: TextLabel? = nil
 	local loadingDataRecoveryAttemptsLabel: TextLabel? = nil
 	local loadingDataRecoveryRetryButton: GuiButton? = nil
@@ -906,6 +926,7 @@ function MainOrchestrator.Init(root: Instance)
 	)
 		local existingBadge = badgeState.badge
 		if not shouldShow then
+			stopNotificationBadgeAnimation(badgeState)
 			if existingBadge then
 				existingBadge:Destroy()
 				badgeState.badge = nil
@@ -920,6 +941,7 @@ function MainOrchestrator.Init(root: Instance)
 
 		local badge = existingBadge
 		if not badge or badge.Parent == nil then
+			stopNotificationBadgeAnimation(badgeState)
 			local template = badgeState.template
 			if not template or template.Parent == nil then
 				local guiHandler = root:FindFirstChild("GuiHandler")
@@ -993,6 +1015,8 @@ function MainOrchestrator.Init(root: Instance)
 					end
 				end
 			end
+
+			ensureNotificationBadgeAnimation(badgeState, badge)
 		end
 	end
 
@@ -1059,7 +1083,9 @@ function MainOrchestrator.Init(root: Instance)
 
 	function tweenGuiTransparencyRecursive(instance: Instance, duration: number, transparency: number)
 		local tweenGoals = {}
-		if instance:IsA("Frame") or instance:IsA("ScrollingFrame") then
+		if instance:IsA("CanvasGroup") then
+			tweenGoals.GroupTransparency = transparency
+		elseif instance:IsA("Frame") or instance:IsA("ScrollingFrame") then
 			tweenGoals.BackgroundTransparency = transparency
 		elseif instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
 			tweenGoals.TextTransparency = transparency
@@ -1075,8 +1101,26 @@ function MainOrchestrator.Init(root: Instance)
 		end
 
 		for _, descendant in ipairs(instance:GetDescendants()) do
+			local insideCanvasGroup = instance:IsA("CanvasGroup")
+			local ancestor = descendant.Parent
+			while ancestor do
+				if ancestor:IsA("CanvasGroup") then
+					insideCanvasGroup = true
+					break
+				end
+				if ancestor == instance then
+					break
+				end
+				ancestor = ancestor.Parent
+			end
+			if insideCanvasGroup then
+				continue
+			end
+
 			local descendantGoals = {}
-			if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
+			if descendant:IsA("CanvasGroup") then
+				descendantGoals.GroupTransparency = transparency
+			elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
 				descendantGoals.TextTransparency = transparency
 			elseif descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
 				descendantGoals.ImageTransparency = transparency
@@ -1459,7 +1503,7 @@ function MainOrchestrator.Init(root: Instance)
 		end
 	end
 
-	local function bindDataRecoveryFrame(frame: Frame?)
+	local function bindDataRecoveryFrame(frame: GuiObject?)
 		if not frame then
 			return
 		end
@@ -1717,6 +1761,18 @@ function MainOrchestrator.Init(root: Instance)
 		if not instance:IsA("GuiObject") then
 			return
 		end
+		if
+			instance:IsA("CanvasGroup")
+			and instance:FindFirstChild("Main")
+			and instance:FindFirstChild("Shadow")
+		then
+			local canvasGroup = instance
+			local function bindFrameShadowColorSync()
+				VisualFunctions.BindFrameShadowColorSync(canvasGroup, sessionMaid)
+			end
+			sessionMaid:GiveTask(canvasGroup:GetAttributeChangedSignal("CreateFrameShadow"):Connect(bindFrameShadowColorSync))
+			bindFrameShadowColorSync()
+		end
 
 		if instance.Name == "NotifShow_Template" then
 			rebirthReadyUIState.template = instance
@@ -1786,7 +1842,7 @@ function MainOrchestrator.Init(root: Instance)
 				VisualFunctions.HUD.DisableWaveCountdownLabel.Visible = false
 			end
 			VisualFunctions.SetupPulsate(instance, 1.05)
-		elseif instance.Name == "LoadingFrame" and instance:IsA("Frame") then
+		elseif instance.Name == "LoadingFrame" and instance:IsA("GuiObject") then
 			loadingFrame = instance
 			instance.Visible = STARTUP_LOADING_ENABLED and not hasCompletedStartupLoading
 			instance.Active = STARTUP_LOADING_ENABLED
@@ -1830,10 +1886,11 @@ function MainOrchestrator.Init(root: Instance)
 				end)
 			end
 
-			bindDataRecoveryFrame(instance:FindFirstChild("DataRecoveryFrame") :: Frame?)
-		elseif instance.Name == "DataRecoveryFrame" and instance:IsA("Frame") then
+			local recoveryFrame = instance:FindFirstChild("DataRecoveryFrame")
+			bindDataRecoveryFrame(if recoveryFrame and recoveryFrame:IsA("GuiObject") then recoveryFrame else nil)
+		elseif instance.Name == "DataRecoveryFrame" and instance:IsA("GuiObject") then
 			bindDataRecoveryFrame(instance)
-		elseif instance.Name == "ReturnToStageFrame" and instance:IsA("Frame") then
+		elseif instance.Name == "ReturnToStageFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.HUD.ReturnToStageFrame = instance
 			local returnToStageButton = instance:FindFirstChild("ReturnToStageButton", true)
 			if returnToStageButton then
@@ -2023,19 +2080,19 @@ function MainOrchestrator.Init(root: Instance)
 		end
 
 		-- 3. Frame & HUD References
-		if instance.Name == "RebirthFrame" and instance:IsA("Frame") then
+		if instance.Name == "RebirthFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.RebirthFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "TrailFrame" then
+		elseif instance.Name == "TrailFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.TrailFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "KartFrame" then
+		elseif instance.Name == "KartFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.KartFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "VerifyFrame" then
+		elseif instance.Name == "VerifyFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.VerifyFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "TrollFrame" then
+		elseif instance.Name == "TrollFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.TrollFrame = instance
 			instance.Visible = false
 			trollFrame = instance
@@ -2071,22 +2128,22 @@ function MainOrchestrator.Init(root: Instance)
 		elseif instance.Name == "JumpscareImage" and instance:IsA("ImageLabel") then
 			jumpscareImage = instance
 			instance.Visible = false
-		elseif instance.Name == "PetFrame" and instance:IsA("Frame") then
+		elseif instance.Name == "PetFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.PetFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "ShopFrame" then
+		elseif instance.Name == "ShopFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.ShopFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "RebirthConfirmFrame" then
+		elseif instance.Name == "RebirthConfirmFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.RebirthConfirmFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "RewardsFrame" then
+		elseif instance.Name == "RewardsFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.RewardsFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "DailyRewardFrame" then
+		elseif instance.Name == "DailyRewardFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.DailyRewardFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "SpinWheelFrame" and instance:IsA("Frame") then
+		elseif instance.Name == "SpinWheelFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.SpinWheelFrame = instance
 			instance.Visible = false
 		elseif instance.Name == "MainHUD" then
@@ -2106,14 +2163,14 @@ function MainOrchestrator.Init(root: Instance)
 		elseif instance.Name == "LevelUpFrame" then
 			VisualFunctions.HUD.LevelUpFrame = instance
 			instance.Visible = false
-		elseif instance.Name == "NotificationFrame" then
+		elseif instance.Name == "NotificationFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.HUD.NotificationFrame = instance
 			instance.Visible = false
 			VisualFunctions.BindNotificationVisibilityGuard(instance, sessionMaid)
 			if tutorialSystem then
 				tutorialSystem:RefreshNotificationReferences()
 			end
-		elseif instance.Name == "StageProgressFrame" and instance:IsA("Frame") then
+		elseif instance.Name == "StageProgressFrame" and instance:IsA("GuiObject") then
 			stageProgressState.frame = instance
 			stageProgressState.trackFrame = instance:FindFirstChild("TrackFrame", true) :: Frame?
 			stageProgressState.markersFrame = stageProgressState.trackFrame
@@ -2146,7 +2203,7 @@ function MainOrchestrator.Init(root: Instance)
 			end
 		elseif instance.Name == "SpeedMultiFrame" then
 			VisualFunctions.HUD.SpeedMultiFrame = instance
-		elseif instance.Name == "BottomRightGridFrame" and instance:IsA("Frame") then
+		elseif instance.Name == "BottomRightGridFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.HUD.BottomRightGridFrame = instance
 		elseif instance.Name == "SpeedBuyFrame" then
 			VisualFunctions.HUD.SpeedBuyFrame = instance
@@ -2220,7 +2277,7 @@ function MainOrchestrator.Init(root: Instance)
 
 		-- 4. Hover & Click Interactions
 		local hudButtonStyle = ColorConfig.UI.HudButtonStyles[instance.Name]
-		if hudButtonStyle and instance:IsA("Frame") then
+		if hudButtonStyle and instance:IsA("GuiObject") then
 			applyGradientStyle(instance, hudButtonStyle)
 		end
 
@@ -2352,12 +2409,12 @@ function MainOrchestrator.Init(root: Instance)
 		if
 			instance.Name == "ExitButton"
 			and instance.Parent
-			and instance.Parent:IsA("Frame")
+			and instance.Parent:IsA("GuiObject")
 			and instance.Parent.Name ~= "SpinWheelFrame"
 			and instance.Parent.Name ~= "PromptBuyProductsFrame"
 			and not instance:FindFirstAncestor("OpenLuckyBlockFrame")
 		then
-			local targetParent = instance.Parent :: Frame
+			local targetParent = instance.Parent :: GuiObject
 			local button = if instance:IsA("GuiButton")
 				then instance
 				else instance:FindFirstChildWhichIsA("GuiButton", true)
@@ -3073,7 +3130,7 @@ function MainOrchestrator.Init(root: Instance)
 			player = player,
 			badgeState = dailyClaimableUIState,
 			updateButtonNotificationBadge = updateButtonNotificationBadge,
-			getDailyRewardFrame = function(): Frame?
+			getDailyRewardFrame = function(): GuiObject?
 				return VisualFunctions.ActiveFrameGroup.DailyRewardFrame
 			end,
 			closeOtherFrames = MainFunctions.CloseOtherFrames,
@@ -3509,7 +3566,7 @@ function MainOrchestrator.Init(root: Instance)
 		local function updateShopButtons()
 			for frameName, config in pairs(SHOP_BUTTON_CONFIGS) do
 				local buttonFrame = root:FindFirstChild(frameName, true)
-				if not buttonFrame or not buttonFrame:IsA("Frame") then
+				if not buttonFrame or not buttonFrame:IsA("GuiObject") then
 					DebugModule.debugWarn(
 						string.format("Shop button frame not found: %s", frameName),
 						"MainOrchestrator"

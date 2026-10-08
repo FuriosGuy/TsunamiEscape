@@ -48,11 +48,11 @@ type CardPressState = {
 type PetInventoryUIControllerObject = {
 	player: Player,
 	viewportAnimator: PetViewportRenderer.Animator,
-	petFrame: Frame,
+	petFrame: GuiObject,
 	list: ScrollingFrame,
 	template: GuiObject,
-	selectedFrame: Frame,
-	confirmationFrame: Frame,
+	selectedFrame: GuiObject,
+	confirmationFrame: GuiObject,
 	cards: { [string]: GuiObject },
 	cardConnections: { [string]: RBXScriptConnection },
 	cardPressStates: { [string]: CardPressState },
@@ -154,7 +154,8 @@ local function readInventory(player: Player): { PetRecord }
 
 	local pets: { PetRecord } = {}
 	for _, value in ipairs(decoded) do
-		if typeof(value) == "table"
+		if
+			typeof(value) == "table"
 			and typeof(value.uid) == "string"
 			and typeof(value.petId) == "string"
 			and petDefinitions[value.petId] ~= nil
@@ -214,7 +215,12 @@ local function collectCardColorTargets(card: GuiObject): { ColorTarget }
 	end
 
 	local function inspect(instance: Instance)
-		if instance:IsA("Frame") or instance:IsA("ScrollingFrame") or instance:IsA("ViewportFrame") then
+		if
+			instance:IsA("Frame")
+			or instance:IsA("ScrollingFrame")
+			or instance:IsA("ViewportFrame")
+			or instance:IsA("CanvasGroup")
+		then
 			capture(instance, "BackgroundColor3")
 		elseif instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
 			capture(instance, "BackgroundColor3")
@@ -321,7 +327,12 @@ local function playPanelAnimation(
 	playTrackedTween(scaleTween, tweens)
 end
 
-local function restorePanelPresentation(frame: Frame, scale: UIScale?, targets: { TransparencyTarget }, tweens: { Tween })
+local function restorePanelPresentation(
+	frame: Frame,
+	scale: UIScale?,
+	targets: { TransparencyTarget },
+	tweens: { Tween }
+)
 	cancelPanelTweens(tweens)
 	if scale then
 		scale.Scale = 1
@@ -347,9 +358,12 @@ local function playPanelClose(
 	cancelPanelTweens(tweens)
 	for _, target in ipairs(targets) do
 		if target.instance:IsDescendantOf(frame) then
-			playTrackedTween(TweenService:Create(target.instance, TweenConfig.WindowClose, {
-				[target.property] = 1,
-			}), tweens)
+			playTrackedTween(
+				TweenService:Create(target.instance, TweenConfig.WindowClose, {
+					[target.property] = 1,
+				}),
+				tweens
+			)
 		end
 	end
 	local scaleTween = TweenService:Create(scale, TweenConfig.WindowClose, { Scale = 0.86 })
@@ -459,7 +473,11 @@ local function tweenConfirmationText(self: PetInventoryUIControllerObject, label
 		end
 	end
 	local function beginFadeIn()
-		if self.confirmationTextTokens[label] ~= textToken or not self.alive or not label:IsDescendantOf(self.confirmationFrame) then
+		if
+			self.confirmationTextTokens[label] ~= textToken
+			or not self.alive
+			or not label:IsDescendantOf(self.confirmationFrame)
+		then
 			return
 		end
 		label.Text = text
@@ -514,7 +532,8 @@ local function tweenConfirmationText(self: PetInventoryUIControllerObject, label
 		self.confirmationStrokeTweens[target.stroke] = strokeTween
 		self.confirmationStrokeOwners[target.stroke] = label
 		strokeTween.Completed:Connect(function()
-			if self.confirmationStrokeTweens[target.stroke] == strokeTween
+			if
+				self.confirmationStrokeTweens[target.stroke] == strokeTween
 				and strokeTween.PlaybackState ~= Enum.PlaybackState.Playing
 			then
 				self.confirmationStrokeTweens[target.stroke] = nil
@@ -599,11 +618,56 @@ local function clearCardStrokeTween(self: PetInventoryUIControllerObject, card: 
 	self.originalStrokeStyles[stroke] = nil
 end
 
+local function getStrokeScaleReference(stroke: UIStroke): number?
+	local parent = stroke.Parent
+	if parent == nil or not parent:IsA("GuiObject") then
+		return nil
+	end
+
+	local size = parent.AbsoluteSize
+	local shortestAxis = math.min(size.X, size.Y)
+	if shortestAxis <= 0 then
+		return nil
+	end
+
+	return shortestAxis
+end
+
+local function convertCardStrokeToScaled(stroke: UIStroke, baseThickness: number): number?
+	if stroke.StrokeSizingMode == Enum.StrokeSizingMode.ScaledSize then
+		return baseThickness
+	end
+
+	local referenceSize = getStrokeScaleReference(stroke)
+	if referenceSize == nil then
+		return nil
+	end
+
+	local scaledThickness = baseThickness / referenceSize
+	stroke.Thickness = scaledThickness
+	stroke.StrokeSizingMode = Enum.StrokeSizingMode.ScaledSize
+	return scaledThickness
+end
+
+local function strokeThicknessForPixels(stroke: UIStroke, pixelThickness: number, fallback: number): number
+	if stroke.StrokeSizingMode ~= Enum.StrokeSizingMode.ScaledSize then
+		return pixelThickness
+	end
+
+	local referenceSize = getStrokeScaleReference(stroke)
+	if referenceSize == nil then
+		return fallback
+	end
+
+	return pixelThickness / referenceSize
+end
+
 local function tweenStrokeTo(self: PetInventoryUIControllerObject, stroke: UIStroke, targetStyle: StrokeStyle)
 	stroke:SetAttribute(DYNAMIC_VISUAL_ATTRIBUTE, true)
 	local previousTarget = self.strokeTargets[stroke]
 	local previousTween = self.strokeTweens[stroke]
-	if previousTarget
+	if
+		previousTarget
 		and previousTarget.color == targetStyle.color
 		and previousTarget.thickness == targetStyle.thickness
 	then
@@ -677,11 +741,18 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 	local deleteSelectedButton = findGuiObject(petFrame, "DeleteSelectedButton")
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	local actionRemote = remotes and remotes:FindFirstChild("PetInventoryAction")
-	if not scrollingFrame or not scrollingFrame:IsA("ScrollingFrame") or not template
-		or not selectedFrame or not selectedFrame:IsA("Frame")
-		or not confirmationFrame or not confirmationFrame:IsA("Frame")
-		or not petFrame or not petFrame:IsA("Frame")
-		or not actionRemote or not actionRemote:IsA("RemoteEvent")
+	if
+		not scrollingFrame
+		or not scrollingFrame:IsA("ScrollingFrame")
+		or not template
+		or not selectedFrame
+		or not selectedFrame:IsA("GuiObject")
+		or not confirmationFrame
+		or not confirmationFrame:IsA("GuiObject")
+		or not petFrame
+		or not petFrame:IsA("GuiObject")
+		or not actionRemote
+		or not actionRemote:IsA("RemoteEvent")
 	then
 		DebugModule.debugWarn("Pet inventory UI hierarchy or action remote missing", MODULE_NAME)
 		return nil
@@ -727,9 +798,7 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 		confirmIds = {},
 		alive = true,
 	}, PetInventoryUIController) :: PetInventoryUIControllerObject
-	local deleteSelectedOriginalColor = if deleteSelectedButton
-		then deleteSelectedButton.BackgroundColor3
-		else nil
+	local deleteSelectedOriginalColor = if deleteSelectedButton then deleteSelectedButton.BackgroundColor3 else nil
 	if deleteSelectedButton then
 		deleteSelectedButton:SetAttribute(DYNAMIC_VISUAL_ATTRIBUTE, true)
 		for _, descendant in ipairs(deleteSelectedButton:GetDescendants()) do
@@ -827,17 +896,20 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 		local nextFrame = if action ~= nil then confirmationFrame else selectedFrame
 		local currentFrame = if confirmationFrame.Visible
 			then confirmationFrame
-			elseif selectedFrame.Visible
-			then selectedFrame
+			elseif selectedFrame.Visible then selectedFrame
 			else nil
 		self.panelTransitionToken += 1
 		local transitionToken = self.panelTransitionToken
 		if self.panelTransitioning and currentFrame then
-			local currentScale = if currentFrame == confirmationFrame then self.confirmationScale else self.selectionScale
+			local currentScale = if currentFrame == confirmationFrame
+				then self.confirmationScale
+				else self.selectionScale
 			local currentTargets = if currentFrame == confirmationFrame
 				then self.confirmationTransparencyTargets
 				else self.selectionTransparencyTargets
-			local currentTweens = if currentFrame == confirmationFrame then self.confirmationTweens else self.selectionTweens
+			local currentTweens = if currentFrame == confirmationFrame
+				then self.confirmationTweens
+				else self.selectionTweens
 			restorePanelPresentation(currentFrame, currentScale, currentTargets, currentTweens)
 			self.panelTransitioning = false
 			self.selectionPanelOpening = false
@@ -849,7 +921,7 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 		local function showNextFrame()
 			if not self.alive or self.panelTransitionToken ~= transitionToken then
 				return
-		end
+			end
 			self.panelTransitioning = false
 			if currentFrame then
 				currentFrame.Visible = false
@@ -879,11 +951,15 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 			elseif nextFrame ~= confirmationFrame then
 				resetConfirmationTextTransitions(self)
 			end
-			local currentScale = if currentFrame == confirmationFrame then self.confirmationScale else self.selectionScale
+			local currentScale = if currentFrame == confirmationFrame
+				then self.confirmationScale
+				else self.selectionScale
 			local currentTargets = if currentFrame == confirmationFrame
 				then self.confirmationTransparencyTargets
 				else self.selectionTransparencyTargets
-			local currentTweens = if currentFrame == confirmationFrame then self.confirmationTweens else self.selectionTweens
+			local currentTweens = if currentFrame == confirmationFrame
+				then self.confirmationTweens
+				else self.selectionTweens
 			playPanelClose(currentFrame, currentScale, currentTargets, currentTweens, showNextFrame)
 		else
 			showNextFrame()
@@ -897,9 +973,17 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 		end
 		local warningLabel = findTextLabel(confirmationFrame, "WarningLabel")
 		if warningLabel and self.confirmAction == "DeleteMany" then
-			tweenConfirmationText(self, warningLabel, if count == 0
-				then "Select pets to delete, then confirm. Equipped pets cannot be deleted."
-				else string.format("Delete %d selected pet%s? Equipped pets cannot be deleted.", count, if count == 1 then "" else "s"))
+			tweenConfirmationText(
+				self,
+				warningLabel,
+				if count == 0
+					then "Select pets to delete, then confirm. Equipped pets cannot be deleted."
+					else string.format(
+						"Delete %d selected pet%s? Equipped pets cannot be deleted.",
+						count,
+						if count == 1 then "" else "s"
+					)
+			)
 		end
 		self.confirmIds = {}
 		for uid in pairs(self.deleteIds) do
@@ -934,8 +1018,7 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 					target.baseColor.B * multiplier
 				)
 				local currentColor = (target.instance :: any)[target.property]
-				local tweenIsPlaying = target.tween ~= nil
-					and target.tween.PlaybackState == Enum.PlaybackState.Playing
+				local tweenIsPlaying = target.tween ~= nil and target.tween.PlaybackState == Enum.PlaybackState.Playing
 				if target.targetColor ~= targetColor or (currentColor ~= targetColor and not tweenIsPlaying) then
 					if target.tween then
 						target.tween:Cancel()
@@ -967,14 +1050,20 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 			}
 			self.originalStrokeStyles[stroke] = originalStyle
 		end
+		local scaledBaseThickness = convertCardStrokeToScaled(stroke, originalStyle.thickness)
+		if scaledBaseThickness ~= nil then
+			originalStyle.thickness = scaledBaseThickness
+		end
 
 		local theme = if themeName then ColorConfig.UI.NotificationThemes[themeName] else nil
+		local selectedThickness = strokeThicknessForPixels(stroke, SELECTED_STROKE_THICKNESS, originalStyle.thickness)
+		local emphasizedThickness =
+			strokeThicknessForPixels(stroke, EMPHASIZED_STROKE_THICKNESS, originalStyle.thickness)
 		local targetStyle: StrokeStyle = {
 			color = if theme then theme.textColor else originalStyle.color,
 			thickness = if selected
-				then SELECTED_STROKE_THICKNESS
-				elseif deleteMarked or equipped
-				then EMPHASIZED_STROKE_THICKNESS
+				then selectedThickness
+				elseif deleteMarked or equipped then emphasizedThickness
 				else originalStyle.thickness,
 		}
 		local strokeGradient = stroke:FindFirstChildOfClass("UIGradient")
@@ -1190,7 +1279,10 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 		if button then
 			table.insert(self.connections, button.Activated:Connect(callback))
 		else
-			DebugModule.debugWarn("Pet inventory button missing | parent=" .. (if parent then parent.Name else "nil"), MODULE_NAME)
+			DebugModule.debugWarn(
+				"Pet inventory button missing | parent=" .. (if parent then parent.Name else "nil"),
+				MODULE_NAME
+			)
 		end
 	end
 
@@ -1222,13 +1314,21 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 			return
 		end
 		setDeleteMode(true)
-		setConfirmation("DeleteMany", "DELETE SELECTED", "Select pets to delete, then confirm. Equipped pets cannot be deleted.")
+		setConfirmation(
+			"DeleteMany",
+			"DELETE SELECTED",
+			"Select pets to delete, then confirm. Equipped pets cannot be deleted."
+		)
 		updateDeleteConfirmation()
 		self:Refresh()
 	end)
 	bindButton(findGuiObject(petFrame, "MergeButton"), function()
 		setDeleteMode(false)
-		setConfirmation("MergeAll", "MERGE PETS", "Merge all eligible unequipped duplicate pets? This cannot be undone.")
+		setConfirmation(
+			"MergeAll",
+			"MERGE PETS",
+			"Merge all eligible unequipped duplicate pets? This cannot be undone."
+		)
 	end)
 	bindButton(findGuiObject(confirmationFrame, "ConfirmButton"), activateConfirmation)
 	bindButton(findGuiObject(confirmationFrame, "CancelButton"), function()
@@ -1250,9 +1350,12 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 			testButton.Visible = RunService:IsStudio()
 			local button = findButton(testButton)
 			if button then
-				table.insert(self.connections, button.Activated:Connect(function()
-					sendAction("AddRandom", rarity)
-				end))
+				table.insert(
+					self.connections,
+					button.Activated:Connect(function()
+						sendAction("AddRandom", rarity)
+					end)
+				)
 			end
 		end
 	end
@@ -1285,7 +1388,7 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 					connection:Disconnect()
 					self.cardConnections[uid] = nil
 				end
-			clearCardPressState(self, uid)
+				clearCardPressState(self, uid)
 				clearCardStrokeTween(self, card)
 				card:Destroy()
 				self.cards[uid] = nil
@@ -1325,12 +1428,18 @@ function PetInventoryUIController.new(screenGui: ScreenGui): PetInventoryUIContr
 		refresh()
 	end
 
-	table.insert(self.connections, player:GetAttributeChangedSignal(INVENTORY_ATTRIBUTE):Connect(function()
-		self:Refresh()
-	end))
-	table.insert(self.connections, player:GetAttributeChangedSignal("Data_Loaded"):Connect(function()
-		self:Refresh()
-	end))
+	table.insert(
+		self.connections,
+		player:GetAttributeChangedSignal(INVENTORY_ATTRIBUTE):Connect(function()
+			self:Refresh()
+		end)
+	)
+	table.insert(
+		self.connections,
+		player:GetAttributeChangedSignal("Data_Loaded"):Connect(function()
+			self:Refresh()
+		end)
+	)
 	self:Refresh()
 	return self
 end

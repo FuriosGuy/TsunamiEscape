@@ -394,7 +394,7 @@ end
 
 local function createFollower(equippedPet: EquippedPet): Follower?
 	local definition = equippedPet.definition
-	local model = PetViewportRenderer.CloneModel(definition.modelPath)
+	local model = PetViewportRenderer.CloneModel(definition.modelPath, true)
 	if not model then
 		return nil
 	end
@@ -425,6 +425,9 @@ local function createFollower(equippedPet: EquippedPet): Follower?
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.CastShadow = false
+		elseif descendant:IsA("ParticleEmitter") then
+			descendant.Enabled = true
+			ClientCullingService.TagInstance(descendant, ClientCullingService.Tags.Particle)
 		end
 	end
 	createPetBillboard(model, definition)

@@ -16,6 +16,7 @@ local EVENT_ERROR_RETRY_INTERVAL = 5
 local EVENT_STARTUP_RETRY_INTERVAL = 2
 local EVENT_STARTUP_RETRY_COUNT = 15
 local EVENT_TOUCH_DEBOUNCE = 3
+local EVENT_RSVP_PROMPT_INTERVAL = 180
 local BOARD_STARTUP_RETRY_INTERVAL = 0.5
 local BOARD_STARTUP_RETRY_COUNT = 20
 local EVENT_STATUS_NOW = "NOW HAPPENING!"
@@ -78,8 +79,19 @@ local isCleanedUp = false
 local rsvpInProgress = false
 local eventBoardConfig = if typeof(CoreConfig.eventBoard) == "table" then CoreConfig.eventBoard else {}
 local scheduleSelectedEventBoundaryRefresh: ((EventDictionary?) -> ())? = nil
+local requestAutomaticRsvpProcessing: (() -> ())? = nil
 local lastThumbnailDiagnosticKey = ""
-local notifiedUpcomingEventIds: { [string]: boolean } = {}
+local upcomingRsvpEvents: { EventDictionary } = {}
+local automaticRsvpHandledEventIds: { [string]: boolean } = {}
+local automaticRsvpPromptWorkerRunning = false
+local nextAutomaticRsvpPromptTime = 0
+local startupLoadingGui: Instance? = nil
+
+local function isStartupLoadingComplete(): boolean
+	return startupLoadingGui ~= nil
+		and startupLoadingGui.Parent ~= nil
+		and startupLoadingGui:GetAttribute("StartupLoadingComplete") == true
+end
 
 local function getCharacterRootPart(): BasePart?
 	local character = localPlayer.Character
@@ -720,94 +732,10 @@ local function applyBoardState(boardState: EventBoardGuiState)
 	end
 end
 
-local function maybeNotifyUpcomingEvent(): ()
-	local eventData = selectedEvent
-	if
-		localPlayer.Parent == nil
-		or localPlayer:GetAttribute("Data_Loaded") ~= true
-		or localPlayer:GetAttribute("TutorialCompleted") ~= true
-		or not isRsvpEligibleEvent(eventData)
-	then
-		return
-	end
-
-	local eventId = getEventId(eventData)
-	if eventId == "" or notifiedUpcomingEventIds[eventId] then
-		return
-	end
-
-	-- Mark event handled before any yielding work so refreshes and RSVP changes cannot duplicate it.
-	notifiedUpcomingEventIds[eventId] = true
-	if eventData.UserRsvpStatus == Enum.RsvpStatus.Going or eventData.UserRsvpStatus == "Going" then
-		DebugModule.debugInfo(
-			"Upcoming-event notification skipped; player already RSVP'd | eventId=" .. eventId,
-			"EventBoard"
-		)
-		return
-	end
-
-	local rawTitle = eventData.DisplayTitle or eventData.Title
-	local title = if typeof(rawTitle) == "string" and rawTitle ~= "" then rawTitle else "UPCOMING EVENT"
-	local message = "UPCOMING EVENT: " .. string.upper(title) .. "! RSVP AT THE EVENT BOARD."
-	local theme = VisualFunctions.NotificationThemes.Gold
-	scriptMaid:GiveSpawnTask(task.spawn(function()
-		for _ = 1, 50 do
-			if isCleanedUp or not isRunning or localPlayer.Parent == nil then
-				return
-			end
-			local currentEvent = selectedEvent
-			if
-				not isRsvpEligibleEvent(currentEvent)
-				or getEventId(currentEvent) ~= eventId
-				or currentEvent.UserRsvpStatus == Enum.RsvpStatus.Going
-				or currentEvent.UserRsvpStatus == "Going"
-			then
-				return
-			end
-
-			local notificationFrame = VisualFunctions.HUD.NotificationFrame
-			local notificationLabel = VisualFunctions.Labels.NotificationTextLabel
-			if
-				notificationFrame
-				and notificationFrame.Parent
-				and notificationLabel
-				and notificationLabel.Parent
-				and notificationLabel:IsDescendantOf(notificationFrame)
-			then
-				local notificationSuccess, notificationError = pcall(function()
-					VisualFunctions.ShowNotification(
-						message,
-						theme.textColor,
-						theme.gradientBottomColor,
-						"UpcomingEvent_" .. eventId
-					)
-				end)
-				if not notificationSuccess then
-					DebugModule.debugWarn(
-						"Upcoming-event notification failed | eventId="
-							.. eventId
-							.. " | error="
-							.. tostring(notificationError),
-						"EventBoard"
-					)
-				end
-				return
-			end
-
-			task.wait(0.1)
-		end
-		DebugModule.debugWarn(
-			"Upcoming-event notification UI was not ready | eventId=" .. eventId,
-			"EventBoard"
-		)
-	end))
-end
-
 local function applyAllBoards()
 	for _, boardState in ipairs(eventBoards) do
 		applyBoardState(boardState)
 	end
-	maybeNotifyUpcomingEvent()
 end
 
 local function normalizeEventTitle(value: any): string
@@ -881,6 +809,31 @@ local function pickBestEvent(events: { any }): EventDictionary?
 		or findFirstByState("Upcoming", true)
 		or findFirstNotEnded(false)
 		or findFirstNotEnded(true)
+end
+
+local function replaceUpcomingRsvpEvents(events: { any }): ()
+	local nextUpcomingEvents: { EventDictionary } = {}
+	local seenEventIds: { [string]: boolean } = {}
+
+	for _, rawEvent in ipairs(events) do
+		if typeof(rawEvent) == "table" then
+			local eventData = rawEvent :: EventDictionary
+			local eventId = getEventId(eventData)
+			if eventId ~= "" and not seenEventIds[eventId] and isRsvpEligibleEvent(eventData) then
+				seenEventIds[eventId] = true
+				table.insert(nextUpcomingEvents, eventData)
+			end
+		end
+	end
+
+	table.sort(nextUpcomingEvents, function(a, b)
+		return (getEventStartUnixTimestamp(a) or math.huge) < (getEventStartUnixTimestamp(b) or math.huge)
+	end)
+
+	upcomingRsvpEvents = nextUpcomingEvents
+	if requestAutomaticRsvpProcessing then
+		requestAutomaticRsvpProcessing()
+	end
 end
 
 local function extractEventsFromResult(result: any): { any }
@@ -1011,6 +964,7 @@ local function tryConfiguredEventFallback(now: number): (boolean, boolean)
 
 	local fallbackEvent, lookupSucceeded = fetchEventById(fallbackEventId)
 	if fallbackEvent and getEventLifecycleState(fallbackEvent) ~= "Ended" then
+		replaceUpcomingRsvpEvents({ fallbackEvent })
 		setSelectedEvent(enrichEventDetails(fallbackEvent))
 		DebugModule.debugInfo(
 			"Configured event fallback selected | placeId="
@@ -1072,14 +1026,17 @@ local function refreshCurrentEvent(force: boolean?)
 	end
 
 	hasFetchedEvents = true
-	local processingSuccess, bestEventOrError = pcall(function()
+	local processingSuccess, processedEventsOrError = pcall(function()
 		local events = extractEventsFromResult(result)
 		DebugModule.debugInfo("Automatic event fetch succeeded | eventCount=" .. tostring(#events), "EventBoard")
-		return pickBestEvent(events)
+		return {
+			events = events,
+			bestEvent = pickBestEvent(events),
+		}
 	end)
 	if not processingSuccess then
 		DebugModule.debugWarn(
-			"Failed to process upcoming experience events: " .. tostring(bestEventOrError),
+			"Failed to process upcoming experience events: " .. tostring(processedEventsOrError),
 			"EventBoard"
 		)
 		startupFetchAttemptCount += 1
@@ -1088,7 +1045,9 @@ local function refreshCurrentEvent(force: boolean?)
 		return
 	end
 
-	local bestEvent = bestEventOrError :: EventDictionary?
+	local processedEvents = processedEventsOrError :: any
+	replaceUpcomingRsvpEvents(processedEvents.events)
+	local bestEvent = processedEvents.bestEvent :: EventDictionary?
 	if bestEvent then
 		setSelectedEvent(enrichEventDetails(bestEvent))
 		local selectedEventData = selectedEvent :: any
@@ -1126,6 +1085,148 @@ local function refreshCurrentEvent(force: boolean?)
 	end
 
 	applyAllBoards()
+end
+
+local function findNextAutomaticRsvpEvent(): (EventDictionary?, string)
+	for _, eventData in ipairs(upcomingRsvpEvents) do
+		local eventId = getEventId(eventData)
+		if eventId ~= "" and not automaticRsvpHandledEventIds[eventId] then
+			return eventData, eventId
+		end
+	end
+
+	return nil, ""
+end
+
+local function processAutomaticRsvpEvent(eventData: EventDictionary, eventId: string): ()
+	if not isStartupLoadingComplete() then
+		return
+	end
+
+	if not isRsvpEligibleEvent(eventData) then
+		automaticRsvpHandledEventIds[eventId] = true
+		return
+	end
+
+	local statusSuccess, currentStatus = pcall(function()
+		return SocialService:GetEventRsvpStatusAsync(eventId)
+	end)
+	if
+		isCleanedUp
+		or not isRunning
+		or rsvpInProgress
+		or not isStartupLoadingComplete()
+		or os.clock() < nextAutomaticRsvpPromptTime
+	then
+		return
+	end
+
+	if not statusSuccess then
+		DebugModule.debugWarn(
+			"Could not check automatic RSVP status | eventId=" .. eventId .. " | error=" .. tostring(currentStatus),
+			"EventBoard"
+		)
+		nextAutomaticRsvpPromptTime = os.clock() + EVENT_RSVP_PROMPT_INTERVAL
+		return
+	end
+
+	if typeof(currentStatus) ~= "EnumItem" then
+		DebugModule.debugWarn(
+			"Automatic RSVP status response was invalid | eventId=" .. eventId .. " | status=" .. tostring(currentStatus),
+			"EventBoard"
+		)
+		nextAutomaticRsvpPromptTime = os.clock() + EVENT_RSVP_PROMPT_INTERVAL
+		return
+	end
+
+	if currentStatus ~= Enum.RsvpStatus.None then
+		automaticRsvpHandledEventIds[eventId] = true
+		DebugModule.debugInfo(
+			"Automatic RSVP skipped; player already responded | eventId="
+				.. eventId
+				.. " | status="
+				.. tostring(currentStatus),
+			"EventBoard"
+		)
+		return
+	end
+
+	if not isRsvpEligibleEvent(eventData) then
+		automaticRsvpHandledEventIds[eventId] = true
+		return
+	end
+
+	rsvpInProgress = true
+	local promptSuccess, promptResult = pcall(function()
+		return SocialService:PromptRsvpToEventAsync(eventId)
+	end)
+	rsvpInProgress = false
+	nextAutomaticRsvpPromptTime = os.clock() + EVENT_RSVP_PROMPT_INTERVAL
+
+	if promptSuccess then
+		automaticRsvpHandledEventIds[eventId] = true
+		DebugModule.debugInfo(
+			"Automatic RSVP prompt completed | eventId=" .. eventId .. " | status=" .. tostring(promptResult),
+			"EventBoard"
+		)
+	else
+		DebugModule.debugWarn(
+			"Automatic RSVP prompt failed | eventId=" .. eventId .. " | error=" .. tostring(promptResult),
+			"EventBoard"
+		)
+	end
+end
+
+requestAutomaticRsvpProcessing = function(): ()
+	if
+		automaticRsvpPromptWorkerRunning
+		or isCleanedUp
+		or not isRunning
+		or rsvpInProgress
+		or localPlayer.Parent == nil
+		or localPlayer:GetAttribute("Data_Loaded") ~= true
+		or localPlayer:GetAttribute("TutorialCompleted") ~= true
+		or not isStartupLoadingComplete()
+	then
+		return
+	end
+
+	if not findNextAutomaticRsvpEvent() then
+		return
+	end
+
+	automaticRsvpPromptWorkerRunning = true
+	local workerThread = task.spawn(function()
+		while isRunning and not isCleanedUp and localPlayer.Parent ~= nil do
+			if
+				localPlayer:GetAttribute("Data_Loaded") ~= true
+				or localPlayer:GetAttribute("TutorialCompleted") ~= true
+				or not isStartupLoadingComplete()
+				or rsvpInProgress
+			then
+				break
+			end
+
+			local eventData, eventId = findNextAutomaticRsvpEvent()
+			if not eventData then
+				break
+			end
+
+			local remainingDelay = nextAutomaticRsvpPromptTime - os.clock()
+			if remainingDelay > 0 then
+				task.wait(remainingDelay)
+				continue
+			end
+
+			processAutomaticRsvpEvent(eventData, eventId)
+		end
+
+		automaticRsvpPromptWorkerRunning = false
+		if isRunning and not isCleanedUp and not rsvpInProgress and requestAutomaticRsvpProcessing then
+			requestAutomaticRsvpProcessing()
+		end
+	end)
+	scriptMaid:GiveSpawnTask(workerThread)
 end
 
 local function scheduleForcedEventRefresh(delaySeconds: number)
@@ -1228,6 +1329,11 @@ local function promptSelectedEvent(boardState: EventBoardGuiState)
 		return
 	end
 
+	if not isStartupLoadingComplete() then
+		DebugModule.debugInfo("Manual RSVP ignored until startup loading completes", "EventBoard")
+		return
+	end
+
 	refreshCurrentEvent(true)
 
 	if not selectedEvent then
@@ -1287,6 +1393,7 @@ local function promptSelectedEvent(boardState: EventBoardGuiState)
 		)
 
 		if success then
+			automaticRsvpHandledEventIds[eventId] = true
 			DebugModule.debugInfo(
 				"RSVP status updated | eventId=" .. eventId .. " | status=" .. tostring(rsvpStatus),
 				"EventBoard"
@@ -1305,6 +1412,10 @@ local function promptSelectedEvent(boardState: EventBoardGuiState)
 		end
 
 		rsvpInProgress = false
+		nextAutomaticRsvpPromptTime = os.clock() + EVENT_RSVP_PROMPT_INTERVAL
+		if requestAutomaticRsvpProcessing then
+			requestAutomaticRsvpProcessing()
+		end
 
 		task.wait(1)
 		if isCleanedUp or not isRunning then
@@ -1622,8 +1733,43 @@ local function scheduleBoardStartupScan()
 	end))
 end
 
-scriptMaid:GiveTask(localPlayer:GetAttributeChangedSignal("Data_Loaded"):Connect(maybeNotifyUpcomingEvent))
-scriptMaid:GiveTask(localPlayer:GetAttributeChangedSignal("TutorialCompleted"):Connect(maybeNotifyUpcomingEvent))
+local function onAutomaticRsvpGateChanged(): ()
+	if requestAutomaticRsvpProcessing then
+		requestAutomaticRsvpProcessing()
+	end
+end
+
+local function bindStartupLoadingGui(mainGui: Instance?): ()
+	if startupLoadingGui == mainGui then
+		return
+	end
+
+	scriptMaid.StartupLoadingCompleteChanged = nil
+	startupLoadingGui = mainGui
+	if mainGui then
+		scriptMaid.StartupLoadingCompleteChanged = mainGui
+			:GetAttributeChangedSignal("StartupLoadingComplete")
+			:Connect(onAutomaticRsvpGateChanged)
+	end
+
+	onAutomaticRsvpGateChanged()
+end
+
+local playerGui = localPlayer:WaitForChild("PlayerGui") :: PlayerGui
+scriptMaid.MainGuiAdded = playerGui.ChildAdded:Connect(function(child: Instance)
+	if child.Name == "MainGUI" then
+		bindStartupLoadingGui(child)
+	end
+end)
+scriptMaid.MainGuiRemoved = playerGui.ChildRemoved:Connect(function(child: Instance)
+	if child == startupLoadingGui then
+		bindStartupLoadingGui(nil)
+	end
+end)
+bindStartupLoadingGui(playerGui:FindFirstChild("MainGUI"))
+
+scriptMaid:GiveTask(localPlayer:GetAttributeChangedSignal("Data_Loaded"):Connect(onAutomaticRsvpGateChanged))
+scriptMaid:GiveTask(localPlayer:GetAttributeChangedSignal("TutorialCompleted"):Connect(onAutomaticRsvpGateChanged))
 
 scanForBoards()
 DebugModule.debugInfo(
@@ -1699,7 +1845,8 @@ local function cleanupScript()
 	table.clear(registeredBoards)
 	table.clear(pendingBoards)
 	table.clear(unregisteringBoards)
-	table.clear(notifiedUpcomingEventIds)
+	table.clear(upcomingRsvpEvents)
+	table.clear(automaticRsvpHandledEventIds)
 
 	scriptMaid:DoCleaning()
 end

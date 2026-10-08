@@ -36,7 +36,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 		levelRequirementPercent = 0.05,
 		topColor = ColorConfig.Colors.Red.Color,
 		bottomColor = ColorConfig.Colors.Red.Gradient.Keypoints[2].Value,
-		image = "rbxassetid://125552789489073",
+		image = "rbxassetid://104159835173600",
 	},
 	{
 		day = 2,
@@ -45,7 +45,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 		currentWinsPercent = 0.05,
 		topColor = ColorConfig.Colors.WheelGold.Color,
 		bottomColor = ColorConfig.Colors.WheelGold.Gradient.Keypoints[2].Value,
-		image = "rbxassetid://104709782370430",
+		image = "rbxassetid://89376319048073",
 	},
 	{
 		day = 3,
@@ -54,7 +54,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 		levelRequirementPercent = 0.15,
 		topColor = ColorConfig.Colors.Red.Color,
 		bottomColor = ColorConfig.Colors.Red.Gradient.Keypoints[2].Value,
-		image = "rbxassetid://125552789489073",
+		image = "rbxassetid://104159835173600",
 	},
 	{
 		day = 4,
@@ -63,7 +63,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 		currentWinsPercent = 0.10,
 		topColor = ColorConfig.Colors.WheelGold.Color,
 		bottomColor = ColorConfig.Colors.WheelGold.Gradient.Keypoints[2].Value,
-		image = "rbxassetid://104709782370430",
+		image = "rbxassetid://89376319048073",
 	},
 	{
 		day = 5,
@@ -71,7 +71,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 		amount = 5,
 		topColor = ColorConfig.Colors.Blue.Color,
 		bottomColor = ColorConfig.Colors.Blue.Gradient.Keypoints[2].Value,
-		image = "rbxassetid://106046877471425",
+		image = "rbxassetid://102578932898871",
 	},
 	{
 		day = 6,
@@ -79,7 +79,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 		amount = 1,
 		topColor = ColorConfig.Colors.Purple.Color,
 		bottomColor = ColorConfig.Colors.Purple.Gradient.Keypoints[2].Value,
-		image = "rbxassetid://138330067069857",
+		image = "rbxassetid://71940044763334",
 	},
 	{
 		day = 7,
@@ -128,7 +128,6 @@ local REPEAT_PREMIUM_WEEK_DAY_7_REWARD: DailyRewardDefinition = table.freeze({
 })
 
 DailyRewardsConfig.REWARDS = REWARDS
-
 
 function DailyRewardsConfig.GetReward(day: number, cycleCount: number?): DailyRewardDefinition?
 	local safeCycleCount = if typeof(cycleCount) == "number" and cycleCount == cycleCount
@@ -191,9 +190,9 @@ function DailyRewardsConfig.GetRewardAmount(
 		end
 
 		local safeCurrentWins = if typeof(currentWins) == "number"
-			and currentWins == currentWins
-			and currentWins ~= math.huge
-			and currentWins ~= -math.huge
+				and currentWins == currentWins
+				and currentWins ~= math.huge
+				and currentWins ~= -math.huge
 			then math.max(0, currentWins)
 			else 0
 		local percentageAmount = math.round(safeCurrentWins * percentage)
@@ -210,9 +209,9 @@ function DailyRewardsConfig.GetRewardAmount(
 	end
 
 	local requiredXP = if typeof(maxXPSpeed) == "number"
-		and maxXPSpeed == maxXPSpeed
-		and maxXPSpeed ~= math.huge
-		and maxXPSpeed ~= -math.huge
+			and maxXPSpeed == maxXPSpeed
+			and maxXPSpeed ~= math.huge
+			and maxXPSpeed ~= -math.huge
 		then math.max(0, maxXPSpeed)
 		else 0
 

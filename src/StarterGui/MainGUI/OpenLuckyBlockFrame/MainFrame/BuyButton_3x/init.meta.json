@@ -10,8 +10,8 @@
     "BorderColor3": [0, 0, 0],
     "BorderSizePixel": 0,
     "ClipsDescendants": true,
-    "Position": [[0.4999, 0.0], [0.8172, 0.0]],
-    "Size": [[0.276, 0.0], [0.0722, 0.0]],
+    "Position": [[0.4999, 0.0], [0.8224, 0.0]],
+    "Size": [[0.276, 0.0], [0.0827, 0.0]],
     "ZIndex": 4
   }
 }

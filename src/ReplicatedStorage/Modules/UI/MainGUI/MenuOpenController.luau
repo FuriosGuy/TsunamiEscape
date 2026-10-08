@@ -49,11 +49,33 @@ end
 local function collectTweenTargets(frame: GuiObject): { TweenTarget }
 	local targets: { TweenTarget } = {}
 
-	if frame:IsA("Frame") then
+	if frame:IsA("CanvasGroup") then
+		addTweenTarget(targets, frame, "GroupTransparency")
+	elseif frame:IsA("Frame") or frame:IsA("ScrollingFrame") then
 		addTweenTarget(targets, frame, "BackgroundTransparency")
 	end
 
 	for _, descendant in ipairs(frame:GetDescendants()) do
+		local insideCanvasGroup = frame:IsA("CanvasGroup")
+		local ancestor = descendant.Parent
+		while ancestor do
+			if ancestor:IsA("CanvasGroup") then
+				insideCanvasGroup = true
+				break
+			end
+			if ancestor == frame then
+				break
+			end
+			ancestor = ancestor.Parent
+		end
+		if insideCanvasGroup then
+			continue
+		end
+
+		if descendant:IsA("CanvasGroup") then
+			addTweenTarget(targets, descendant, "GroupTransparency")
+		end
+
 		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
 			addTweenTarget(targets, descendant, "TextTransparency")
 		end

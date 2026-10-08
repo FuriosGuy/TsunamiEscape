@@ -6,7 +6,7 @@
     "BottomSurface": "Smooth",
     "CanCollide": false,
     "CanTouch": false,
-    "CFrame": [-3987.7427, 31.5574, -7804.3496, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "CFrame": [-3987.7427, 31.5574, -6983.75, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Color": [124, 92, 70],
     "Locked": true,
     "MaterialVariant": "Studs",

@@ -13,14 +13,14 @@
       "weight": "Regular"
     },
     "Interactable": false,
-    "Position": [[0.5, 0.0], [0.5, 0.0]],
+    "Position": [[0.5, 0.0], [0.4651, 0.0]],
     "RichText": true,
-    "Size": [[0.7831, 0.0], [0.7447, 0.0]],
+    "Size": [[0.7831, 0.0], [0.6927, 0.0]],
     "Text": "Lucky Block Tier",
     "TextColor3": [1, 1, 1],
     "TextScaled": true,
     "TextSize": 14,
     "TextWrapped": true,
-    "ZIndex": 3
+    "ZIndex": 4
   }
 }

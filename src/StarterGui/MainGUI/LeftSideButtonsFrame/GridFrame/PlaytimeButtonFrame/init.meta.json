@@ -9,6 +9,7 @@
     "BackgroundColor3": [0, 1, 0],
     "BorderColor3": [0, 0, 0],
     "BorderSizePixel": 0,
+    "LayoutOrder": 7,
     "Position": [[0.1535, 0.0], [0.5151, 0.0]],
     "Size": [[0.6929, 0.0], [0.1965, 0.0]]
   }

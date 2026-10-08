@@ -11,8 +11,8 @@ local MUSIC_CONFIG: PreferenceToggleConfig = table.freeze({
 	frameName = "SoundButtonFrame",
 	attributeName = "MusicEnabled",
 	remoteName = "SoundPreferenceChanged",
-	enabledImage = "rbxassetid://131367933530396",
-	disabledImage = "rbxassetid://109353678370280",
+	enabledImage = "rbxassetid://130154476215017",
+	disabledImage = "rbxassetid://96167397555969",
 	debugName = "SoundButtonUI",
 })
 

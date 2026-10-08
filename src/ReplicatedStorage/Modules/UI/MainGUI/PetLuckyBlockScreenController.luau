@@ -22,6 +22,7 @@ local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 
 type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | PetConfig.EventId
 type PurchaseKind = "Wins" | "Robux"
+type RollSource = "Modal" | "Shop"
 type HumanoidStateSnapshot = {
 	walkSpeed: number,
 	jumpPower: number,
@@ -29,11 +30,14 @@ type HumanoidStateSnapshot = {
 	autoRotate: boolean,
 	jumpingEnabled: boolean,
 }
+type PriceRequestState = {
+	threads: { thread },
+}
 type Controller = {
 	player: Player,
 	mainGui: ScreenGui,
-	openFrame: Frame,
-	mainFrame: Frame,
+	openFrame: GuiObject,
+	mainFrame: GuiObject,
 	exitButton: GuiButton?,
 	panelTransitionId: number,
 	panelTransitionConnection: RBXScriptConnection?,
@@ -48,27 +52,36 @@ type Controller = {
 	alive: boolean,
 	isOpen: boolean,
 	activeGroup: LuckyBlockGroup?,
+	activeRollSource: RollSource?,
 	previousMainFrameInteractable: boolean?,
 	lockedHumanoids: { [Humanoid]: HumanoidStateSnapshot },
 	blurEffect: BlurEffect?,
 	blurTween: Tween?,
-	priceRequestGeneration: number,
-	priceThreads: { thread },
+	priceRequestStates: { [Frame]: PriceRequestState },
 	_stopBlurTween: (self: Controller) -> (),
 	_playBlurTween: (self: Controller, targetSize: number, destroyOnComplete: boolean) -> (),
 	_beginBlur: (self: Controller) -> (),
 	_lockHumanoid: (self: Controller, humanoid: Humanoid) -> (),
 	_lockMovement: (self: Controller) -> (),
 	_restoreMovement: (self: Controller) -> (),
-	_cancelPriceRequests: (self: Controller) -> (),
+	_cancelPriceRequests: (self: Controller, targetFrame: GuiObject?) -> (),
 	_animatePanelOpen: (self: Controller) -> (),
 	_animatePanelClose: (self: Controller, onComplete: () -> ()) -> (),
-	_updatePrices: (self: Controller, group: LuckyBlockGroup) -> (),
+	_updatePrices: (self: Controller, group: LuckyBlockGroup, targetFrame: GuiObject?) -> (),
 	_bindExitButton: (self: Controller) -> (),
 	_canOpen: (self: Controller) -> boolean,
 	Init: (self: Controller) -> (),
 	Open: (self: Controller, group: LuckyBlockGroup) -> (),
 	Close: (self: Controller) -> (),
+	RequestRoll: (
+		self: Controller,
+		group: LuckyBlockGroup,
+		rollCount: number,
+		purchaseKind: PurchaseKind,
+		source: RollSource
+	) -> boolean,
+	UpdatePrices: (self: Controller, group: LuckyBlockGroup, targetFrame: GuiObject?) -> (),
+	CancelPriceUpdates: (self: Controller, targetFrame: GuiObject?) -> (),
 	Destroy: (self: Controller) -> (),
 }
 
@@ -80,6 +93,7 @@ local MOVEMENT_ACTION = "PetLuckyBlockModalMovementLock"
 local CLOSE_ACTION = "PetLuckyBlockModalClose"
 local MODAL_OWNER = "LuckyBlock"
 local BLUR_SIZE = 18
+local POLICY_DISABLED_COLOR_MULTIPLIER = 0.75
 local ROLL_COUNTS = { 1, 3, 5 }
 local GROUP_NAMES: { [string]: string } = {
 	Tier1 = "Tier 1 Lucky Block",
@@ -135,16 +149,14 @@ local function showPolicyRestrictionNotification(): ()
 	)
 end
 
-function PetLuckyBlockScreenController.new(
-	mainGui: ScreenGui
-): Controller?
+function PetLuckyBlockScreenController.new(mainGui: ScreenGui): Controller?
 	local openFrameInstance = mainGui:WaitForChild("OpenLuckyBlockFrame", 10)
-	if not openFrameInstance or not openFrameInstance:IsA("Frame") then
+	if not openFrameInstance or not openFrameInstance:IsA("GuiObject") then
 		DebugModule.debugWarn("MainGUI.OpenLuckyBlockFrame is missing", MODULE_NAME)
 		return nil
 	end
 	local mainFrameInstance = openFrameInstance:WaitForChild("MainFrame", 10)
-	if not mainFrameInstance or not mainFrameInstance:IsA("Frame") then
+	if not mainFrameInstance or not mainFrameInstance:IsA("GuiObject") then
 		DebugModule.debugWarn("MainGUI.OpenLuckyBlockFrame.MainFrame is missing", MODULE_NAME)
 		return nil
 	end
@@ -169,53 +181,59 @@ function PetLuckyBlockScreenController.new(
 		alive = true,
 		isOpen = false,
 		activeGroup = nil,
+		activeRollSource = nil,
 		previousMainFrameInteractable = nil,
 		lockedHumanoids = {},
 		blurEffect = nil,
 		blurTween = nil,
-		priceRequestGeneration = 0,
-		priceThreads = {},
+		priceRequestStates = {},
 	}, PetLuckyBlockScreenController) :: Controller
 
-	self.purchaseController = PetLuckyBlockPurchaseController.new(function(
-		group: LuckyBlockGroup,
-		petIds: { string },
-		fasterOpen: boolean
-	)
-		local cutsceneController = self.cutsceneController
-		if not self.isOpen or not self.alive or not cutsceneController then
-			return
-		end
-		self.activeGroup = group
-		self.cutsceneGeneration += 1
-		local generation = self.cutsceneGeneration
-		cutsceneController:Stop()
-		self:_playBlurTween(0, false)
-		local started = cutsceneController:Play(group, petIds, fasterOpen, function()
-			if generation ~= self.cutsceneGeneration or not self.alive or not self.isOpen then
+	self.purchaseController = PetLuckyBlockPurchaseController.new(
+		function(group: LuckyBlockGroup, petIds: { string }, fasterOpen: boolean)
+			local cutsceneController = self.cutsceneController
+			if not self.alive or not cutsceneController then
 				return
 			end
-			self.openFrame.Visible = true
-			self.mainFrame.Visible = true
-			self:_beginBlur()
-		end)
-		if not started then
-			self.openFrame.Visible = true
-			self.mainFrame.Visible = true
-			self:_beginBlur()
+			local rollSource = self.activeRollSource
+			self.activeRollSource = nil
+			local restoreModal = rollSource == "Modal" and self.isOpen
+			if restoreModal then
+				self.activeGroup = group
+			end
+			self.cutsceneGeneration += 1
+			local generation = self.cutsceneGeneration
+			cutsceneController:Stop()
+			if restoreModal then
+				self:_playBlurTween(0, false)
+			end
+			local started = cutsceneController:Play(group, petIds, fasterOpen, function()
+				if generation ~= self.cutsceneGeneration or not self.alive or not restoreModal or not self.isOpen then
+					return
+				end
+				self.openFrame.Visible = true
+				self.mainFrame.Visible = true
+				self:_beginBlur()
+			end)
+			if not started and restoreModal then
+				self.openFrame.Visible = true
+				self.mainFrame.Visible = true
+				self:_beginBlur()
+			end
 		end
-	end)
-	self.petUIController = PetLuckyBlockUIController.new(mainFrame, "Tier1", function(
-		rollCount: number,
-		purchaseKind: PurchaseKind
 	)
-		local activeGroup = self.activeGroup
-		local purchaseController = self.purchaseController
-		if not self.isOpen or not activeGroup or not purchaseController then
-			return
+	self.petUIController = PetLuckyBlockUIController.new(
+		mainFrame,
+		"Tier1",
+		function(rollCount: number, purchaseKind: PurchaseKind)
+			local activeGroup = self.activeGroup
+			local purchaseController = self.purchaseController
+			if not self.isOpen or not activeGroup or not purchaseController then
+				return
+			end
+			self:RequestRoll(activeGroup, rollCount, purchaseKind, "Modal")
 		end
-		purchaseController:RequestRoll(activeGroup, rollCount, purchaseKind)
-	end)
+	)
 	return self
 end
 
@@ -226,7 +244,11 @@ function PetLuckyBlockScreenController._stopBlurTween(self: Controller): ()
 	end
 end
 
-function PetLuckyBlockScreenController._playBlurTween(self: Controller, targetSize: number, destroyOnComplete: boolean): ()
+function PetLuckyBlockScreenController._playBlurTween(
+	self: Controller,
+	targetSize: number,
+	destroyOnComplete: boolean
+): ()
 	self:_stopBlurTween()
 	local blur = self.blurEffect
 	if not blur then
@@ -330,7 +352,8 @@ local function bindCharacterDeath(self: Controller, character: Model): ()
 		humanoidBound = true
 		local camera = Workspace.CurrentCamera
 		local cameraSubject = if camera then camera.CameraSubject else nil
-		if camera
+		if
+			camera
 			and humanoid.Health > 0
 			and cameraSubject
 			and cameraSubject:IsA("Humanoid")
@@ -356,14 +379,17 @@ local function bindCharacterDeath(self: Controller, character: Model): ()
 	end))
 end
 
-function PetLuckyBlockScreenController._cancelPriceRequests(self: Controller): ()
-	self.priceRequestGeneration += 1
-	for _, thread in ipairs(self.priceThreads) do
-		if coroutine.status(thread) ~= "dead" then
-			pcall(task.cancel, thread)
+function PetLuckyBlockScreenController._cancelPriceRequests(self: Controller, targetFrame: GuiObject?): ()
+	for frame, state in pairs(table.clone(self.priceRequestStates)) do
+		if targetFrame == nil or frame == targetFrame then
+			for _, thread in ipairs(state.threads) do
+				if coroutine.status(thread) ~= "dead" then
+					pcall(task.cancel, thread)
+				end
+			end
+			self.priceRequestStates[frame] = nil
 		end
 	end
-	table.clear(self.priceThreads)
 end
 
 function PetLuckyBlockScreenController._animatePanelOpen(self: Controller): ()
@@ -376,10 +402,7 @@ function PetLuckyBlockScreenController._animatePanelOpen(self: Controller): ()
 	VisualFunctions.OpenWindow(self.mainFrame)
 end
 
-function PetLuckyBlockScreenController._animatePanelClose(
-	self: Controller,
-	onComplete: () -> ()
-): ()
+function PetLuckyBlockScreenController._animatePanelClose(self: Controller, onComplete: () -> ()): ()
 	self.panelTransitionId += 1
 	local transitionId = self.panelTransitionId
 	if self.panelTransitionConnection then
@@ -399,19 +422,36 @@ function PetLuckyBlockScreenController._animatePanelClose(
 	end)
 end
 
-function PetLuckyBlockScreenController._updatePrices(self: Controller, group: LuckyBlockGroup): ()
-	self:_cancelPriceRequests()
-	local generation = self.priceRequestGeneration
+function PetLuckyBlockScreenController._updatePrices(self: Controller, group: LuckyBlockGroup, targetFrame: GuiObject?): ()
+	local priceFrame = targetFrame or self.mainFrame
+	if not priceFrame.Parent then
+		return
+	end
+	self:_cancelPriceRequests(priceFrame)
+	local requestState: PriceRequestState = {
+		threads = {},
+	}
+	self.priceRequestStates[priceFrame] = requestState
 	local policyReady = self.player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
 	local paidRandomItemsAllowed = policyReady and self.player:GetAttribute("Pet_PaidRandomItemsRestricted") ~= true
-	local showWins = isWinsGroup(group) and paidRandomItemsAllowed
+	local policyControlsThisFrame = priceFrame == self.mainFrame
+	local showWins = isWinsGroup(group)
 	for _, rollCount in ipairs(ROLL_COUNTS) do
-		local winsFrame = self.mainFrame:FindFirstChild("BuyButton_" .. tostring(rollCount) .. "x", true)
-		local robuxFrame = self.mainFrame:FindFirstChild("RobuxBuyButton_" .. tostring(rollCount) .. "x", true)
+		local winsFrame = priceFrame:FindFirstChild("BuyButton_" .. tostring(rollCount) .. "x", true)
+		local robuxFrame = priceFrame:FindFirstChild("RobuxBuyButton_" .. tostring(rollCount) .. "x", true)
 		if winsFrame and winsFrame:IsA("GuiObject") then
 			winsFrame.Visible = showWins
+			if policyControlsThisFrame and winsFrame:IsA("GuiObject") then
+				VisualFunctions.SetFrameDisabledState(
+					winsFrame,
+					not paidRandomItemsAllowed,
+					POLICY_DISABLED_COLOR_MULTIPLIER
+				)
+			end
 			if showWins then
-				local costPerRoll = if group == "Tier1" or group == "Tier2" or group == "Tier3"
+				local costPerRoll = if group == "Tier1"
+						or group == "Tier2"
+						or group == "Tier3"
 					then PetConfig.LuckyBlocks[group].winCostPerRoll
 					else nil
 				local priceLabel = findTextLabel(winsFrame, { "PriceLabel", "AmountLabel", "CostLabel" })
@@ -434,7 +474,14 @@ function PetLuckyBlockScreenController._updatePrices(self: Controller, group: Lu
 			end
 		end
 		if robuxFrame and robuxFrame:IsA("GuiObject") then
-			robuxFrame.Visible = paidRandomItemsAllowed
+			robuxFrame.Visible = true
+			if policyControlsThisFrame and robuxFrame:IsA("GuiObject") then
+				VisualFunctions.SetFrameDisabledState(
+					robuxFrame,
+					not paidRandomItemsAllowed,
+					POLICY_DISABLED_COLOR_MULTIPLIER
+				)
+			end
 			local productId = ProductService.DevProducts[getProductKey(group, rollCount)]
 			local priceLabel = findTextLabel(robuxFrame, { "PriceLabel" })
 			local button = findGuiButton(robuxFrame)
@@ -442,16 +489,26 @@ function PetLuckyBlockScreenController._updatePrices(self: Controller, group: Lu
 				priceLabel.Text = getRollPricePrefix(rollCount) .. " FOR ..."
 				if typeof(productId) ~= "number" or productId <= 0 then
 					priceLabel.Text = getRollPricePrefix(rollCount) .. " FOR UNAVAILABLE"
-					DebugModule.debugWarn("Missing Robux product ID | group=" .. group .. " | rolls=" .. tostring(rollCount), MODULE_NAME)
+					DebugModule.debugWarn(
+						"Missing Robux product ID | group=" .. group .. " | rolls=" .. tostring(rollCount),
+						MODULE_NAME
+					)
 				else
 					local thread = task.spawn(function()
 						local success, productInfo = pcall(function()
 							return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
 						end)
-						if not self.alive or not self.isOpen or generation ~= self.priceRequestGeneration then
+						if
+							not self.alive
+							or not priceLabel.Parent
+							or not priceLabel:IsDescendantOf(priceFrame)
+							or self.priceRequestStates[priceFrame] ~= requestState
+						then
 							return
 						end
-						local price = if success and typeof(productInfo) == "table" then productInfo.PriceInRobux else nil
+						local price = if success and typeof(productInfo) == "table"
+							then productInfo.PriceInRobux
+							else nil
 						if typeof(price) == "number" and price >= 0 then
 							priceLabel.Text = getRollPricePrefix(rollCount)
 								.. " FOR "
@@ -471,13 +528,44 @@ function PetLuckyBlockScreenController._updatePrices(self: Controller, group: Lu
 							)
 						end
 					end)
-					table.insert(self.priceThreads, thread)
+					table.insert(requestState.threads, thread)
 				end
 			elseif button and button:IsA("TextButton") then
 				button.Text = getRollPricePrefix(rollCount) .. " FOR UNAVAILABLE"
 			end
 		end
 	end
+end
+
+function PetLuckyBlockScreenController.UpdatePrices(self: Controller, group: LuckyBlockGroup, targetFrame: GuiObject?): ()
+	if self.alive and isLuckyBlockGroup(group) then
+		self:_updatePrices(group, targetFrame)
+	end
+end
+
+function PetLuckyBlockScreenController.CancelPriceUpdates(self: Controller, targetFrame: GuiObject?): ()
+	if self.alive then
+		self:_cancelPriceRequests(targetFrame)
+	end
+end
+
+function PetLuckyBlockScreenController.RequestRoll(
+	self: Controller,
+	group: LuckyBlockGroup,
+	rollCount: number,
+	purchaseKind: PurchaseKind,
+	source: RollSource
+): boolean
+	local purchaseController = self.purchaseController
+	if not self.alive or not purchaseController or not isLuckyBlockGroup(group) then
+		return false
+	end
+	local requestSource = if source == "Shop" then "Shop" else "World"
+	local accepted = purchaseController:RequestRoll(group, rollCount, purchaseKind, requestSource)
+	if accepted then
+		self.activeRollSource = source
+	end
+	return accepted
 end
 
 function PetLuckyBlockScreenController._bindExitButton(self: Controller): ()
@@ -557,7 +645,8 @@ function PetLuckyBlockScreenController.Open(self: Controller, group: LuckyBlockG
 	petUIController:SetPreviewGroup(group)
 	petUIController:SetPreviewVisible(true)
 	self:_updatePrices(group)
-	if self.player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
+	if
+		self.player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
 		and self.player:GetAttribute("Pet_PaidRandomItemsRestricted") == true
 	then
 		showPolicyRestrictionNotification()
@@ -579,7 +668,7 @@ function PetLuckyBlockScreenController.Close(self: Controller): ()
 		cutsceneController:Stop()
 	end
 	self.activeGroup = nil
-	self:_cancelPriceRequests()
+	self:_cancelPriceRequests(self.mainFrame)
 	ContextActionService:UnbindAction(CLOSE_ACTION)
 	local petUIController = self.petUIController :: any
 	petUIController:RestoreGamepadFocus()
@@ -639,7 +728,8 @@ function PetLuckyBlockScreenController.Init(self: Controller): ()
 			local group = reveal.group
 			local petIds = reveal.petIds
 			local fasterOpen = reveal.fasterOpen
-			if (group ~= "Premium" and group ~= "Tier3")
+			if
+				(group ~= "Premium" and group ~= "Tier3")
 				or typeof(petIds) ~= "table"
 				or #petIds ~= 1
 				or typeof((petIds :: { unknown })[1]) ~= "string"
@@ -660,11 +750,16 @@ function PetLuckyBlockScreenController.Init(self: Controller): ()
 			self:_playBlurTween(0, false)
 			self.cutsceneGeneration += 1
 			local generation = self.cutsceneGeneration
-			local started = cutsceneController:Play(group :: LuckyBlockGroup, petIds :: { string }, fasterOpen, function()
-				if generation ~= self.cutsceneGeneration or not self.alive then
-					return
+			local started = cutsceneController:Play(
+				group :: LuckyBlockGroup,
+				petIds :: { string },
+				fasterOpen,
+				function()
+					if generation ~= self.cutsceneGeneration or not self.alive then
+						return
+					end
 				end
-			end)
+			)
 			if not started then
 				DebugModule.debugWarn("Daily Lucky Block cutscene failed to start", MODULE_NAME)
 			end
@@ -680,14 +775,19 @@ function PetLuckyBlockScreenController.Init(self: Controller): ()
 			return
 		end
 		self:_updatePrices(group)
-		if self.player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
+		if
+			self.player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
 			and self.player:GetAttribute("Pet_PaidRandomItemsRestricted") == true
 		then
 			showPolicyRestrictionNotification()
 		end
 	end
-	self.maid:GiveTask(self.player:GetAttributeChangedSignal("Pet_RandomItemPolicyLoaded"):Connect(refreshPolicyAvailability))
-	self.maid:GiveTask(self.player:GetAttributeChangedSignal("Pet_PaidRandomItemsRestricted"):Connect(refreshPolicyAvailability))
+	self.maid:GiveTask(
+		self.player:GetAttributeChangedSignal("Pet_RandomItemPolicyLoaded"):Connect(refreshPolicyAvailability)
+	)
+	self.maid:GiveTask(
+		self.player:GetAttributeChangedSignal("Pet_PaidRandomItemsRestricted"):Connect(refreshPolicyAvailability)
+	)
 	self.maid:GiveTask(self.mainFrame.DescendantAdded:Connect(function()
 		self:_bindExitButton()
 	end))
@@ -733,7 +833,7 @@ function PetLuckyBlockScreenController.Destroy(self: Controller): ()
 	self.previousMainFrameInteractable = nil
 	self.modalVisibilityController:SetNotificationLayer(self.openFrame, false)
 	self.modalVisibilityController:Restore()
-	self:_cancelPriceRequests()
+	self:_cancelPriceRequests(nil)
 	self:_stopBlurTween()
 	if self.blurEffect then
 		self.blurEffect:Destroy()

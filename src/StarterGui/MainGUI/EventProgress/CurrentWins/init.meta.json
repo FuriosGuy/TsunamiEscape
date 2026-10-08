@@ -12,7 +12,7 @@
       "weight": "Regular"
     },
     "Interactable": false,
-    "Position": [[0.1878, 0.0], [0.1092, 0.0]],
+    "Position": [[0.24, 0.0], [0.1092, 0.0]],
     "Size": [[0.1043, 0.0], [0.233, 0.0]],
     "Text": "0 Wins",
     "TextColor3": [1, 1, 1],

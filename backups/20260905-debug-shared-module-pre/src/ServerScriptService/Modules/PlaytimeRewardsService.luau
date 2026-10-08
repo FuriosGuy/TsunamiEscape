@@ -1,0 +1,428 @@
+--!strict
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Maid = require(Modules:WaitForChild("Maid"))
+local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
+local DebugModule = require(game:GetService("ServerScriptService").Modules:WaitForChild("DebugModule_Server"))
+local FunnelAnalytics = require(game:GetService("ServerScriptService").Modules:WaitForChild("FunnelAnalytics_Server"))
+local ConfigFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Config")
+local CoreConfig = require(ConfigFolder:WaitForChild("CoreConfig_Server"))
+local PlaytimeRewardsConfig = require(Modules.UI.MainGUI:WaitForChild("PlaytimeRewardsConfig"))
+
+local LevelingService = require(script.Parent:WaitForChild("LevelingService"))
+local EconomyAnalytics = require(script.Parent:WaitForChild("EconomyAnalytics"))
+
+local PlaytimeRewardsService = {}
+
+local MODULE_NAME = "PlaytimeRewardsService"
+local PLAYTIME_ELAPSED_ATTRIBUTE = "PlaytimeRewardElapsed"
+local TOTAL_PLAYTIME_ATTRIBUTE = "TotalPlaytimeSeconds"
+local PLAYTIME_CLAIMED_ATTRIBUTE = "PlaytimeRewardsClaimed"
+local TOTAL_DURATION_SECONDS = PlaytimeRewardsConfig.TOTAL_DURATION_SECONDS
+local REQUEST_COOLDOWN_SECONDS = 0.15
+local playtimeConfig = if CoreConfig.server and CoreConfig.server.playtimeRewards
+	then CoreConfig.server.playtimeRewards
+	else nil
+local DEBUG_SEQUENTIAL_CLAIM_MODE = if playtimeConfig
+		and typeof(playtimeConfig.debugSequentialClaimMode) == "boolean"
+	then RunService:IsStudio() and playtimeConfig.debugSequentialClaimMode
+	else false
+local analyticsConfig = if CoreConfig.analytics then CoreConfig.analytics else nil
+local analyticsFunnels = if analyticsConfig and typeof(analyticsConfig.funnels) == "table"
+	then analyticsConfig.funnels
+	else nil
+local PLAYTIME_REWARD_FUNNEL_NAME = if analyticsFunnels and typeof(analyticsFunnels.playtimeReward) == "string"
+	then analyticsFunnels.playtimeReward
+	else "PlaytimeRewardClaim"
+
+local isInitialized = false
+local serviceMaid = Maid.new()
+local playerMaids: { [Player]: any } = {}
+local claimInFlight: { [Player]: boolean } = {}
+local lastRequestAt: { [Player]: number } = {}
+local claimFunnelSessions: { [Player]: string } = {}
+local readyFunnelSessions: { [Player]: { [string]: string } } = {}
+
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local PlaytimeRewardAction = Remotes:WaitForChild("PlaytimeRewardAction") :: RemoteEvent
+local XPGainAwarded = Remotes:WaitForChild("XPGainAwarded") :: RemoteEvent
+local WinButtonPressed = Remotes:WaitForChild("WinButtonPressed") :: RemoteEvent
+local ShowNotification = Remotes:WaitForChild("ShowNotification") :: RemoteEvent
+
+local function parseClaimedTiers(value: any): { [string]: boolean }
+	local claimed: { [string]: boolean } = {}
+	if typeof(value) ~= "string" or value == "" then
+		return claimed
+	end
+
+	for token in string.gmatch(value, "([^,]+)") do
+		if token ~= "" then
+			claimed[token] = true
+		end
+	end
+
+	return claimed
+end
+
+local function serializeClaimedTiers(claimed: { [string]: boolean }): string
+	local orderedIds = {}
+	for _, tier in ipairs(PlaytimeRewardsConfig.TIERS) do
+		if claimed[tier.id] == true then
+			table.insert(orderedIds, tier.id)
+		end
+	end
+	return table.concat(orderedIds, ",")
+end
+
+local function applyRewardGrant(player: Player, kind: string, amount: number)
+	if kind == "XPSpeed" then
+		local awardedAmount = PlayerHandler.AddRewardXPSpeed(player, amount)
+		EconomyAnalytics.LogSource(
+			player,
+			"XPSpeed",
+			awardedAmount,
+			Enum.AnalyticsEconomyTransactionType.TimedReward.Name,
+			"PlaytimeReward",
+			{ customField01 = kind }
+		)
+		XPGainAwarded:FireClient(player, awardedAmount)
+		return
+	end
+
+	if kind == "Wins" then
+		local awardedWins = PlayerHandler.AddPlaytimeWins(player, amount)
+		EconomyAnalytics.LogSource(
+			player,
+			"Wins",
+			awardedWins,
+			Enum.AnalyticsEconomyTransactionType.TimedReward.Name,
+			"PlaytimeReward",
+			{ customField01 = kind }
+		)
+		WinButtonPressed:FireClient(player, awardedWins, "PlaytimeReward")
+		return
+	end
+
+	if kind == "Level" then
+		PlayerHandler.AddLevels(player, amount)
+		return
+	end
+
+	if kind == "Rebirth" then
+		for _ = 1, amount do
+			LevelingService.PerformRebirth(player, true)
+		end
+		return
+	end
+
+	DebugModule.debugWarn(
+		string.format("Unsupported playtime reward kind '%s' for %s", tostring(kind), player.Name),
+		MODULE_NAME
+	)
+end
+
+local function getTierIndexById(tierId: string): number?
+	for index, tier in ipairs(PlaytimeRewardsConfig.TIERS) do
+		if tier.id == tierId then
+			return index
+		end
+	end
+	return nil
+end
+
+local function getFirstUnclaimedTierIndex(claimed: { [string]: boolean }): number?
+	for index, tier in ipairs(PlaytimeRewardsConfig.TIERS) do
+		if claimed[tier.id] ~= true then
+			return index
+		end
+	end
+	return nil
+end
+
+local function getTierFields(tierId: string)
+	return {
+		customField01 = tierId,
+	}
+end
+
+local function getReadySession(player: Player, tierId: string): string?
+	local playerSessions = readyFunnelSessions[player]
+	return playerSessions and playerSessions[tierId] or nil
+end
+
+local function setReadySession(player: Player, tierId: string, sessionId: string)
+	local playerSessions = readyFunnelSessions[player]
+	if not playerSessions then
+		playerSessions = {}
+		readyFunnelSessions[player] = playerSessions
+	end
+
+	playerSessions[tierId] = sessionId
+end
+
+local function recordRewardReady(player: Player, tierId: string)
+	if getReadySession(player, tierId) then
+		return
+	end
+
+	local sessionId = FunnelAnalytics.OpenRecurringFunnel(
+		player,
+		PLAYTIME_REWARD_FUNNEL_NAME,
+		"Playtime Reward Ready",
+		getTierFields(tierId)
+	)
+	if sessionId then
+		setReadySession(player, tierId, sessionId)
+	end
+end
+
+local function recordReadyRewards(player: Player)
+	local claimed = parseClaimedTiers(player:GetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE))
+	local elapsedSeconds = player:GetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE)
+	if typeof(elapsedSeconds) ~= "number" then
+		elapsedSeconds = 0
+	end
+
+	for _, tier in ipairs(PlaytimeRewardsConfig.TIERS) do
+		if claimed[tier.id] ~= true and elapsedSeconds >= tier.unlockSeconds then
+			recordRewardReady(player, tier.id)
+		end
+	end
+end
+
+function PlaytimeRewardsService.OnRewardAction(player: Player, action: string, tierId: string)
+	if typeof(action) ~= "string" or typeof(tierId) ~= "string" then
+		return
+	end
+
+	if action ~= "Claim" then
+		return
+	end
+
+	local now = os.clock()
+	local lastRequest = lastRequestAt[player] or 0
+	if now - lastRequest < REQUEST_COOLDOWN_SECONDS then
+		return
+	end
+	lastRequestAt[player] = now
+
+	if player:GetAttribute("Data_Loaded") ~= true then
+		return
+	end
+
+	if claimInFlight[player] == true then
+		return
+	end
+
+	local tier = PlaytimeRewardsConfig.GetTierById(tierId)
+	if not tier then
+		return
+	end
+
+	local tierIndex = getTierIndexById(tierId)
+	if not tierIndex then
+		return
+	end
+
+	local claimed = parseClaimedTiers(player:GetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE))
+	if claimed[tierId] == true then
+		return
+	end
+
+	local isReady = false
+
+	local elapsedSeconds = player:GetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE)
+	if typeof(elapsedSeconds) ~= "number" then
+		elapsedSeconds = 0
+	end
+
+	if DEBUG_SEQUENTIAL_CLAIM_MODE then
+		local expectedTierIndex = getFirstUnclaimedTierIndex(claimed)
+		if not expectedTierIndex then
+			return
+		end
+
+		if tierIndex ~= expectedTierIndex then
+			ShowNotification:FireClient(player, "CLAIM THE PREVIOUS GIFT FIRST!", "Red")
+			return
+		end
+
+		-- Debug mode: current unclaimed tier is always claimable.
+		isReady = true
+	else
+		isReady = elapsedSeconds >= tier.unlockSeconds
+	end
+
+	if not isReady then
+		ShowNotification:FireClient(player, "REWARD NOT READY!", "Red")
+		return
+	end
+
+	local claimSessionId = getReadySession(player, tierId)
+	if claimSessionId then
+		FunnelAnalytics.LogRecurringStep(
+			player,
+			PLAYTIME_REWARD_FUNNEL_NAME,
+			claimSessionId,
+			2,
+			"Playtime Reward Claim Clicked",
+			getTierFields(tierId)
+		)
+	else
+		claimSessionId = FunnelAnalytics.OpenRecurringFunnel(
+			player,
+			PLAYTIME_REWARD_FUNNEL_NAME,
+			"Playtime Reward Claim Clicked",
+			getTierFields(tierId)
+		)
+	end
+	if claimSessionId then
+		claimFunnelSessions[player] = claimSessionId
+	end
+
+	claimInFlight[player] = true
+	local grantSuccess, grantError = pcall(function()
+		for _, reward in ipairs(tier.rewards) do
+			applyRewardGrant(player, reward.kind, reward.amount)
+		end
+	end)
+	claimInFlight[player] = nil
+
+	if not grantSuccess then
+		claimFunnelSessions[player] = nil
+		DebugModule.debugWarn(
+			string.format(
+				"Playtime reward claim failed | player=%s tier=%s err=%s",
+				player.Name,
+				tierId,
+				tostring(grantError)
+			),
+			MODULE_NAME
+		)
+		ShowNotification:FireClient(player, "REWARD CLAIM FAILED!", "Red")
+		return
+	end
+
+	claimed[tierId] = true
+	player:SetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE, serializeClaimedTiers(claimed))
+
+	if DEBUG_SEQUENTIAL_CLAIM_MODE then
+		local nextTier = PlaytimeRewardsConfig.GetTier(tierIndex + 1)
+		if nextTier then
+			local currentElapsed = player:GetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE)
+			local elapsed = if typeof(currentElapsed) == "number" then currentElapsed else 0
+			local debugElapsed = math.max(elapsed, nextTier.unlockSeconds)
+			player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, math.clamp(debugElapsed, 0, TOTAL_DURATION_SECONDS))
+		else
+			player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, TOTAL_DURATION_SECONDS)
+		end
+	end
+
+	if claimSessionId then
+		FunnelAnalytics.LogRecurringStep(
+			player,
+			PLAYTIME_REWARD_FUNNEL_NAME,
+			claimSessionId,
+			if getReadySession(player, tierId) then 3 else 2,
+			"Playtime Reward Claimed",
+			getTierFields(tierId)
+		)
+	end
+	local playerReadySessions = readyFunnelSessions[player]
+	if playerReadySessions then
+		playerReadySessions[tierId] = nil
+	end
+	claimFunnelSessions[player] = nil
+
+	ShowNotification:FireClient(player, "REWARD CLAIMED!", "Green")
+end
+
+function PlaytimeRewardsService.OnPlayerAdded(player: Player)
+	PlaytimeRewardsService.CleanupPlayer(player)
+
+	local playerMaid = Maid.new()
+	playerMaids[player] = playerMaid
+
+	local existingElapsed = player:GetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE)
+	local elapsedValue = if typeof(existingElapsed) == "number"
+		then math.clamp(math.floor(existingElapsed), 0, TOTAL_DURATION_SECONDS)
+		else 0
+	local existingTotalPlaytime = player:GetAttribute(TOTAL_PLAYTIME_ATTRIBUTE)
+	local totalPlaytimeValue = if typeof(existingTotalPlaytime) == "number"
+		then math.max(0, math.floor(existingTotalPlaytime))
+		else 0
+	local existingClaimed = player:GetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE)
+	local claimedValue = if typeof(existingClaimed) == "string" then existingClaimed else ""
+
+	player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, elapsedValue)
+	player:SetAttribute(TOTAL_PLAYTIME_ATTRIBUTE, totalPlaytimeValue)
+	player:SetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE, claimedValue)
+	recordReadyRewards(player)
+
+	playerMaid.TimerThread = task.spawn(function()
+		while player.Parent do
+			task.wait(1)
+			if not player.Parent then
+				break
+			end
+
+			local currentElapsed = player:GetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE)
+			if typeof(currentElapsed) ~= "number" then
+				currentElapsed = 0
+			end
+
+			local clampedElapsed = math.clamp(math.floor(currentElapsed), 0, TOTAL_DURATION_SECONDS)
+			local currentTotalPlaytime = player:GetAttribute(TOTAL_PLAYTIME_ATTRIBUTE)
+			if typeof(currentTotalPlaytime) ~= "number" then
+				currentTotalPlaytime = 0
+			end
+
+			player:SetAttribute(TOTAL_PLAYTIME_ATTRIBUTE, math.max(0, math.floor(currentTotalPlaytime)) + 1)
+
+			if clampedElapsed < TOTAL_DURATION_SECONDS then
+				player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, clampedElapsed + 1)
+				recordReadyRewards(player)
+			elseif currentElapsed ~= TOTAL_DURATION_SECONDS then
+				player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, TOTAL_DURATION_SECONDS)
+			end
+		end
+	end)
+end
+
+function PlaytimeRewardsService.CleanupPlayer(player: Player)
+	local playerMaid = playerMaids[player]
+	if playerMaid then
+		playerMaid:DoCleaning()
+		playerMaids[player] = nil
+	end
+	claimFunnelSessions[player] = nil
+	readyFunnelSessions[player] = nil
+	claimInFlight[player] = nil
+	lastRequestAt[player] = nil
+end
+
+function PlaytimeRewardsService.Init()
+	if isInitialized then
+		return
+	end
+	isInitialized = true
+
+	serviceMaid.RewardAction = PlaytimeRewardAction.OnServerEvent:Connect(PlaytimeRewardsService.OnRewardAction)
+	serviceMaid.PlayerRemoving = Players.PlayerRemoving:Connect(PlaytimeRewardsService.CleanupPlayer)
+	DebugModule.debugInfo("PlaytimeRewardsService initialized", MODULE_NAME)
+end
+
+function PlaytimeRewardsService.Shutdown()
+	for player in pairs(table.clone(playerMaids)) do
+		PlaytimeRewardsService.CleanupPlayer(player)
+	end
+	serviceMaid:DoCleaning()
+	table.clear(claimInFlight)
+	table.clear(lastRequestAt)
+	isInitialized = false
+end
+
+return PlaytimeRewardsService

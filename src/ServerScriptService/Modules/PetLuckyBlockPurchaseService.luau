@@ -58,6 +58,10 @@ local EVENT_GROUPS: { [string]: boolean } = {
 	NeonRush = true,
 	FrostbiteRally = true,
 }
+local ROLL_EVENT_GATED_GROUPS: { [string]: boolean } = {
+	NeonRush = true,
+	FrostbiteRally = true,
+}
 local ACTIVE_EVENT_IDS: { [string]: string } = {
 	BloodMoon = "Bloodmoon",
 	NeonRush = "NeonRush",
@@ -580,7 +584,13 @@ local function getPaidRollProductId(group: LuckyBlockGroup, rollCount: RollCount
 	return if typeof(productId) == "number" and productId > 0 then productId else nil
 end
 
-local function processRequest(player: Player, rawGroup: any, rawRollCount: any, rawPurchaseKind: any): ()
+local function processRequest(
+	player: Player,
+	rawGroup: any,
+	rawRollCount: any,
+	rawPurchaseKind: any,
+	rawSource: any
+): ()
 	if player.Parent ~= Players then
 		return
 	end
@@ -604,9 +614,14 @@ local function processRequest(player: Player, rawGroup: any, rawRollCount: any, 
 		sendResult(player, "InvalidRequest")
 		return
 	end
+	if rawSource ~= "World" and rawSource ~= "Shop" then
+		sendResult(player, "InvalidRequest")
+		return
+	end
 	local group = rawGroup :: LuckyBlockGroup
 	local rollCount = rawRollCount :: RollCount
 	local purchaseKind = rawPurchaseKind :: "Wins" | "Robux"
+	local source = rawSource :: "World" | "Shop"
 	if player:GetAttribute("Data_Loaded") ~= true then
 		sendResult(player, "DataNotLoaded")
 		return
@@ -619,11 +634,15 @@ local function processRequest(player: Player, rawGroup: any, rawRollCount: any, 
 		sendResult(player, "PaidRandomItemsRestricted")
 		return
 	end
-	if not canInteractWithLuckyBlock(player, group) then
+	local canUseLuckyBlock = if source == "World"
+		then canInteractWithLuckyBlock(player, group)
+		else ValidationService.IsPlayerAlive(player)
+			and ValidationService.ValidateRewardEligibility(player, "LuckyBlockInteraction")
+	if not canUseLuckyBlock then
 		sendResult(player, "InvalidRequest")
 		return
 	end
-	if EVENT_GROUPS[group] and not isLiveEventActive(group) then
+	if ROLL_EVENT_GATED_GROUPS[group] and not isLiveEventActive(group) then
 		sendResult(player, "EventInactive")
 		return
 	end

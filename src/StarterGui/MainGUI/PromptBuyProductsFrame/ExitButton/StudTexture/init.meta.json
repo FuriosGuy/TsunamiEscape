@@ -8,9 +8,10 @@
     "BorderSizePixel": 0,
     "ClipsDescendants": true,
     "ImageContent": "rbxassetid://121692853485740",
-    "Position": [[0.5, 0.0], [0.5, 0.0]],
+    "Position": [[0.5, 0.0], [0.4651, 0.0]],
     "ScaleType": "Tile",
-    "Size": [[1.0, 0.0], [1.0, 0.0]],
-    "TileSize": [[0.0, 100.0], [0.0, 100.0]]
+    "Size": [[1.0, 0.0], [0.9302, 0.0]],
+    "TileSize": [[0.0, 100.0], [0.0, 100.0]],
+    "ZIndex": 3
   }
 }

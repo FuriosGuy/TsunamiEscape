@@ -113,7 +113,7 @@ SystemChatService.Config = {
 		then math.max(1, math.floor(systemChatConfig.normalSelectionWeight))
 		else 1,
 	LiveEventSelectionWeight = if systemChatConfig
-		and typeof(systemChatConfig.liveEventSelectionWeight) == "number"
+			and typeof(systemChatConfig.liveEventSelectionWeight) == "number"
 		then math.max(1, math.floor(systemChatConfig.liveEventSelectionWeight))
 		else 4,
 }
@@ -438,15 +438,11 @@ local function getActiveEventContexts(): { LiveEventChatContext }
 				local rawDisplayName = if typeof(eventEntry.displayText) == "string"
 					then getUsableText(eventEntry.displayText)
 					else nil
-				local displayName = string.upper(
-					getUsableText(rawDisplayName)
-						or getUsableText(eventDefinition.displayText)
-						or eventId
-				)
+				local displayName =
+					string.upper(getUsableText(rawDisplayName) or getUsableText(eventDefinition.displayText) or eventId)
 				local color = if isBloodmoon
 					then SystemChatService.Config.BloodmoonColor
-					elseif typeof(eventDefinition.displayColor) == "Color3"
-					then eventDefinition.displayColor
+					elseif typeof(eventDefinition.displayColor) == "Color3" then eventDefinition.displayColor
 					else SystemChatService.Config.DefaultColor
 				table.insert(contexts, {
 					id = eventId,
@@ -506,9 +502,7 @@ end
 
 local function buildEventRewardMessage(context: LiveEventChatContext): string?
 	local template = getRandomFromPool(context.rewardTemplates)
-	local reward = if #context.rewards > 0
-		then context.rewards[math.random(1, #context.rewards)]
-		else nil
+	local reward = if #context.rewards > 0 then context.rewards[math.random(1, #context.rewards)] else nil
 	if not template or not reward then
 		return nil
 	end
@@ -625,14 +619,10 @@ local function buildEventMessage(context: LiveEventChatContext): string
 	if messageType == 1 then
 		return buildEventTipMessage(context) or buildLiveEventMessage(context)
 	elseif messageType == 2 then
-		return buildEventRewardMessage(context)
-			or buildEventTipMessage(context)
-			or buildLiveEventMessage(context)
+		return buildEventRewardMessage(context) or buildEventTipMessage(context) or buildLiveEventMessage(context)
 	end
 
-	return buildEventPromotionalMessage(context)
-		or buildEventTipMessage(context)
-		or buildLiveEventMessage(context)
+	return buildEventPromotionalMessage(context) or buildEventTipMessage(context) or buildLiveEventMessage(context)
 end
 
 local function buildScheduledMessage(): (string?, Color3?, string?)

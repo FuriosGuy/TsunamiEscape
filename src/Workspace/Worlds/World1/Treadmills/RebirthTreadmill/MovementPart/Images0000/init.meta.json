@@ -1,0 +1,30 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/0000",
+  "properties": {
+    "Color": [{
+        "color": [1.0, 0.502, 0.0],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.502, 0.0],
+        "time": 1.0
+      }],
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0, 1],
+    "LightEmission": 1,
+    "LightInfluence": 1,
+    "Rate": 100,
+    "Size": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 1.2966
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Speed": [1.2966, 1.2966],
+    "Texture": "rbxassetid://8733488500"
+  }
+}

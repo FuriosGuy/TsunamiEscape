@@ -18,6 +18,7 @@ local PetUpgradeUIController = require(ReplicatedStorage.Modules.UI.MainGUI.PetU
 local PetInventoryUIController = require(ReplicatedStorage.Modules.UI.MainGUI.PetInventoryUIController)
 local PetMultiplierUI = require(ReplicatedStorage.Modules.UI.MainGUI.PetMultiplierUI)
 local PetLuckyBlockScreenController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockScreenController)
+local PetLuckyBlockShopController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockShopController)
 local PetLuckyBlockBillboardVisualController =
 	require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockBillboardVisualController)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
@@ -68,6 +69,13 @@ if petLuckyBlockScreenController then
 	petLuckyBlockScreenController:Init()
 end
 
+local petLuckyBlockShopController = if petLuckyBlockScreenController
+	then PetLuckyBlockShopController.new(script.Parent :: ScreenGui, petLuckyBlockScreenController)
+	else nil
+if petLuckyBlockShopController then
+	petLuckyBlockShopController:Init()
+end
+
 local petLuckyBlockBillboardVisualController = PetLuckyBlockBillboardVisualController.new()
 petLuckyBlockBillboardVisualController:Init()
 
@@ -111,6 +119,9 @@ DebugModule.debugPrint(
 local function cleanupGuiHandlerSingleton()
 	notificationLayoutController:Destroy()
 	spinWheelUI:Destroy()
+	if petLuckyBlockShopController then
+		petLuckyBlockShopController:Destroy()
+	end
 	if petLuckyBlockScreenController then
 		petLuckyBlockScreenController:Destroy()
 	end

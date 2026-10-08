@@ -41,6 +41,7 @@ type ReturnFreezeState = {
 }
 
 local MODULE_NAME = "MinigameService"
+local MINIMUM_RACE_LEVEL = 50
 local DEFAULT_REQUIRED_PLAYERS = 3
 local DEFAULT_MAX_PLAYERS = 20
 local DEFAULT_GRACE_SECONDS = 30
@@ -877,6 +878,10 @@ beginGrace = function()
 end
 
 local function canJoin(player: Player): (boolean, string)
+	local currentLevel = player:GetAttribute("CurrentLevel")
+	if typeof(currentLevel) ~= "number" or currentLevel < MINIMUM_RACE_LEVEL then
+		return false, "LevelRequired"
+	end
 	if raceState ~= "Open" and raceState ~= "Grace" then
 		return false, "RaceClosed"
 	end

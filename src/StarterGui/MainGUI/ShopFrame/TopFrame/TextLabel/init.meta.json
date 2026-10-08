@@ -12,15 +12,15 @@
       "weight": "Regular"
     },
     "Interactable": false,
-    "Position": [[0.1082, 0.0], [0.1378, 0.0]],
+    "Position": [[0.1082, 0.0], [0.1282, 0.0]],
     "RichText": true,
-    "Size": [[0.7831, 0.0], [0.7447, 0.0]],
+    "Size": [[0.7831, 0.0], [0.6927, 0.0]],
     "Text": "Shop",
     "TextColor3": [1, 1, 1],
     "TextScaled": true,
     "TextSize": 14,
     "TextWrapped": true,
     "TextXAlignment": "Left",
-    "ZIndex": 3
+    "ZIndex": 4
   }
 }

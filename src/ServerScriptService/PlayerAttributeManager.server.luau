@@ -3,6 +3,7 @@ local PhysicsService = game:GetService("PhysicsService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local TutorialProgress = Remotes:WaitForChild("TutorialProgress") :: RemoteEvent
+local FavoriteGamePromptAttempted = Remotes:WaitForChild("FavoriteGamePromptAttempted") :: RemoteEvent
 local ShowNotification = Remotes:WaitForChild("ShowNotification") :: RemoteEvent
 local SoundPreferenceChanged = Remotes:WaitForChild("SoundPreferenceChanged") :: RemoteEvent
 
@@ -199,11 +200,11 @@ local activeMaid = Maid.new()
 local scriptAlive = true
 local cleanupStarted = false
 local badgeAwardService = BadgeAwardService.new()
-local unregisterWinStreakReturnListener: (() -> ())? = ReturnToStageService.RegisterSuccessfulReturn(function(
-	player: Player
+local unregisterWinStreakReturnListener: (() -> ())? = ReturnToStageService.RegisterSuccessfulReturn(
+	function(player: Player)
+		WinStreakService.RestoreAfterReturn(player)
+	end
 )
-	WinStreakService.RestoreAfterReturn(player)
-end)
 
 type LeaderstatBinding = {
 	leaderstatName: string,
@@ -279,7 +280,14 @@ local function logOnboardingSessionStep(
 )
 	local sessionId = onboardingSessionIds[player]
 	if sessionId then
-		FunnelAnalytics.LogRecurringStep(player, ONBOARDING_SESSION_FUNNEL_NAME, sessionId, step, stepName, customFields)
+		FunnelAnalytics.LogRecurringStep(
+			player,
+			ONBOARDING_SESSION_FUNNEL_NAME,
+			sessionId,
+			step,
+			stepName,
+			customFields
+		)
 	end
 end
 
@@ -1149,6 +1157,21 @@ end
 
 activeMaid.SoundPreferenceChanged = bindBooleanPreferenceRemote(SoundPreferenceChanged, "MusicEnabled")
 activeMaid.HapticPreferenceChanged = bindBooleanPreferenceRemote(HapticPreferenceChanged, "HapticsEnabled")
+activeMaid.FavoriteGamePromptAttempted = FavoriteGamePromptAttempted.OnServerEvent:Connect(function(player: Player)
+	if
+		player.Parent ~= Players
+		or player:GetAttribute("Data_Loaded") ~= true
+		or player:GetAttribute("TutorialCompleted") ~= true
+		or player:GetAttribute("FavoriteGamePromptAttempted") == true
+	then
+		return
+	end
+
+	player:SetAttribute("FavoriteGamePromptAttempted", true)
+	if not ProductServerService.SavePlayerData(player) then
+		DebugModule.debugWarn("Could not persist favorite prompt attempt | player=" .. player.Name, MODULE_NAME)
+	end
+end)
 activeMaid.TutorialProgress = TutorialProgress.OnServerEvent:Connect(function(player: Player, state: string)
 	if player:GetAttribute("Data_Loaded") ~= true then
 		return

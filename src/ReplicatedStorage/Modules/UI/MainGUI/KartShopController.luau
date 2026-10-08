@@ -33,7 +33,7 @@ type KartConfig = {
 
 type KartEntry = {
 	frame: Frame,
-	equipButton: Frame?,
+	equipButton: GuiObject?,
 }
 
 type MarketplaceInfoGetter = (itemId: number, infoType: Enum.InfoType) -> any
@@ -44,8 +44,8 @@ type Options = {
 	getMarketplaceInfoCached: MarketplaceInfoGetter,
 	isLiveEventActive: (eventId: string?) -> boolean,
 	openSpinWheelFromShop: (player: Player) -> (),
-	applyWheelStyle: (frame: Frame) -> (),
-	applyEquipStyle: (frame: Frame) -> (),
+	applyWheelStyle: (frame: GuiObject) -> (),
+	applyEquipStyle: (frame: GuiObject) -> (),
 }
 
 type Controller = {
@@ -405,7 +405,7 @@ function KartShopController.new(options: Options): Controller
 			clone.Parent = scrollingFrame
 
 			local equipButton = clone:FindFirstChild("EquipButton")
-			if equipButton and equipButton:IsA("Frame") then
+			if equipButton and equipButton:IsA("GuiObject") then
 				local textButton = equipButton:FindFirstChild("TextButton", true)
 				if textButton and textButton:IsA("TextButton") then
 					shopMaid:GiveTask(textButton.Activated:Connect(function()
@@ -436,7 +436,7 @@ function KartShopController.new(options: Options): Controller
 
 			entryFrames[config.kartName] = {
 				frame = clone,
-				equipButton = if equipButton and equipButton:IsA("Frame") then equipButton else nil,
+				equipButton = if equipButton and equipButton:IsA("GuiObject") then equipButton else nil,
 			}
 		end
 

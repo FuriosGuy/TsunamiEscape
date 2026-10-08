@@ -7,11 +7,11 @@
     "BorderColor3": [0, 0, 0],
     "BorderSizePixel": 0,
     "ClipsDescendants": true,
-    "ImageContent": "rbxassetid://137858424435229",
+    "ImageContent": "rbxassetid://101884985920317",
     "Interactable": false,
     "Position": [[0.5, 0.0], [0.5, 0.0]],
     "ScaleType": "Fit",
-    "Size": [[0.8555, 0.0], [0.8861, 0.0]],
+    "Size": [[0.8, 0.0], [0.8, 0.0]],
     "TileSize": [[0.0, 100.0], [0.0, 100.0]],
     "ZIndex": 2
   }

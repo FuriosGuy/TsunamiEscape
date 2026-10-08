@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SocialService = game:GetService("SocialService")
 local StarterGui = game:GetService("StarterGui")
+local TopbarIcon = require(ReplicatedStorage:WaitForChild("Topbar"):WaitForChild("Icon"))
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
@@ -23,6 +24,7 @@ type FriendMultiplierUIObject = {
 	frame: GuiObject?,
 	promptButton: GuiButton?,
 	inviteFriendButton: GuiButton?,
+	topbarIcon: any?,
 	multiplierLabel: TextLabel?,
 	plusLabel: TextLabel?,
 	initialized: boolean,
@@ -35,6 +37,7 @@ type FriendMultiplierUIObject = {
 
 local MODULE_NAME = "FriendMultiplierUI"
 local INVITE_DEBOUNCE_SECONDS = 1.5
+local TOPBAR_INVITE_IMAGE = "rbxassetid://131695948686823"
 local PLUS_COLOR = ColorConfig.UI.NotificationThemes.Green.textColor
 
 local function showClientNotification(message: string)
@@ -60,6 +63,7 @@ function FriendMultiplierUI.new(screenGui: ScreenGui): FriendMultiplierUIObject
 		frame = nil,
 		promptButton = nil,
 		inviteFriendButton = nil,
+		topbarIcon = nil,
 		multiplierLabel = nil,
 		plusLabel = nil,
 		initialized = false,
@@ -169,6 +173,22 @@ function FriendMultiplierUI:Init()
 	else
 		DebugModule.debugWarn("InviteFriendButtonFrame TextButton was not found", MODULE_NAME)
 	end
+
+	local existingIcon = TopbarIcon.getIcon("InviteFriendsTopbar")
+	if existingIcon then
+		existingIcon:destroy()
+	end
+	TopbarIcon.setTopbarEnabled(true)
+	local inviteIcon = TopbarIcon.new()
+		:setName("InviteFriendsTopbar")
+		:setLeft()
+		:setImage(TOPBAR_INVITE_IMAGE)
+		:setLabel("Invite")
+		:oneClick()
+	self.topbarIcon = inviteIcon
+	self.maid:GiveTask(inviteIcon.selected:Connect(function()
+		self:promptInvite("Topbar")
+	end))
 end
 
 function FriendMultiplierUI:Destroy()
@@ -177,6 +197,10 @@ function FriendMultiplierUI:Destroy()
 	end
 	self.alive = false
 	self.maid:DoCleaning()
+	if self.topbarIcon then
+		self.topbarIcon:destroy()
+		self.topbarIcon = nil
+	end
 	self.frame = nil
 	self.promptButton = nil
 	self.inviteFriendButton = nil

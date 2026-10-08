@@ -78,7 +78,7 @@ type CutsceneController = {
 	guiSnapshot: GuiSnapshot?,
 	mainGui: ScreenGui,
 	playerGui: PlayerGui,
-	fadeFrame: Frame,
+	fadeFrame: GuiObject,
 	fadeTween: Tween?,
 	runMaid: any,
 	onFinished: (() -> ())?,
@@ -117,6 +117,18 @@ type GuiSnapshot = {
 
 local PetLuckyBlockCutsceneController = {}
 PetLuckyBlockCutsceneController.__index = PetLuckyBlockCutsceneController
+
+local function getFadeTransparencyProperty(fadeFrame: GuiObject): string
+	return if fadeFrame:IsA("CanvasGroup") then "GroupTransparency" else "BackgroundTransparency"
+end
+
+local function setFadeTransparency(fadeFrame: GuiObject, transparency: number): ()
+	(fadeFrame :: any)[getFadeTransparencyProperty(fadeFrame)] = transparency
+end
+
+local function getFadeTransparency(fadeFrame: GuiObject): number
+	return (fadeFrame :: any)[getFadeTransparencyProperty(fadeFrame)]
+end
 
 local MODULE_NAME = "PetLuckyBlockCutsceneController"
 local MODEL_FOLDER_NAME = "Luckyblock_Models"
@@ -642,7 +654,7 @@ local function restoreGui(self: CutsceneController, keepFadeBlack: boolean): ()
 	end
 	if keepFadeBlack then
 		self.fadeFrame.Visible = true
-		self.fadeFrame.BackgroundTransparency = 0
+		setFadeTransparency(self.fadeFrame, 0)
 		return
 	end
 	for guiObject, wasVisible in pairs(snapshot.fadeChildren) do
@@ -651,7 +663,7 @@ local function restoreGui(self: CutsceneController, keepFadeBlack: boolean): ()
 		end
 	end
 	self.fadeFrame.Visible = snapshot.fadeVisible
-	self.fadeFrame.BackgroundTransparency = snapshot.fadeTransparency
+	setFadeTransparency(self.fadeFrame, snapshot.fadeTransparency)
 	self.fadeFrame.ZIndex = snapshot.fadeZIndex
 	self.mainGui.DisplayOrder = snapshot.mainGuiDisplayOrder
 end
@@ -663,7 +675,7 @@ local function captureGui(self: CutsceneController): GuiSnapshot
 		fadeChildren = {},
 		mainGuiDisplayOrder = self.mainGui.DisplayOrder,
 		fadeVisible = self.fadeFrame.Visible,
-		fadeTransparency = self.fadeFrame.BackgroundTransparency,
+		fadeTransparency = getFadeTransparency(self.fadeFrame),
 		fadeZIndex = self.fadeFrame.ZIndex,
 	}
 	for _, child in ipairs(self.playerGui:GetChildren()) do
@@ -688,7 +700,7 @@ local function captureGui(self: CutsceneController): GuiSnapshot
 		end
 	end
 	self.fadeFrame.Visible = true
-	self.fadeFrame.BackgroundTransparency = 1
+	setFadeTransparency(self.fadeFrame, 1)
 	self.fadeFrame.ZIndex = CUTSCENE_Z_INDEX
 	return snapshot
 end
@@ -988,7 +1000,7 @@ local function playFade(self: CutsceneController, transparency: number, generati
 	local tween = TweenService:Create(
 		self.fadeFrame,
 		TweenInfo.new(FADE_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
-		{ BackgroundTransparency = transparency }
+		{ [getFadeTransparencyProperty(self.fadeFrame)] = transparency }
 	)
 	self.fadeTween = tween
 	self.runMaid:GiveTask(tween.Completed:Connect(function(playbackState: Enum.PlaybackState)
@@ -1155,8 +1167,8 @@ function PetLuckyBlockCutsceneController.new(mainGui: ScreenGui): CutsceneContro
 	if not fadeFrame then
 		fadeFrame = mainGui:WaitForChild("FadeFrame", 10) or mainGui:WaitForChild("Fadeframe", 10)
 	end
-	if not fadeFrame or not fadeFrame:IsA("Frame") then
-		DebugModule.debugWarn("MainGUI FadeFrame/Fadeframe missing or not a Frame; cutscene unavailable", MODULE_NAME)
+	if not fadeFrame or not fadeFrame:IsA("GuiObject") then
+		DebugModule.debugWarn("MainGUI FadeFrame/Fadeframe missing or not a GuiObject; cutscene unavailable", MODULE_NAME)
 		return nil
 	end
 	local controller = setmetatable({

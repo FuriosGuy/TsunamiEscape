@@ -17,9 +17,9 @@ type TrailConfig = { [string]: any }
 
 type TrailEntry = {
 	frame: Frame,
-	buyButton: Frame?,
-	robuxBuyButton: Frame?,
-	equipButton: Frame?,
+	buyButton: GuiObject?,
+	robuxBuyButton: GuiObject?,
+	equipButton: GuiObject?,
 	robuxOriginalPosition: UDim2?,
 	robuxOriginalSize: UDim2?,
 }
@@ -27,11 +27,11 @@ type TrailEntry = {
 type Options = {
 	player: Player,
 	openSpinWheelFromShop: (player: Player) -> (),
-	applyWheelStyle: (frame: Frame) -> (),
-	applyEquipStyle: (frame: Frame) -> (),
+	applyWheelStyle: (frame: GuiObject) -> (),
+	applyEquipStyle: (frame: GuiObject) -> (),
 	canBuyEventProduct: (config: TrailConfig, isOwned: boolean) -> boolean,
 	formatTrailMultiplier: (multiplier: number) -> string,
-	getOrCreateEquipButton: (entryFrame: Frame) -> Frame?,
+	getOrCreateEquipButton: (entryFrame: Frame) -> GuiObject?,
 }
 
 type Controller = {
@@ -290,7 +290,7 @@ function TrailShopController.new(options: Options): Controller
 			local robuxBuyButton = clone:FindFirstChild("RobuxBuyButton")
 			local equipButton = options.getOrCreateEquipButton(clone)
 
-			if buyButton and buyButton:IsA("Frame") then
+			if buyButton and buyButton:IsA("GuiObject") then
 				local textButton = buyButton:FindFirstChild("TextButton", true)
 				if textButton and textButton:IsA("TextButton") then
 					shopMaid:GiveTask(textButton.Activated:Connect(function()
@@ -310,7 +310,7 @@ function TrailShopController.new(options: Options): Controller
 				end
 			end
 
-			if robuxBuyButton and robuxBuyButton:IsA("Frame") then
+			if robuxBuyButton and robuxBuyButton:IsA("GuiObject") then
 				local textButton = robuxBuyButton:FindFirstChild("TextButton", true)
 				if textButton and textButton:IsA("TextButton") then
 					shopMaid:GiveTask(textButton.Activated:Connect(function()
@@ -346,13 +346,13 @@ function TrailShopController.new(options: Options): Controller
 
 			entryFrames[trailName] = {
 				frame = clone,
-				buyButton = if buyButton and buyButton:IsA("Frame") then buyButton else nil,
-				robuxBuyButton = if robuxBuyButton and robuxBuyButton:IsA("Frame") then robuxBuyButton else nil,
+				buyButton = if buyButton and buyButton:IsA("GuiObject") then buyButton else nil,
+				robuxBuyButton = if robuxBuyButton and robuxBuyButton:IsA("GuiObject") then robuxBuyButton else nil,
 				equipButton = equipButton,
-				robuxOriginalPosition = if robuxBuyButton and robuxBuyButton:IsA("Frame")
+				robuxOriginalPosition = if robuxBuyButton and robuxBuyButton:IsA("GuiObject")
 					then robuxBuyButton.Position
 					else nil,
-				robuxOriginalSize = if robuxBuyButton and robuxBuyButton:IsA("Frame")
+				robuxOriginalSize = if robuxBuyButton and robuxBuyButton:IsA("GuiObject")
 					then robuxBuyButton.Size
 					else nil,
 			}

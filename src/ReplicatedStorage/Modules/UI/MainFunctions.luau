@@ -67,7 +67,7 @@ end
 --[[
 	Closes all managed frames except the one provided.
 ]]
-function MainFunctions.CloseOtherFrames(except: Frame?)
+function MainFunctions.CloseOtherFrames(except: GuiObject?)
 	local frames = VisualFunctions.ActiveFrameGroup
 	if not frames then
 		return

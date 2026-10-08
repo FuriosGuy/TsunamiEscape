@@ -8,10 +8,10 @@
     "ClipsDescendants": true,
     "ImageContent": "rbxassetid://125610194520583",
     "Interactable": false,
-    "Position": [[0.0112, 0.0], [0.0693, 0.0]],
+    "Position": [[0.0112, 0.0], [0.0645, 0.0]],
     "ScaleType": "Fit",
-    "Size": [[0.1428, 0.0], [0.9136, 0.0]],
+    "Size": [[0.1428, 0.0], [0.8499, 0.0]],
     "TileSize": [[0.0, 100.0], [0.0, 100.0]],
-    "ZIndex": 2
+    "ZIndex": 4
   }
 }

@@ -2,7 +2,7 @@
   "className": "Texture",
   "properties": {
     "Color3": [0, 0, 0],
-    "Face": "Bottom",
+    "Face": "Top",
     "StudsPerTileU": 8,
     "StudsPerTileV": 8,
     "TextureContent": "rbxassetid://6372755229",

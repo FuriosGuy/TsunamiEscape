@@ -8,8 +8,7 @@ CoreConfig.debugSystem = {
 	showErrors = true,
 	timestamp = true,
 	studioOnly = true,
-	enabledModules = {
-	},
+	enabledModules = {},
 	disabledModules = {
 		"EventBoard",
 	},
@@ -55,6 +54,13 @@ CoreConfig.spinWheel = {
 	wheelTickMinPlaybackSpeed = 1,
 	wheelTickMaxPlaybackSpeed = 1.6,
 	wheelTickReferenceDegreesPerSecond = 720,
+}
+
+CoreConfig.treadmills = {
+	rebirthTreadmillRequiredRebirths = 2,
+	freeTreadmillClaimSessionSeconds = 20 * 60,
+	studioFreeTreadmillClaimSessionSeconds = 5,
+	blockedNoticeCooldownSeconds = 10,
 }
 
 CoreConfig.temporaryBoosts = {

@@ -12,7 +12,7 @@
       "weight": "Regular"
     },
     "RichText": true,
-    "Size": [[1.0, 0.0], [1.0, 0.0]],
+    "Size": [[1.0, 0.0], [0.88, 0.0]],
     "Text": "2x Speed",
     "TextColor3": [1, 1, 1],
     "TextScaled": true,

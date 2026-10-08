@@ -22,6 +22,7 @@ local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild
 local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
 local WorldSpawnService = require(SharedFolder:WaitForChild("WorldSpawnService_Server"))
 local WinStreakService = require(script.Parent.Modules:WaitForChild("WinStreakService"))
+local TreadmillRequirementService = require(script.Parent.Modules:WaitForChild("TreadmillRequirementService"))
 
 -- Create Remote if not exists
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -139,6 +140,8 @@ type StageDefinition = {
 }
 local stageDefinitions: { StageDefinition } = {}
 
+local EventBlockSystem = {}
+do
 local function isLiveEventActive(eventId: string): boolean
 	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
 	if not liveEventState or not liveEventState:IsA("Folder") then
@@ -286,18 +289,18 @@ local function applyEventBillboardPresentation(eventBillboard: BillboardGui, eve
 	local eventBlockUi = if typeof(eventEntry.eventBlockUi) == "table" then eventEntry.eventBlockUi else nil
 	local billboardText = if eventBlockUi and typeof(eventBlockUi.billboardText) == "string"
 		then eventBlockUi.billboardText
-		elseif typeof(eventEntry.displayText) == "string"
-		then string.upper(eventEntry.displayText) .. " KARTS"
+		elseif typeof(eventEntry.displayText) == "string" then string.upper(eventEntry.displayText) .. " KARTS"
 		else nil
 	local textColor = parseHexColor(eventEntry.displayColor)
 	if eventBlockUi then
 		textColor = parseHexColor(eventBlockUi.textColor) or textColor
 	end
 	local gradientColor = if eventBlockUi then parseHexColor(eventBlockUi.gradientColor) else nil
-	local infoText = if eventBlockUi and typeof(eventBlockUi.infoText) == "string" and eventBlockUi.infoText ~= ""
+	local infoText = if eventBlockUi
+			and typeof(eventBlockUi.infoText) == "string"
+			and eventBlockUi.infoText ~= ""
 		then eventBlockUi.infoText
-		elseif typeof(eventEntry.displayText) == "string"
-		then string.upper(eventEntry.displayText) .. " WINS REQUIRED"
+		elseif typeof(eventEntry.displayText) == "string" then string.upper(eventEntry.displayText) .. " WINS REQUIRED"
 		else nil
 
 	local function applyLabel(label: TextLabel?, text: string?, labelColor: Color3?, labelGradientColor: Color3?)
@@ -364,8 +367,10 @@ local function applyEventBlockState(eventBlock: Instance, stateFolder: Folder?)
 		then canonicalizeEventName(eventNameAttribute)
 		else "Bloodmoon"
 	local eventEntry = if stateFolder
-		then findFirstEventEntryWithBlockUi(stateFolder, "ActiveEvents")
-			or findFirstEventEntryWithBlockUi(stateFolder, "EventBlockEvents")
+		then findFirstEventEntryWithBlockUi(stateFolder, "ActiveEvents") or findFirstEventEntryWithBlockUi(
+			stateFolder,
+			"EventBlockEvents"
+		)
 		else nil
 	local eventActive = if stateFolder
 		then findFirstEventEntryWithBlockUi(stateFolder, "ActiveEvents") ~= nil
@@ -377,9 +382,7 @@ local function applyEventBlockState(eventBlock: Instance, stateFolder: Folder?)
 		eventColor = if typeof(eventBlockUi) == "table"
 			then parseHexColor(eventBlockUi.textColor) or parseHexColor(eventEntry.displayColor)
 			else parseHexColor(eventEntry.displayColor)
-		eventGradientColor = if typeof(eventBlockUi) == "table"
-			then parseHexColor(eventBlockUi.gradientColor)
-			else nil
+		eventGradientColor = if typeof(eventBlockUi) == "table" then parseHexColor(eventBlockUi.gradientColor) else nil
 	end
 
 	for _, descendant in ipairs(eventBlock:GetDescendants()) do
@@ -432,10 +435,8 @@ local function applyEventBlockState(eventBlock: Instance, stateFolder: Folder?)
 							updatedKeypoints[1] = ColorSequenceKeypoint.new(updatedKeypoints[1].Time, eventColor)
 							if eventGradientColor then
 								local lastIndex = #updatedKeypoints
-								updatedKeypoints[lastIndex] = ColorSequenceKeypoint.new(
-									updatedKeypoints[lastIndex].Time,
-									eventGradientColor
-								)
+								updatedKeypoints[lastIndex] =
+									ColorSequenceKeypoint.new(updatedKeypoints[lastIndex].Time, eventGradientColor)
 							end
 							gradient.Color = ColorSequence.new(updatedKeypoints)
 						end
@@ -485,7 +486,8 @@ local function setupEventBlock(eventBlock: Instance)
 	refreshCountdownLabel()
 	worldMaid.EventBlockCountdownLabelAdded = eventBlock.DescendantAdded:Connect(function(descendant)
 		local surfaceGui = descendant:FindFirstAncestorWhichIsA("SurfaceGui")
-		if descendant.Name == "CountdownLabel"
+		if
+			descendant.Name == "CountdownLabel"
 			or (descendant:IsA("TextLabel") and surfaceGui ~= nil and surfaceGui:IsDescendantOf(eventBlock))
 		then
 			refreshCountdownLabel()
@@ -504,9 +506,12 @@ local function setupEventBlock(eventBlock: Instance)
 				updateEventBlockCountdown(countdownLabel, candidate)
 			end
 		end
-		worldMaid.EventBlockActiveEventsChanged = candidate:GetAttributeChangedSignal("ActiveEvents"):Connect(refreshEventBlock)
-		worldMaid.EventBlockEventBlockEventsChanged = candidate:GetAttributeChangedSignal("EventBlockEvents"):Connect(refreshEventBlock)
-		worldMaid.EventBlockUpcomingEventsChanged = candidate:GetAttributeChangedSignal("UpcomingEvents"):Connect(refreshEventBlock)
+		worldMaid.EventBlockActiveEventsChanged =
+			candidate:GetAttributeChangedSignal("ActiveEvents"):Connect(refreshEventBlock)
+		worldMaid.EventBlockEventBlockEventsChanged =
+			candidate:GetAttributeChangedSignal("EventBlockEvents"):Connect(refreshEventBlock)
+		worldMaid.EventBlockUpcomingEventsChanged =
+			candidate:GetAttributeChangedSignal("UpcomingEvents"):Connect(refreshEventBlock)
 		applyEventBlockState(eventBlock, candidate)
 		worldMaid.EventBlockCountdownThread = task.spawn(function()
 			while scriptAlive and eventBlock.Parent do
@@ -532,6 +537,15 @@ local function setupEventBlock(eventBlock: Instance)
 		end
 	end)
 	applyEventBlockState(eventBlock, eventBlockStateFolder)
+end
+
+EventBlockSystem.IsLiveEventActive = isLiveEventActive
+EventBlockSystem.GetLiveEventDefinition = getLiveEventDefinition
+EventBlockSystem.CanonicalizeEventName = canonicalizeEventName
+EventBlockSystem.FindEventEntry = findEventEntry
+EventBlockSystem.GetActiveEventWithStageAwards = getActiveEventWithStageAwards
+EventBlockSystem.DecodeEventEntries = decodeEventEntries
+EventBlockSystem.SetupEventBlock = setupEventBlock
 end
 
 local KART_HOLDER_NAME = if worldManagerConfig and typeof(worldManagerConfig.kartHolderName) == "string"
@@ -792,6 +806,8 @@ local function findKartModelByNumber(worldName: string, kartNumber: number): Mod
 	return nil
 end
 
+local KartGrounding = {}
+do
 local function getFallbackRootPartToGroundDistance(character: Model, rootPart: BasePart): number
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local hipHeight = if humanoid then humanoid.HipHeight else 2
@@ -945,6 +961,11 @@ local function getOctagonGroundDistance(
 	local upperSupportIndex = math.ceil(#groundHeights * 0.75)
 	local upperSupportGroundY = groundHeights[upperSupportIndex]
 	return math.max(0, rootPart.Position.Y - upperSupportGroundY)
+end
+
+KartGrounding.CollectWheelParts = collectKartWheelParts
+KartGrounding.GetLowestRelativeY = getModelLowestRelativeY
+KartGrounding.GetOctagonGroundDistance = getOctagonGroundDistance
 end
 
 local function getKartDisplayName(kartModelName: string): string
@@ -1312,7 +1333,7 @@ local function attachKartToPlayer(player: Player, kartTemplate: Model): (boolean
 	tagKartRuntimeInstance(kartClone, player, EQUIPPED_KART_MODEL_TAG)
 
 	-- Identify wheels first to avoid accidental welding during internal pass
-	local wheelsToMotorize = collectKartWheelParts(kartClone)
+	local wheelsToMotorize = KartGrounding.CollectWheelParts(kartClone)
 	local seatBase = kartClone:FindFirstChild("SeatBase", true) :: BasePart?
 
 	if not seatBase then
@@ -1321,8 +1342,8 @@ local function attachKartToPlayer(player: Player, kartTemplate: Model): (boolean
 		return false, "MissingSeatBase"
 	end
 
-	local rootToGroundDistance = getOctagonGroundDistance(character, rootPart, kartClone, wheelsToMotorize)
-	local lowestSeatBaseLocalY = getModelLowestRelativeY(kartClone, seatBase.CFrame)
+	local rootToGroundDistance = KartGrounding.GetOctagonGroundDistance(character, rootPart, kartClone, wheelsToMotorize)
+	local lowestSeatBaseLocalY = KartGrounding.GetLowestRelativeY(kartClone, seatBase.CFrame)
 	local seatYOffset = math.clamp(
 		rootToGroundDistance + lowestSeatBaseLocalY - KART_SEAT_GROUND_CLEARANCE,
 		KART_SEAT_MIN_Y_OFFSET,
@@ -1691,6 +1712,10 @@ local function applyTreadmillToPlayer(
 	xpGainInterval: number,
 	gamePassId: number?
 )
+	if not TreadmillRequirementService.Meets(player, treadmillInstance.Name) then
+		TreadmillRequirementService.NotifyBlocked(player, treadmillInstance.Name)
+		return
+	end
 	if not ValidationService.IsPlayerNearPart(player, triggerPart) then
 		return
 	end
@@ -1843,11 +1868,7 @@ local function queueWinButtonTeleport(player: Player, worldName: string, buttonN
 				task.wait(delaySeconds)
 			end
 
-			if
-				not scriptAlive
-				or not player.Parent
-				or pendingWinButtonTeleportGenerations[player] ~= generation
-			then
+			if not scriptAlive or not player.Parent or pendingWinButtonTeleportGenerations[player] ~= generation then
 				break
 			end
 
@@ -1870,7 +1891,12 @@ local function queueWinButtonTeleport(player: Player, worldName: string, buttonN
 			failureReason = reason
 		end
 
-		if not completed and scriptAlive and player.Parent and pendingWinButtonTeleportGenerations[player] == generation then
+		if
+			not completed
+			and scriptAlive
+			and player.Parent
+			and pendingWinButtonTeleportGenerations[player] == generation
+		then
 			DebugModule.debugWarn(
 				string.format(
 					"WinButton teleport failed after retries | player=%s | button=%s | world=%s | reason=%s",
@@ -1979,8 +2005,8 @@ local reconcileEventKartButtonFolders: ((Instance) -> ())? = nil
 
 local function applyEventKartButtonState(kartButton: Instance, eventName: string, stateFolder: Folder?)
 	local eventActive = if stateFolder
-		then findEventEntry(stateFolder, "ActiveEvents", eventName) ~= nil
-		else isLiveEventActive(eventName)
+		then EventBlockSystem.FindEventEntry(stateFolder, "ActiveEvents", eventName) ~= nil
+		else EventBlockSystem.IsLiveEventActive(eventName)
 
 	for _, descendant in ipairs(kartButton:GetDescendants()) do
 		if descendant:IsA("BasePart") then
@@ -2005,7 +2031,8 @@ local function applyEventKartButtonState(kartButton: Instance, eventName: string
 				eventKartButtonOriginalStates[descendant] = originalEnabled
 			end
 			descendant.Enabled = if eventActive then originalEnabled else false
-		elseif descendant:IsA("ParticleEmitter")
+		elseif
+			descendant:IsA("ParticleEmitter")
 			or descendant:IsA("Beam")
 			or descendant:IsA("Trail")
 			or descendant:IsA("Smoke")
@@ -2051,25 +2078,23 @@ local function bindEventKartButtonStateFolder(candidate: Instance)
 	end
 
 	eventKartButtonStateFolder = candidate
-	worldMaid.EventKartButtonActiveEventsChanged = candidate:GetAttributeChangedSignal("ActiveEvents"):Connect(
-		refreshEventKartButtonStates
-	)
-	worldMaid.EventKartButtonActiveIdsChanged = candidate:GetAttributeChangedSignal("ActiveEventIds"):Connect(
-		refreshEventKartButtonStates
-	)
+	worldMaid.EventKartButtonActiveEventsChanged =
+		candidate:GetAttributeChangedSignal("ActiveEvents"):Connect(refreshEventKartButtonStates)
+	worldMaid.EventKartButtonActiveIdsChanged =
+		candidate:GetAttributeChangedSignal("ActiveEventIds"):Connect(refreshEventKartButtonStates)
 	refreshEventKartButtonStates()
 end
 
 local function getEventNameFromKartButton(kartButton: Instance): string?
 	local eventNameAttribute = kartButton:GetAttribute("EventName")
 	if typeof(eventNameAttribute) == "string" and eventNameAttribute ~= "" then
-		return canonicalizeEventName(eventNameAttribute)
+		return EventBlockSystem.CanonicalizeEventName(eventNameAttribute)
 	end
 
 	local ancestor = kartButton.Parent
 	while ancestor do
 		if ancestor.Parent and ancestor.Parent.Name == "EventKartButtons" then
-			return canonicalizeEventName(ancestor.Name)
+			return EventBlockSystem.CanonicalizeEventName(ancestor.Name)
 		end
 		ancestor = ancestor.Parent
 	end
@@ -2093,7 +2118,7 @@ local function getEventKartProductConfig(productKey: string): { [string]: any }?
 end
 
 local function getEventKartWinsAttribute(eventName: string): string
-	local eventDefinition = getLiveEventDefinition(eventName)
+	local eventDefinition = EventBlockSystem.GetLiveEventDefinition(eventName)
 	if eventDefinition and typeof(eventDefinition.kartWinsAttribute) == "string" then
 		return eventDefinition.kartWinsAttribute
 	end
@@ -2103,7 +2128,7 @@ local function getEventKartWinsAttribute(eventName: string): string
 end
 
 local function getEventKartRequirementLabel(eventName: string): string
-	local eventDefinition = getLiveEventDefinition(eventName)
+	local eventDefinition = EventBlockSystem.GetLiveEventDefinition(eventName)
 	if eventDefinition and typeof(eventDefinition.kartRequirementLabel) == "string" then
 		return string.upper(eventDefinition.kartRequirementLabel)
 	end
@@ -2183,13 +2208,13 @@ setupKartButton = function(kartButton: Instance, worldName: string)
 		return
 	end
 
-	local eventDefinition = if eventName then getLiveEventDefinition(eventName) else nil
+	local eventDefinition = if eventName then EventBlockSystem.GetLiveEventDefinition(eventName) else nil
 	local eventTextColor = if eventDefinition and typeof(eventDefinition.displayColor) == "Color3"
 		then eventDefinition.displayColor
 		else nil
 	local eventGradientColor = if eventDefinition
-		and typeof(eventDefinition.eventBlockUi) == "table"
-		and typeof(eventDefinition.eventBlockUi.gradientColor) == "Color3"
+			and typeof(eventDefinition.eventBlockUi) == "table"
+			and typeof(eventDefinition.eventBlockUi.gradientColor) == "Color3"
 		then eventDefinition.eventBlockUi.gradientColor
 		else nil
 
@@ -2342,8 +2367,9 @@ setupKartButton = function(kartButton: Instance, worldName: string)
 
 		local alreadyOwned = PlayerHandler.OwnsKart(player, kartTemplate.Name)
 		if
-			(isEventKart or isProductKart or isGamepassKart) and not alreadyOwned
-			and (eventName == nil or not isLiveEventActive(eventName))
+			(isEventKart or isProductKart or isGamepassKart)
+			and not alreadyOwned
+			and (eventName == nil or not EventBlockSystem.IsLiveEventActive(eventName))
 		then
 			ShowNotification:FireClient(player, "EVENT NOT ACTIVE!", "Red")
 			return
@@ -2514,7 +2540,7 @@ reconcileEventKartButtonFolders = function(eventKartButtonsFolder: Instance)
 	end
 
 	local activeEventNames: { [string]: boolean } = {}
-	for _, eventEntry in ipairs(decodeEventEntries(stateFolder, "ActiveEvents")) do
+	for _, eventEntry in ipairs(EventBlockSystem.DecodeEventEntries(stateFolder, "ActiveEvents")) do
 		if
 			type(eventEntry) == "table"
 			and typeof(eventEntry.id) == "string"
@@ -2808,9 +2834,8 @@ local function setupWinButton(model: Model, worldName: string)
 
 		local finalStage = worldFinalStages[worldName]
 		local didUnlockEventReward = false
-		local activeEventDefinition = getActiveEventWithStageAwards()
-		local activeEventName = if activeEventDefinition
-			and typeof(activeEventDefinition.id) == "string"
+		local activeEventDefinition = EventBlockSystem.GetActiveEventWithStageAwards()
+		local activeEventName = if activeEventDefinition and typeof(activeEventDefinition.id) == "string"
 			then activeEventDefinition.id
 			else nil
 		local eventBaseAward = if activeEventName
@@ -2980,6 +3005,10 @@ local function setupTreadmill(treadmillInstance: Instance, worldName: string)
 		end
 
 		if not consumeTouchInteractionDebounce(player, touchDebounceKey, 0.2) then
+			return
+		end
+		if not TreadmillRequirementService.Meets(player, treadmillInstance.Name) then
+			TreadmillRequirementService.NotifyBlocked(player, treadmillInstance.Name)
 			return
 		end
 
@@ -3161,7 +3190,7 @@ local function initWorlds()
 		local eventKartShop = decorations and decorations:FindFirstChild("EventKartShop")
 		local eventBlock = eventKartShop and eventKartShop:FindFirstChild("EventBlock")
 		if eventBlock then
-			setupEventBlock(eventBlock)
+			EventBlockSystem.SetupEventBlock(eventBlock)
 		end
 	end
 
@@ -3260,6 +3289,7 @@ activeMaid.PlayerRemoving = Players.PlayerRemoving:Connect(function(player)
 	lastKartHealthResyncAt[player] = nil
 	lastKartVisualResyncRequestAt[player] = nil
 	ValidationService.CleanupPlayer(player)
+	TreadmillRequirementService.CleanupPlayer(player)
 end)
 
 for _, player in ipairs(Players:GetPlayers()) do
@@ -3415,6 +3445,10 @@ activeMaid.Heartbeat = RunService.Heartbeat:Connect(function(dt)
 					treadmillDefinition.worldName == currentWorld
 					and isRootPartTouchingPart(rootPart, treadmillDefinition.triggerPart)
 				then
+					if not TreadmillRequirementService.Meets(player, treadmillDefinition.instance.Name) then
+						TreadmillRequirementService.NotifyBlocked(player, treadmillDefinition.instance.Name)
+						break
+					end
 					if
 						treadmillDefinition.gamePassId
 						and not ProductService.userOwnsGamePass(player, treadmillDefinition.gamePassId)
@@ -3479,6 +3513,7 @@ local function cleanupWorldManager()
 	end
 
 	ValidationService.Cleanup()
+	TreadmillRequirementService.Cleanup()
 	table.clear(eventBlockOriginalStates)
 	table.clear(eventBlockOriginalExclusiveTextColors)
 	table.clear(eventBlockOriginalExclusiveGradients)

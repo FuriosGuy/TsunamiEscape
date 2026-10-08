@@ -12,15 +12,15 @@
       "weight": "Regular"
     },
     "Interactable": false,
-    "Position": [[0.0921, 0.0], [0.1378, 0.0]],
+    "Position": [[0.0921, 0.0], [0.1282, 0.0]],
     "RichText": true,
-    "Size": [[0.8041, 0.0], [0.7447, 0.0]],
+    "Size": [[0.8041, 0.0], [0.6927, 0.0]],
     "Text": "Pet Inventory",
     "TextColor3": [1, 1, 1],
     "TextScaled": true,
     "TextSize": 14,
     "TextWrapped": true,
     "TextXAlignment": "Left",
-    "ZIndex": 3
+    "ZIndex": 4
   }
 }

@@ -65,7 +65,7 @@ type RewardEntry = {
 local function cacheOriginalColorAttributes(target: Instance)
 	local targetProps = {}
 
-	if target:IsA("Frame") or target:IsA("ScrollingFrame") then
+	if target:IsA("Frame") or target:IsA("ScrollingFrame") or target:IsA("CanvasGroup") then
 		table.insert(targetProps, "BackgroundColor3")
 	elseif target:IsA("TextLabel") then
 		table.insert(targetProps, "TextColor3")
@@ -91,7 +91,7 @@ local function cacheOriginalColorAttributes(target: Instance)
 	end
 end
 
-local function cacheEntryOriginalColors(root: Frame)
+local function cacheEntryOriginalColors(root: GuiObject)
 	if root:GetAttribute("OriginalDisabledBaseColor") == nil then
 		root:SetAttribute("OriginalDisabledBaseColor", root.BackgroundColor3)
 	end
@@ -305,11 +305,11 @@ function DailyRewardsUI.new(options: ControllerOptions)
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	self.dailyRewardAction = remotes:WaitForChild("DailyRewardAction") :: RemoteEvent
 	self.dailyRewardTimeSync = remotes:WaitForChild("DailyRewardTimeSync") :: RemoteEvent
-	self.frame = nil :: Frame?
+	self.frame = nil :: GuiObject?
 	self.claimDailyButton = nil :: TextButton?
-	self.claimDailyButtonFrame = nil :: Frame?
+	self.claimDailyButtonFrame = nil :: GuiObject?
 	self.claimAllButton = nil :: TextButton?
-	self.claimAllButtonFrame = nil :: Frame?
+	self.claimAllButtonFrame = nil :: GuiObject?
 	self.claimAllPriceLabel = nil :: TextLabel?
 	self.dailyCountdownLabel = nil :: TextLabel?
 
@@ -329,9 +329,9 @@ function DailyRewardsUI:SyncLocalTime()
 	self.dailyRewardTimeSync:FireServer(getLocalTimezoneOffsetMinutes())
 end
 
-function DailyRewardsUI:FindDailyRewardFrame(): Frame?
+function DailyRewardsUI:FindDailyRewardFrame(): GuiObject?
 	local frame = self.root:FindFirstChild("DailyRewardFrame", true)
-	if frame and frame:IsA("Frame") then
+	if frame and frame:IsA("GuiObject") then
 		return frame
 	end
 
@@ -349,13 +349,19 @@ function DailyRewardsUI:Rebuild()
 	end
 
 	local bodyFrame = self.frame:FindFirstChild("BodyFrame")
-	if not bodyFrame or not bodyFrame:IsA("Frame") then
+	if not bodyFrame or not bodyFrame:IsA("GuiObject") then
 		return
 	end
 
 	self.dailyCountdownLabel = bodyFrame:FindFirstChild("DailyCountdown") :: TextLabel?
-	self.claimDailyButtonFrame = self.frame:FindFirstChild("ClaimDailyButton") :: Frame?
-	self.claimAllButtonFrame = self.frame:FindFirstChild("ClaimAllDailyButton") :: Frame?
+	local claimDailyButtonFrame = self.frame:FindFirstChild("ClaimDailyButton")
+	self.claimDailyButtonFrame = if claimDailyButtonFrame and claimDailyButtonFrame:IsA("GuiObject")
+		then claimDailyButtonFrame
+		else nil
+	local claimAllButtonFrame = self.frame:FindFirstChild("ClaimAllDailyButton")
+	self.claimAllButtonFrame = if claimAllButtonFrame and claimAllButtonFrame:IsA("GuiObject")
+		then claimAllButtonFrame
+		else nil
 	self.claimDailyButton = self.claimDailyButtonFrame
 			and self.claimDailyButtonFrame:FindFirstChildWhichIsA("TextButton", true)
 		or nil

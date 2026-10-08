@@ -20,7 +20,7 @@ type PetUpgradeUIControllerObject = {
 	pendingGamePassIds: { [number]: boolean },
 	priceThreads: { thread },
 	priceRequestKeys: { [TextLabel]: string },
-	fastOpenTween: Tween?,
+	fastOpenTweens: { [GuiButton]: Tween },
 	creatorPurchaseDisconnect: (() -> ())?,
 	alive: boolean,
 	Destroy: (self: PetUpgradeUIControllerObject) -> (),
@@ -94,7 +94,7 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 		pendingGamePassIds = {},
 		priceThreads = {},
 		priceRequestKeys = {},
-		fastOpenTween = nil,
+		fastOpenTweens = {},
 		creatorPurchaseDisconnect = nil,
 		alive = true,
 	}, PetUpgradeUIController) :: PetUpgradeUIControllerObject
@@ -116,11 +116,35 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 	local luckyBlockLuckPromptButton = findButton(luckyBlockLuckButtonFrame)
 	local fasterOpenButtonFrame = findGuiObject(openLuckyBlockMainFrame, "InstantHatchButtonFrame")
 	local fastOpenLabel = findGuiObject(openLuckyBlockMainFrame, "FastOpen")
+	local shopFrame = findGuiObject(screenGui, "ShopFrame")
+	local shopScrollBackground = findGuiObject(shopFrame, "ScrollBackground")
+	local shopScrollingFrame = findGuiObject(shopScrollBackground, "ScrollingFrame")
+	local shopLuckyBlocks = findGuiObject(shopScrollingFrame, "LuckyBlocks")
+	local shopLuckyBlocksMainFrame = findGuiObject(shopLuckyBlocks, "MainFrame")
+	local shopFastOpenLabel = findGuiObject(shopLuckyBlocksMainFrame, "FastOpen")
+	type FastOpenToggle = { label: GuiObject, container: CanvasGroup, button: GuiButton }
+	local fastOpenToggles: { FastOpenToggle } = {}
+	local fastOpenLabels: { GuiObject } = {}
 	if fastOpenLabel then
-		fastOpenLabel.Visible = false
+		table.insert(fastOpenLabels, fastOpenLabel)
 	end
-	local fastOpenCanvasGroup = fastOpenLabel and fastOpenLabel:FindFirstChildWhichIsA("CanvasGroup")
-	local fastOpenToggleButton = findButton(fastOpenCanvasGroup)
+	if shopFastOpenLabel then
+		table.insert(fastOpenLabels, shopFastOpenLabel)
+	end
+	for _, label in ipairs(fastOpenLabels) do
+		if label then
+			label.Visible = false
+			local canvasGroup = label:FindFirstChildWhichIsA("CanvasGroup")
+			local button = findButton(canvasGroup)
+			if canvasGroup and button then
+				table.insert(fastOpenToggles, {
+					label = label,
+					container = canvasGroup,
+					button = button,
+				})
+			end
+		end
+	end
 	local fastOpenRemoteInstance = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PetLuckyBlockFastOpenPreference", 10)
 	local fastOpenRemote = if fastOpenRemoteInstance and fastOpenRemoteInstance:IsA("RemoteEvent")
 		then fastOpenRemoteInstance
@@ -132,7 +156,7 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 	local fastOpenPending = false
 
 	local function setFasterOpenDisabledState(): ()
-		if fasterOpenButtonFrame and fasterOpenButtonFrame:IsA("Frame") then
+		if fasterOpenButtonFrame and fasterOpenButtonFrame:IsA("GuiObject") then
 			if fasterOpenOwnershipResolved then
 				VisualFunctions.SetFrameDisabledState(fasterOpenButtonFrame, fasterOpenOwned, 0.5)
 			else
@@ -142,33 +166,33 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 	end
 
 	local function updateFastOpenVisibility(): ()
-		if fastOpenLabel then
-			fastOpenLabel.Visible = fasterOpenOwnershipResolved
-				and fasterOpenOwned
-				and player:GetAttribute("Data_Loaded") == true
+		local isVisible = fasterOpenOwnershipResolved
+			and fasterOpenOwned
+			and player:GetAttribute("Data_Loaded") == true
+		for _, toggle in ipairs(fastOpenToggles) do
+			toggle.label.Visible = isVisible
 		end
 	end
 
 	local function updateFastOpenVisual(): ()
-		if not fastOpenToggleButton then
-			return
-		end
+		for _, toggle in ipairs(fastOpenToggles) do
+			local gradient = toggle.button:FindFirstChildOfClass("UIGradient")
+			if gradient then
+				gradient.Color = if fastOpenEnabled then ColorConfig.Colors.Green.Gradient else ColorConfig.Colors.Gray.Gradient
+			end
 
-		local gradient = fastOpenToggleButton:FindFirstChildOfClass("UIGradient")
-		if gradient then
-			gradient.Color = if fastOpenEnabled then ColorConfig.Colors.Green.Gradient else ColorConfig.Colors.Gray.Gradient
+			local previousTween = self.fastOpenTweens[toggle.button]
+			if previousTween then
+				previousTween:Cancel()
+			end
+			local tween = TweenService:Create(
+				toggle.button,
+				TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ BackgroundTransparency = if fastOpenEnabled then 0 else 1 }
+			)
+			self.fastOpenTweens[toggle.button] = tween
+			tween:Play()
 		end
-
-		if self.fastOpenTween then
-			self.fastOpenTween:Cancel()
-			self.fastOpenTween = nil
-		end
-		self.fastOpenTween = TweenService:Create(
-			fastOpenToggleButton,
-			TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ BackgroundTransparency = if fastOpenEnabled then 0 else 1 }
-		)
-		self.fastOpenTween:Play()
 	end
 
 	local function requestPrice(priceLabel: TextLabel?, itemId: number?, infoType: Enum.InfoType): ()
@@ -298,21 +322,22 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 			ProductService.promptGamePassPurchase(player, gamePassId)
 		end
 	end)
-	if fastOpenLabel and fastOpenCanvasGroup and fastOpenToggleButton then
-		fastOpenLabel.Visible = false
-		connectAction(fastOpenCanvasGroup, function()
-			if not fasterOpenOwned or not fasterOpenOwnershipResolved or player:GetAttribute("Data_Loaded") ~= true then
-				return
-			end
-			if fastOpenPending or not fastOpenRemote then
-				return
-			end
+	if #fastOpenToggles > 0 then
+		for _, toggle in ipairs(fastOpenToggles) do
+			connectAction(toggle.container, function()
+				if not fasterOpenOwned or not fasterOpenOwnershipResolved or player:GetAttribute("Data_Loaded") ~= true then
+					return
+				end
+				if fastOpenPending or not fastOpenRemote then
+					return
+				end
 
-			fastOpenPending = true
-			fastOpenEnabled = not fastOpenEnabled
-			updateFastOpenVisual()
-			fastOpenRemote:FireServer(fastOpenEnabled)
-		end)
+				fastOpenPending = true
+				fastOpenEnabled = not fastOpenEnabled
+				updateFastOpenVisual()
+				fastOpenRemote:FireServer(fastOpenEnabled)
+			end)
+		end
 		if fastOpenRemote then
 			table.insert(self.connections, fastOpenRemote.OnClientEvent:Connect(function(serverEnabled: any)
 				if typeof(serverEnabled) ~= "boolean" then
@@ -405,7 +430,7 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 			hudPlusLabel.Visible = nextTierAvailable and luckPurchasesAllowed
 		end
 
-		if luckyBlockLuckButtonFrame and luckyBlockLuckButtonFrame:IsA("Frame") then
+		if luckyBlockLuckButtonFrame and luckyBlockLuckButtonFrame:IsA("GuiObject") then
 			luckyBlockLuckButtonFrame.Visible = luckPurchasesAllowed
 			VisualFunctions.SetFrameDisabledState(luckyBlockLuckButtonFrame, not nextTierAvailable, 0.5)
 		end
@@ -497,9 +522,9 @@ function PetUpgradeUIController:Destroy()
 		return
 	end
 	self.alive = false
-	if self.fastOpenTween then
-		self.fastOpenTween:Cancel()
-		self.fastOpenTween = nil
+	for button, tween in pairs(self.fastOpenTweens) do
+		tween:Cancel()
+		self.fastOpenTweens[button] = nil
 	end
 	for _, connection in ipairs(self.connections) do
 		connection:Disconnect()

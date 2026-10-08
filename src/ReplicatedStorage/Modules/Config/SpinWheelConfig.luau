@@ -22,14 +22,14 @@ SpinWheelConfig.Rewards = {
 		frameName = "Reward_SpeedSmall",
 		chance = 35,
 		displayName = "+SPEED",
-		imageAssetId = "rbxassetid://136641422450900",
+		imageAssetId = "rbxassetid://75466794680143",
 	},
 	{
 		id = "SpeedLarge",
 		frameName = "Reward_SpeedLarge",
 		chance = 20,
 		displayName = "+BIG SPEED",
-		imageAssetId = "rbxassetid://125552789489073",
+		imageAssetId = "rbxassetid://104159835173600",
 	},
 	{
 		id = "Wins",
@@ -43,7 +43,7 @@ SpinWheelConfig.Rewards = {
 		frameName = "Reward_Rebirth",
 		chance = 15,
 		displayName = "+1 REBIRTH",
-		imageAssetId = "rbxassetid://138330067069857",
+		imageAssetId = "rbxassetid://71940044763334",
 	},
 	{
 		id = "FlameTrail",

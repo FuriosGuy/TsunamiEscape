@@ -11,6 +11,7 @@
     "BorderSizePixel": 0,
     "ClipsDescendants": true,
     "Position": [[0.3323, 0.0], [0.1053, 0.0]],
-    "Size": [[0.3108, 0.0], [0.7895, 0.0]]
+    "Size": [[0.3108, 0.0], [0.7895, 0.0]],
+    "ZIndex": 2
   }
 }

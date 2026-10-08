@@ -3,7 +3,7 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [-83, 1.25, -4416, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "CFrame": [-83, 1.25, -7496, 0, 0, 1, 0, 1, 0, -1, 0, 0],
     "Color": [17, 17, 17],
     "Locked": true,
     "MaterialVariant": "Weld",

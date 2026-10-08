@@ -12,9 +12,9 @@
       "weight": "Regular"
     },
     "Interactable": false,
-    "Position": [[0.0127, 0.0], [0.7082, 0.0]],
+    "Position": [[0.0127, 0.0], [0.7107, 0.0]],
     "RichText": true,
-    "Size": [[0.9501, 0.0], [0.3668, 0.0]],
+    "Size": [[0.9501, 0.0], [0.3643, 0.0]],
     "Text": "STARTER PACK",
     "TextColor3": [1, 1, 1],
     "TextScaled": true,

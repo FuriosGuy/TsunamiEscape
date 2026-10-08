@@ -227,7 +227,7 @@ local LuckyBlocks: { [LuckyBlockId]: LuckyBlockDefinition } = table.freeze({
 						"Legendary",
 						7.5
 					),
-				createPet("BloodMoon_TungSahur", "Bloodmoon Tung Sahur", "BloodMoon/05_Tung", "Mythic", 16),
+					createPet("BloodMoon_TungSahur", "Bloodmoon Tung Sahur", "BloodMoon/05_Tung", "Mythic", 16),
 				}),
 			}),
 			NeonRush = table.freeze({

@@ -12,8 +12,8 @@
       "weight": "Regular"
     },
     "Interactable": false,
-    "Position": [[0.7199, 0.0], [0.2386, 0.0]],
-    "Size": [[0.0954, 0.0], [0.4995, 0.0]],
+    "Position": [[0.6717, 0.0], [0.2386, 0.0]],
+    "Size": [[0.1436, 0.0], [0.4995, 0.0]],
     "Text": "Stage 0",
     "TextColor3": [1, 1, 1],
     "TextScaled": true,

@@ -305,6 +305,9 @@ local function updateScreenGuiStrokesAndTextSize()
 		if uiStroke.Parent == nil then
 			screenStrokes[uiStroke] = nil
 			addSkip("destroyed_before_scale")
+		elseif uiStroke.StrokeSizingMode == Enum.StrokeSizingMode.ScaledSize then
+			screenStrokes[uiStroke] = nil
+			addSkip("stroke_already_scaled")
 		else
 			uiStroke.Thickness = originalThickness * ratio
 		end
@@ -504,6 +507,11 @@ uiStrokeAdjusterMaid:GiveTask(
 
 uiStrokeAdjusterMaid:GiveTask(
 	CollectionService:GetInstanceAddedSignal(SCREEN_STROKE_TAG):Connect(function(uiStroke: UIStroke)
+		if uiStroke.StrokeSizingMode == Enum.StrokeSizingMode.ScaledSize then
+			addSkip("stroke_already_scaled")
+			return
+		end
+
 		screenStrokes[uiStroke] = uiStroke.Thickness
 		uiStroke.Thickness *= getScreenRatio()
 		addScaled()

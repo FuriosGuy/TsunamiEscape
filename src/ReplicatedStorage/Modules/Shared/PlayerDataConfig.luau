@@ -51,8 +51,10 @@ PlayerDataConfig.DEFAULT_ATTRIBUTES = {
 	VerifyRewardNextClaimUnix = 0,
 	VerifyRewardClaimCount = 0,
 	StarterPackRewardClaimed = false,
+	FreeTreadmillClaimed = false,
 	TutorialSeen = false,
 	TutorialCompleted = false,
+	FavoriteGamePromptAttempted = false,
 	Data_Loaded = false,
 	PlaytimeRewardElapsed = 0,
 	TotalPlaytimeSeconds = 0,
@@ -98,7 +100,8 @@ PlayerDataConfig.FRIEND_INVITE_MULTIPLIER_STEP = if socialConfig
 PlayerDataConfig.DEFAULT_PLAYER_SPEED = if typeof(PlayerDataConfig.DEFAULT_ATTRIBUTES.Player_Speed) == "number"
 	then PlayerDataConfig.DEFAULT_ATTRIBUTES.Player_Speed
 	else 16
-PlayerDataConfig.DEFAULT_MAX_PLAYER_SPEED = if typeof(PlayerDataConfig.DEFAULT_ATTRIBUTES.Max_Player_Speed) == "number"
+PlayerDataConfig.DEFAULT_MAX_PLAYER_SPEED = if typeof(PlayerDataConfig.DEFAULT_ATTRIBUTES.Max_Player_Speed)
+		== "number"
 	then PlayerDataConfig.DEFAULT_ATTRIBUTES.Max_Player_Speed
 	else 16
 

@@ -69,7 +69,7 @@ function TutorialNotificationSystem.new(options: ControllerOptions)
 	self.tutorialSeenSent = tutorialSeen
 	self.tutorialCompletedSent = tutorialCompleted
 
-	self.notificationFrame = nil :: Frame?
+	self.notificationFrame = nil :: GuiObject?
 	self.notificationLabel = nil :: TextLabel?
 	self.tutorialLabel = nil :: TextLabel?
 	self.skipButtonFrame = nil :: GuiObject?
@@ -128,7 +128,7 @@ function TutorialNotificationSystem:RefreshNotificationReferences()
 		then skipFrame:FindFirstChildWhichIsA("GuiButton", true)
 		else nil
 
-	self.notificationFrame = if frame and frame:IsA("Frame") then frame else nil
+	self.notificationFrame = if frame and frame:IsA("GuiObject") then frame else nil
 	self.notificationLabel = if label and label:IsA("TextLabel") then label else nil
 	self.tutorialLabel = if tutorialLabelInstance and tutorialLabelInstance:IsA("TextLabel")
 		then tutorialLabelInstance
@@ -155,7 +155,9 @@ function TutorialNotificationSystem:CaptureNotificationTransparencyDefaults()
 
 	local function captureForInstance(instance: Instance)
 		local defaults = {} :: { [string]: number }
-		if instance:IsA("Frame") or instance:IsA("ScrollingFrame") then
+		if instance:IsA("CanvasGroup") then
+			defaults.GroupTransparency = instance.GroupTransparency
+		elseif instance:IsA("Frame") or instance:IsA("ScrollingFrame") then
 			defaults.BackgroundTransparency = instance.BackgroundTransparency
 		elseif instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
 			defaults.TextTransparency = instance.TextTransparency

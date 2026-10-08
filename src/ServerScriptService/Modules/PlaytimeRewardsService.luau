@@ -11,7 +11,9 @@ local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitFor
 local FunnelAnalytics =
 	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("FunnelAnalytics_Server"))
 local CoreConfig = require(ServerSharedFolder:WaitForChild("CoreConfig_Server"))
+local CoreConfigShared = require(SharedFolder:WaitForChild("CoreConfig_Shared"))
 local PlaytimeRewardsConfig = require(SharedFolder:WaitForChild("PlaytimeRewardsConfig"))
+local ProductServerService = require(script.Parent:WaitForChild("ProductServerService"))
 
 local LevelingService = require(script.Parent:WaitForChild("LevelingService"))
 local EconomyAnalytics = require(script.Parent:WaitForChild("EconomyAnalytics"))
@@ -22,8 +24,28 @@ local MODULE_NAME = "PlaytimeRewardsService"
 local PLAYTIME_ELAPSED_ATTRIBUTE = "PlaytimeRewardElapsed"
 local TOTAL_PLAYTIME_ATTRIBUTE = "TotalPlaytimeSeconds"
 local PLAYTIME_CLAIMED_ATTRIBUTE = "PlaytimeRewardsClaimed"
+local FREE_TREADMILL_CLAIMED_ATTRIBUTE = if RunService:IsStudio()
+	then "FreeTreadmillStudioClaimed"
+	else "FreeTreadmillClaimed"
+local FREE_TREADMILL_REMAINING_ATTRIBUTE = "FreeTreadmillClaimRemainingSeconds"
+local FREE_TREADMILL_CLAIM_ID = "FreeTreadmill"
 local TOTAL_DURATION_SECONDS = PlaytimeRewardsConfig.TOTAL_DURATION_SECONDS
 local REQUEST_COOLDOWN_SECONDS = 0.15
+local treadmillConfig = CoreConfigShared.treadmills
+assert(typeof(treadmillConfig) == "table", "CoreConfigShared.treadmills is required")
+local freeTreadmillSessionSecondsValue = treadmillConfig.freeTreadmillClaimSessionSeconds
+local studioFreeTreadmillSessionSecondsValue = treadmillConfig.studioFreeTreadmillClaimSessionSeconds
+assert(
+	typeof(freeTreadmillSessionSecondsValue) == "number" and freeTreadmillSessionSecondsValue >= 0,
+	"CoreConfigShared.treadmills.freeTreadmillClaimSessionSeconds must be non-negative"
+)
+assert(
+	typeof(studioFreeTreadmillSessionSecondsValue) == "number" and studioFreeTreadmillSessionSecondsValue >= 0,
+	"CoreConfigShared.treadmills.studioFreeTreadmillClaimSessionSeconds must be non-negative"
+)
+local FREE_TREADMILL_SESSION_SECONDS = math.floor(
+	if RunService:IsStudio() then studioFreeTreadmillSessionSecondsValue else freeTreadmillSessionSecondsValue
+)
 local playtimeConfig = if CoreConfig.server and CoreConfig.server.playtimeRewards
 	then CoreConfig.server.playtimeRewards
 	else nil
@@ -46,6 +68,7 @@ local claimInFlight: { [Player]: boolean } = {}
 local lastRequestAt: { [Player]: number } = {}
 local claimFunnelSessions: { [Player]: string } = {}
 local readyFunnelSessions: { [Player]: { [string]: string } } = {}
+local freeTreadmillSessionElapsed: { [Player]: number } = {}
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local PlaytimeRewardAction = Remotes:WaitForChild("PlaytimeRewardAction") :: RemoteEvent
@@ -218,6 +241,49 @@ function PlaytimeRewardsService.OnRewardAction(player: Player, action: string, t
 		return
 	end
 
+	if tierId == FREE_TREADMILL_CLAIM_ID then
+		if player:GetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE) == true then
+			return
+		end
+
+		local sessionElapsed = freeTreadmillSessionElapsed[player] or 0
+		if sessionElapsed < FREE_TREADMILL_SESSION_SECONDS then
+			player:SetAttribute(
+				FREE_TREADMILL_REMAINING_ATTRIBUTE,
+				FREE_TREADMILL_SESSION_SECONDS - sessionElapsed
+			)
+			ShowNotification:FireClient(player, "TREADMILL NOT READY!", "Red")
+			return
+		end
+
+		claimInFlight[player] = true
+		local previousClaimed = player:GetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE)
+		player:SetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE, true)
+		if not RunService:IsStudio() then
+			local saveCallSucceeded, saved = pcall(ProductServerService.SavePlayerData, player, true)
+			if not saveCallSucceeded or saved ~= true then
+				player:SetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE, previousClaimed)
+				claimInFlight[player] = nil
+				DebugModule.debugWarn(
+					string.format(
+						"Free treadmill claim rolled back after save failure | player=%s error=%s",
+						player.Name,
+						tostring(saved)
+					),
+					MODULE_NAME
+				)
+				ShowNotification:FireClient(player, "TREADMILL CLAIM FAILED!", "Red")
+				return
+			end
+		end
+		claimInFlight[player] = nil
+
+		freeTreadmillSessionElapsed[player] = nil
+		player:SetAttribute(FREE_TREADMILL_REMAINING_ATTRIBUTE, 0)
+		ShowNotification:FireClient(player, "FREE 2X TREADMILL CLAIMED!", "Green")
+		return
+	end
+
 	local tier = PlaytimeRewardsConfig.GetTierById(tierId)
 	if not tier then
 		return
@@ -369,10 +435,19 @@ function PlaytimeRewardsService.OnPlayerAdded(player: Player)
 		else 0
 	local existingClaimed = player:GetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE)
 	local claimedValue = if typeof(existingClaimed) == "string" then existingClaimed else ""
+	if RunService:IsStudio() then
+		player:SetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE, false)
+	end
+	local hasClaimedFreeTreadmill = player:GetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE) == true
 
 	player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, elapsedValue)
 	player:SetAttribute(TOTAL_PLAYTIME_ATTRIBUTE, totalPlaytimeValue)
 	player:SetAttribute(PLAYTIME_CLAIMED_ATTRIBUTE, claimedValue)
+	freeTreadmillSessionElapsed[player] = if hasClaimedFreeTreadmill then FREE_TREADMILL_SESSION_SECONDS else 0
+	player:SetAttribute(
+		FREE_TREADMILL_REMAINING_ATTRIBUTE,
+		if hasClaimedFreeTreadmill then 0 else FREE_TREADMILL_SESSION_SECONDS
+	)
 	recordReadyRewards(player)
 
 	playerMaid.TimerThread = task.spawn(function()
@@ -395,6 +470,18 @@ function PlaytimeRewardsService.OnPlayerAdded(player: Player)
 
 			player:SetAttribute(TOTAL_PLAYTIME_ATTRIBUTE, math.max(0, math.floor(currentTotalPlaytime)) + 1)
 
+			if player:GetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE) ~= true then
+				local sessionElapsed = math.min(
+					FREE_TREADMILL_SESSION_SECONDS,
+					(freeTreadmillSessionElapsed[player] or 0) + 1
+				)
+				freeTreadmillSessionElapsed[player] = sessionElapsed
+				player:SetAttribute(
+					FREE_TREADMILL_REMAINING_ATTRIBUTE,
+					math.max(0, FREE_TREADMILL_SESSION_SECONDS - sessionElapsed)
+				)
+			end
+
 			if clampedElapsed < TOTAL_DURATION_SECONDS then
 				player:SetAttribute(PLAYTIME_ELAPSED_ATTRIBUTE, clampedElapsed + 1)
 				recordReadyRewards(player)
@@ -415,6 +502,7 @@ function PlaytimeRewardsService.CleanupPlayer(player: Player)
 	readyFunnelSessions[player] = nil
 	claimInFlight[player] = nil
 	lastRequestAt[player] = nil
+	freeTreadmillSessionElapsed[player] = nil
 end
 
 function PlaytimeRewardsService.Init()

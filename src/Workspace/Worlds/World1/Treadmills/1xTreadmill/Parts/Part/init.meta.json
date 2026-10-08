@@ -3,10 +3,10 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [59.0508, 13.3413, -30.9971, 0, 1, 0, -1, 0, 0, 0, 0, 1],
+    "CFrame": [99.8922, 11.4856, -3.9971, 0.9397, -0.342, 0, 0.342, 0.9397, 0, 0, 0, 1],
     "Color": [99, 95, 98],
     "MaterialVariant": "Universal",
-    "Size": [0.6483, 4.7858, 1.2966],
+    "Size": [0.6483, 4.4036, 1.2966],
     "TopSurface": "Smooth"
   }
 }

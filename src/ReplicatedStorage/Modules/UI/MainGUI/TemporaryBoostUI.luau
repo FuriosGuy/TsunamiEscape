@@ -84,7 +84,7 @@ local function getColorTargets(root: GuiObject, excluded: { [Instance]: boolean 
 	end
 
 	local function inspect(instance: Instance)
-		if instance:IsA("Frame") or instance:IsA("ScrollingFrame") then
+		if instance:IsA("Frame") or instance:IsA("ScrollingFrame") or instance:IsA("CanvasGroup") then
 			addTarget(instance, "BackgroundColor3")
 		elseif instance:IsA("TextLabel") then
 			addTarget(instance, "TextColor3")

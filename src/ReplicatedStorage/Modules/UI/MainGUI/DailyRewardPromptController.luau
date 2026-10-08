@@ -10,9 +10,9 @@ type ControllerOptions = {
 		refresh: (() -> ())?,
 	},
 	updateButtonNotificationBadge: (any, boolean, string, string) -> (),
-	getDailyRewardFrame: () -> Frame?,
-	closeOtherFrames: (Frame?) -> (),
-	openWindow: (Frame) -> (),
+	getDailyRewardFrame: () -> GuiObject?,
+	closeOtherFrames: (GuiObject?) -> (),
+	openWindow: (GuiObject) -> (),
 	canAutoOpen: (() -> boolean)?,
 }
 
@@ -44,7 +44,7 @@ function DailyRewardPromptController:RefreshBadge()
 	local dataLoaded = self.player:GetAttribute("Data_Loaded") == true
 	local dailyButtonLabel = dailyButtonFrame and dailyButtonFrame:FindFirstChild("TextLabel", true)
 	if dailyButtonLabel and dailyButtonLabel:IsA("TextLabel") then
-		dailyButtonLabel.Text = if self.isClaimable then "CLAIM" else "DAILY"
+		dailyButtonLabel.Text = "DAILY"
 	end
 
 	if self.lightRay and self.lightRay.Parent then

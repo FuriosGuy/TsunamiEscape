@@ -5,11 +5,11 @@
     "BottomSurface": "Smooth",
     "CanQuery": false,
     "CastShadow": false,
-    "CFrame": [-106.5098, 28, -9430, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "CFrame": [-192.0098, 28, -160.1992, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Color": [196, 40, 28],
     "Locked": true,
     "Material": "SmoothPlastic",
-    "Size": [20.9805, 56, 541.9991],
+    "Size": [191.9805, 56, 15.147],
     "TopSurface": "Smooth",
     "Transparency": 1
   }

@@ -81,7 +81,7 @@ local function findModelTemplate(modelPath: string): Model?
 	return if current and current:IsA("Model") then current else nil
 end
 
-local function prepareModel(model: Model): boolean
+local function prepareModel(model: Model, preserveVisualEffects: boolean): boolean
 	local basePartCount = 0
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
@@ -97,7 +97,9 @@ local function prepareModel(model: Model): boolean
 			or descendant:IsA("Fire")
 			or descendant:IsA("Sparkles")
 		then
-			descendant:Destroy()
+			if not preserveVisualEffects then
+				descendant:Destroy()
+			end
 		elseif descendant:IsA("BaseScript") or descendant:IsA("ModuleScript") then
 			descendant:Destroy()
 		end
@@ -385,7 +387,7 @@ function PetViewportRenderer.Clear(viewport: ViewportFrame, animator: Animator?)
 	removeRenderedModel(viewport)
 end
 
-function PetViewportRenderer.CloneModel(modelPath: string): Model?
+function PetViewportRenderer.CloneModel(modelPath: string, preserveVisualEffects: boolean?): Model?
 	queueModelPreload(modelPath)
 	local template = findModelTemplate(modelPath)
 	if not template then
@@ -398,7 +400,7 @@ function PetViewportRenderer.CloneModel(modelPath: string): Model?
 
 	local model = template:Clone()
 	model.Name = VIEWPORT_MODEL_NAME
-	if not prepareModel(model) then
+	if not prepareModel(model, preserveVisualEffects == true) then
 		model:Destroy()
 		DebugModule.debugWarn(
 			string.format("Brainrot model has no BaseParts | path=%s", modelPath),

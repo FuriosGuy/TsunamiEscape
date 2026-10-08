@@ -12,6 +12,7 @@ local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | "BloodMoon" | "NeonRush" | "FrostbiteRally"
 type RollCount = number
 type PurchaseKind = "Wins" | "Robux"
+type RollSource = "World" | "Shop"
 
 type PendingRoll = {
 	group: LuckyBlockGroup,
@@ -30,7 +31,13 @@ type Controller = {
 	onRollResolved: RollResolvedCallback,
 	alive: boolean,
 	Init: (self: Controller) -> (),
-	RequestRoll: (self: Controller, group: LuckyBlockGroup, rollCount: number, purchaseKind: PurchaseKind) -> (),
+	RequestRoll: (
+		self: Controller,
+		group: LuckyBlockGroup,
+		rollCount: number,
+		purchaseKind: PurchaseKind,
+		source: RollSource
+	) -> boolean,
 	Destroy: (self: Controller) -> (),
 }
 
@@ -178,40 +185,45 @@ function PetLuckyBlockPurchaseController.RequestRoll(
 	self: Controller,
 	group: LuckyBlockGroup,
 	rollCount: number,
-	purchaseKind: PurchaseKind
-): ()
+	purchaseKind: PurchaseKind,
+	source: RollSource
+): boolean
 	if not self.alive then
-		return
+		return false
 	end
 
 	if rollCount ~= 1 and rollCount ~= 3 and rollCount ~= 5 then
 		DebugModule.debugWarn("Rejected unsupported Lucky Block roll count", MODULE_NAME)
-		return
+		return false
 	end
 	if purchaseKind ~= "Wins" and purchaseKind ~= "Robux" then
 		DebugModule.debugWarn("Rejected unsupported Lucky Block purchase kind", MODULE_NAME)
-		return
+		return false
+	end
+	if source ~= "World" and source ~= "Shop" then
+		DebugModule.debugWarn("Rejected unsupported Lucky Block request source", MODULE_NAME)
+		return false
 	end
 	local player = Players.LocalPlayer
 	if player:GetAttribute("Pet_RandomItemPolicyLoaded") ~= true then
 		showNotification("CHECKING LUCKY BLOCK ACCESS!", "Gold")
-		return
+		return false
 	end
 	if player:GetAttribute("Pet_PaidRandomItemsRestricted") == true then
 		showNotification("LUCKY BLOCKS ARE UNAVAILABLE FOR YOUR ACCOUNT!", "Red")
-		return
+		return false
 	end
 
 	local pendingRoll = self.pendingRoll
 	if pendingRoll and os.clock() - pendingRoll.startedAt <= PENDING_REQUEST_TIMEOUT_SECONDS then
-		return
+		return false
 	end
 	clearPending(self)
 
 	local requestRemote = self.requestRemote
 	if not requestRemote then
 		showNotification("LUCKY BLOCK PURCHASE SYSTEM NOT READY!", "Red")
-		return
+		return false
 	end
 
 	self.pendingRoll = {
@@ -221,7 +233,8 @@ function PetLuckyBlockPurchaseController.RequestRoll(
 		productId = nil,
 		startedAt = os.clock(),
 	}
-	requestRemote:FireServer(group, rollCount, purchaseKind)
+	requestRemote:FireServer(group, rollCount, purchaseKind, source)
+	return true
 end
 
 function PetLuckyBlockPurchaseController.Destroy(self: Controller): ()

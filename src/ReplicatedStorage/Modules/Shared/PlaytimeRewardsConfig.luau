@@ -17,22 +17,22 @@ PlaytimeRewardsConfig.TOTAL_DURATION_SECONDS = 60 * 60
 PlaytimeRewardsConfig.TIER_COUNT = 12
 PlaytimeRewardsConfig.PLACEHOLDER_ICON_IMAGE = "rbxassetid://70776298167875"
 PlaytimeRewardsConfig.ICON_IMAGE_BY_KIND = table.freeze({
-	XPSpeed = "rbxassetid://113466904095935", -- Gift icon XP
-	Wins = "rbxassetid://102626472172663", -- Gift icon Wins
-	Level = "rbxassetid://113342943009305", -- Gift icon Levels
-	Rebirth = "rbxassetid://102895420789840", -- Gift icon Rebirth
+	XPSpeed = "rbxassetid://140317593080314", -- Red gift icon for XP
+	Wins = "rbxassetid://110621016327193", -- Orange gift icon for Wins
+	Level = "rbxassetid://133424167221323", -- Blue gift icon for Levels
+	Rebirth = "rbxassetid://102895420789840", -- Rebirth reward icon
 })
 PlaytimeRewardsConfig.ICON_IMAGE_BY_TIER_ID = table.freeze({
-	Gift12 = "rbxassetid://102895420789840", -- Final mixed-reward gift (purple)
+	Gift12 = "rbxassetid://86021795710639", -- Final mixed-reward gift (purple)
 })
 PlaytimeRewardsConfig.CLAIMED_ICON_IMAGE_BY_KIND = table.freeze({
-	XPSpeed = "rbxassetid://125552789489073",
-	Wins = "rbxassetid://104709782370430",
-	Level = "rbxassetid://106046877471425",
-	Rebirth = "rbxassetid://138330067069857",
+	XPSpeed = "rbxassetid://104159835173600",
+	Wins = "rbxassetid://89376319048073",
+	Level = "rbxassetid://102578932898871",
+	Rebirth = "rbxassetid://71940044763334",
 })
 PlaytimeRewardsConfig.CLAIMED_ICON_IMAGE_BY_TIER_ID = table.freeze({
-	Gift12 = "rbxassetid://76077537030305", -- Final mixed reward claimed icon
+	Gift12 = "rbxassetid://86021795710639", -- Final mixed reward gift (purple)
 })
 
 local REWARD_TIERS: { RewardTier } = {

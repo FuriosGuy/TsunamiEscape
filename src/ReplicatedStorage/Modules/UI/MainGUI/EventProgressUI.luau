@@ -51,7 +51,7 @@ type EventProgressTheme = {
 
 type EventProgressUIObject = {
 	screenGui: ScreenGui,
-	root: Frame?,
+	root: GuiObject?,
 	currentWinsLabel: TextLabel?,
 	currentStageLabel: TextLabel?,
 	nextUnlockLabel: TextLabel?,
@@ -356,7 +356,7 @@ function EventProgressUI.new(
 	visibilityController: ProgressFrameVisibilityControllerLike?
 ): EventProgressUIObject
 	local rootInstance = screenGui:FindFirstChild("EventProgress")
-	local root = if rootInstance and rootInstance:IsA("Frame") then rootInstance else nil
+	local root = if rootInstance and rootInstance:IsA("GuiObject") then rootInstance else nil
 	local currentWinsLabel = getTextLabel(root, "CurrentWins")
 	local currentStageLabel = getTextLabel(root, "CurrentStage")
 	local nextUnlockLabel = getTextLabel(root, "NextUnlock")

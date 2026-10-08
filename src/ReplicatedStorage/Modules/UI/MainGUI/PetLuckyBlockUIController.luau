@@ -49,7 +49,7 @@ type Controller = {
 	canvasConnection: RBXScriptConnection?,
 	template: Frame?,
 	templateWasVisible: boolean?,
-	topFrame: Frame?,
+	topFrame: GuiObject?,
 	topFrameState: TopFrameState?,
 	previousGamepadSelection: GuiObject?,
 	_registerButton: (self: Controller, instance: Instance) -> (),
@@ -143,12 +143,9 @@ local function hasShowcaseHierarchy(root: Instance): boolean
 	local petList = root:FindFirstChild("PetList", true)
 	local scrollingFrame = petList and petList:FindFirstChildWhichIsA("ScrollingFrame", true)
 	local template = scrollingFrame and scrollingFrame:FindFirstChild("PetShowcaseTemplate")
-	local topFrame = root:FindFirstChild("TopFrame", true)
 	return scrollingFrame ~= nil
 		and template ~= nil
 		and template:IsA("Frame")
-		and topFrame ~= nil
-		and topFrame:IsA("Frame")
 end
 
 local function registerButtonAncestors(self: Controller, instance: Instance): ()
@@ -387,15 +384,13 @@ function PetLuckyBlockUIController._renderShowcase(self: Controller): ()
 	if not scrollingFrame
 		or not templateInstance
 		or not templateInstance:IsA("Frame")
-		or not topFrameInstance
-		or not topFrameInstance:IsA("Frame")
 	then
 		self.rendered = false
 		DebugModule.debugWarn("Lucky Block preview hierarchy is still loading", MODULE_NAME)
 		return
 	end
 	local template = templateInstance
-	local topFrame = topFrameInstance
+	local topFrame = if topFrameInstance and topFrameInstance:IsA("GuiObject") then topFrameInstance else nil
 	self.previewContainer = scrollingFrame
 	if self.previewContainerWasVisible == nil then
 		self.previewContainerWasVisible = scrollingFrame.Visible
@@ -419,25 +414,34 @@ function PetLuckyBlockUIController._renderShowcase(self: Controller): ()
 		return
 	end
 
-	local style = ColorConfig.LuckyBlocks.TopFrameStyles[self.previewGroup]
-	local gradient = topFrame:FindFirstChildOfClass("UIGradient")
-	local label = topFrame:FindFirstChild("LuckyBlockTier")
-	self.topFrame = topFrame
-	if not self.topFrameState then
-		self.topFrameState = {
-			backgroundColor = topFrame.BackgroundColor3,
-			gradientColor = if gradient then gradient.Color else nil,
-			gradientRotation = if gradient then gradient.Rotation else nil,
-			labelText = if label and label:IsA("TextLabel") then label.Text else nil,
-		}
-	end
-	topFrame.BackgroundColor3 = style.BackgroundColor
-	if gradient then
-		gradient.Color = style.Gradient
-		gradient.Rotation = 90
-	end
-	if label and label:IsA("TextLabel") then
-		label.Text = style.Label
+	if topFrame then
+		local style = ColorConfig.LuckyBlocks.TopFrameStyles[self.previewGroup]
+		local styleTarget = topFrame
+		if topFrame:IsA("CanvasGroup") then
+			local main = topFrame:FindFirstChild("Main")
+			if main and main:IsA("GuiObject") then
+				styleTarget = main
+			end
+		end
+		local gradient = styleTarget:FindFirstChildOfClass("UIGradient")
+		local label = styleTarget:FindFirstChild("LuckyBlockTier")
+		self.topFrame = styleTarget
+		if not self.topFrameState then
+			self.topFrameState = {
+				backgroundColor = styleTarget.BackgroundColor3,
+				gradientColor = if gradient then gradient.Color else nil,
+				gradientRotation = if gradient then gradient.Rotation else nil,
+				labelText = if label and label:IsA("TextLabel") then label.Text else nil,
+			}
+		end
+		styleTarget.BackgroundColor3 = style.BackgroundColor
+		if gradient then
+			gradient.Color = style.Gradient
+			gradient.Rotation = 90
+		end
+		if label and label:IsA("TextLabel") then
+			label.Text = style.Label
+		end
 	end
 
 	local player = Players.LocalPlayer

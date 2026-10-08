@@ -3,10 +3,11 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [49.375, 8.5, -778, -1, 0, 0, 0, 1, 0, 0, 0, -1],
-    "Color": [99, 95, 98],
+    "CFrame": [-112.8749, 27.375, -21063.584, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [248, 248, 248],
+    "Material": "Neon",
     "MaterialVariant": "Universal",
-    "Size": [0.7499, 1, 49.9999],
+    "Size": [6.2499, 0.25, 9.5],
     "TopSurface": "Smooth"
   }
 }

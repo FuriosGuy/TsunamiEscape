@@ -15,28 +15,29 @@ local VisualFunctions = {}
 
 -- Table to store references to specific UI frames
 VisualFunctions.ActiveFrameGroup = {
-	RebirthFrame = nil :: Frame?,
-	TrailFrame = nil :: Frame?,
-	KartFrame = nil :: Frame?,
-	ShopFrame = nil :: Frame?,
-	VerifyFrame = nil :: Frame?,
-	TrollFrame = nil :: Frame?,
-	DailyRewardFrame = nil :: Frame?,
-	RewardsFrame = nil :: Frame?,
-	SpinWheelFrame = nil :: Frame?,
-	PetFrame = nil :: Frame?,
+	RebirthFrame = nil :: GuiObject?,
+	RebirthConfirmFrame = nil :: GuiObject?,
+	TrailFrame = nil :: GuiObject?,
+	KartFrame = nil :: GuiObject?,
+	ShopFrame = nil :: GuiObject?,
+	VerifyFrame = nil :: GuiObject?,
+	TrollFrame = nil :: GuiObject?,
+	DailyRewardFrame = nil :: GuiObject?,
+	RewardsFrame = nil :: GuiObject?,
+	SpinWheelFrame = nil :: GuiObject?,
+	PetFrame = nil :: GuiObject?,
 }
 
 VisualFunctions.HUD = {
 	LevelsBarFrame = nil :: Frame?,
 	SpeedMultiFrame = nil :: Frame?,
-	BottomRightGridFrame = nil :: Frame?,
+	BottomRightGridFrame = nil :: GuiObject?,
 	SpeedBuyFrame = nil :: Frame?,
 	RightSideButtonsFrame = nil :: Frame?,
 	XPProgressFrame = nil :: Frame?,
 	LevelProgressFrame = nil :: Frame?,
 	LevelUpFrame = nil :: Frame?,
-	NotificationFrame = nil :: Frame?,
+	NotificationFrame = nil :: GuiObject?,
 	CustomSpeedFrame = nil :: Frame?,
 	CustomSpeedTextBox = nil :: TextBox?,
 
@@ -48,7 +49,7 @@ VisualFunctions.HUD = {
 	DisableWaveButtonFrame = nil :: Frame?,
 	DisableWavePriceLabel = nil :: TextLabel?,
 	DisableWaveCountdownLabel = nil :: TextLabel?,
-	ReturnToStageFrame = nil :: Frame?,
+	ReturnToStageFrame = nil :: GuiObject?,
 	ReturnToStagePriceLabel = nil :: TextLabel?,
 	ReturnToStageCountdownLabel = nil :: TextLabel?,
 
@@ -207,6 +208,7 @@ local ClickSetupBindings: { [GuiObject]: boolean } = setmetatable({}, { __mode =
 local ClickPulseActions: { [GuiObject]: () -> () } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: () -> () }
 local ClickPulseThreads: { [GuiObject]: thread } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: thread }
 local AnimationMaids: { [Instance]: Maid } = setmetatable({}, { __mode = "k" }) :: { [Instance]: Maid }
+local FrameShadowColorMaids: { [CanvasGroup]: Maid } = setmetatable({}, { __mode = "k" }) :: { [CanvasGroup]: Maid }
 local InteractionMaids: { [GuiObject]: Maid } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: Maid }
 local activeNotificationKey: string? = nil
 local RAINBOW_GRADIENT_UPDATE_INTERVAL = 1 / 30
@@ -442,7 +444,7 @@ local function applyColorToDescendants(root: Instance, multiplier: number, isRes
 		end
 
 		local targetProps = {}
-		if target:IsA("Frame") or target:IsA("ScrollingFrame") then
+		if target:IsA("Frame") or target:IsA("ScrollingFrame") or target:IsA("CanvasGroup") then
 			table.insert(targetProps, "BackgroundColor3")
 		elseif target:IsA("TextLabel") then
 			table.insert(targetProps, "TextColor3")
@@ -488,7 +490,9 @@ local function applyColorToDescendants(root: Instance, multiplier: number, isRes
 end
 
 local function getTransparencyProperty(obj: Instance): string?
-	if obj:IsA("Frame") or obj:IsA("ScrollingFrame") or obj:IsA("CanvasGroup") then
+	if obj:IsA("CanvasGroup") then
+		return "GroupTransparency"
+	elseif obj:IsA("Frame") or obj:IsA("ScrollingFrame") then
 		return "BackgroundTransparency"
 	elseif obj:IsA("ViewportFrame") then
 		return "ImageTransparency"
@@ -509,10 +513,11 @@ local function setTransparencyRecursive(root: Instance, alpha: number)
 			return
 		end
 
-		local original = obj:GetAttribute("OriginalTransparency") :: number?
+		local originalAttribute = if obj:IsA("CanvasGroup") then "OriginalGroupTransparency" else "OriginalTransparency"
+		local original = obj:GetAttribute(originalAttribute) :: number?
 		if original == nil then
 			original = (obj :: any)[prop]
-			obj:SetAttribute("OriginalTransparency", original)
+			obj:SetAttribute(originalAttribute, original)
 		end
 
 		local baseAlpha = original or 0
@@ -547,8 +552,61 @@ local function setTransparencyRecursive(root: Instance, alpha: number)
 
 	apply(root)
 	for _, descendant in ipairs(root:GetDescendants()) do
-		apply(descendant)
+		if not descendant:FindFirstAncestorWhichIsA("CanvasGroup") then
+			apply(descendant)
+		end
 	end
+end
+
+function VisualFunctions.BindFrameShadowColorSync(canvasGroup: CanvasGroup, sessionMaid: any): ()
+	if canvasGroup:GetAttribute("CreateFrameShadow") ~= true or FrameShadowColorMaids[canvasGroup] then
+		return
+	end
+
+	local main = canvasGroup:FindFirstChild("Main")
+	local shadow = canvasGroup:FindFirstChild("Shadow")
+	if not main or not main:IsA("GuiObject") or not shadow or not shadow:IsA("GuiObject") then
+		return
+	end
+	local innerStrokes: { UIStroke } = {}
+	local isLuckyBlockTierHeader = canvasGroup.Name == "TopFrame"
+		and (canvasGroup:FindFirstAncestor("OpenLuckyBlockFrame") ~= nil
+			or canvasGroup:FindFirstAncestor("LuckyBlocks") ~= nil)
+	if isLuckyBlockTierHeader then
+		for _, descendant in ipairs(main:GetDescendants()) do
+			if descendant:IsA("UIStroke") and string.find(string.lower(descendant.Name), "inner", 1, true) then
+				table.insert(innerStrokes, descendant)
+			end
+		end
+	end
+
+	local syncMaid = Maid.new()
+	FrameShadowColorMaids[canvasGroup] = syncMaid
+	sessionMaid:GiveTask(syncMaid)
+	syncMaid:GiveTask(function()
+		if FrameShadowColorMaids[canvasGroup] == syncMaid then
+			FrameShadowColorMaids[canvasGroup] = nil
+		end
+	end)
+
+	local function updateShadowColor(): ()
+		local darkenFactor = canvasGroup:GetAttribute("ShadowDarkenFactor")
+		if typeof(darkenFactor) ~= "number" then
+			darkenFactor = 0.75
+		end
+		local backgroundColor = main.BackgroundColor3
+		shadow.BackgroundColor3 = backgroundColor:Lerp(Color3.new(0, 0, 0), math.clamp(darkenFactor, 0, 1))
+		local luminance = backgroundColor.R * 0.2126 + backgroundColor.G * 0.7152 + backgroundColor.B * 0.0722
+		local strokeTransparency = 0.7 + (1 - luminance) * 0.2
+		for _, innerStroke in ipairs(innerStrokes) do
+			if innerStroke.Parent then
+				innerStroke.Transparency = strokeTransparency
+			end
+		end
+	end
+
+	syncMaid:GiveTask(main:GetPropertyChangedSignal("BackgroundColor3"):Connect(updateShadowColor))
+	updateShadowColor()
 end
 
 local function isRotateTextLabel(instance: Instance): boolean
@@ -904,6 +962,111 @@ function VisualFunctions.PlayFrameClick(frame: GuiObject)
 	end
 end
 
+type NotificationBadgePulseStep = {
+	scale: number,
+	rotationOffset: number,
+	xOffset: number,
+	duration: number,
+}
+
+local NOTIFICATION_BADGE_PULSE_COOLDOWN = 2.4
+local NOTIFICATION_BADGE_SHAKE_OFFSET = 3
+local NOTIFICATION_BADGE_PULSE_STEPS: { NotificationBadgePulseStep } = {
+	{ scale = 1.24, rotationOffset = 0, xOffset = 0, duration = 0.18 },
+	{ scale = 1.1, rotationOffset = -10, xOffset = -NOTIFICATION_BADGE_SHAKE_OFFSET, duration = 0.1 },
+	{ scale = 1.18, rotationOffset = 10, xOffset = NOTIFICATION_BADGE_SHAKE_OFFSET, duration = 0.1 },
+	{ scale = 1, rotationOffset = 0, xOffset = 0, duration = 0.12 },
+}
+
+function VisualFunctions.StartNotificationBadgeAnimation(badge: GuiObject): () -> ()
+	local scaleInstance = badge:FindFirstChild("NotificationBadgePulseScale")
+	if not scaleInstance or not scaleInstance:IsA("UIScale") then
+		local pulseScale = Instance.new("UIScale")
+		pulseScale.Name = "NotificationBadgePulseScale"
+		pulseScale.Scale = 1
+		pulseScale.Parent = badge
+		scaleInstance = pulseScale
+	end
+
+	local badgeScale = scaleInstance :: UIScale
+	local originalPosition = badge.Position
+	local originalRotation = badge.Rotation
+	local activeTweens: { Tween } = {}
+	local animationThread: thread? = nil
+	local isAlive = true
+
+	local function playStep(step: NotificationBadgePulseStep): boolean
+		if not isAlive or badge.Parent == nil then
+			return false
+		end
+
+		local tweenInfo = TweenInfo.new(step.duration, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+		local scaleTween = TweenService:Create(badgeScale, tweenInfo, { Scale = step.scale })
+		local movementTween = TweenService:Create(badge, tweenInfo, {
+			Position = originalPosition + UDim2.fromOffset(step.xOffset, 0),
+			Rotation = originalRotation + step.rotationOffset,
+		})
+		activeTweens = { scaleTween, movementTween }
+		scaleTween:Play()
+		movementTween:Play()
+
+		local playbackState = scaleTween.Completed:Wait()
+		if activeTweens[1] == scaleTween then
+			table.clear(activeTweens)
+		end
+		return playbackState == Enum.PlaybackState.Completed and isAlive and badge.Parent ~= nil
+	end
+
+	animationThread = task.spawn(function()
+		local firstPulse = true
+		while isAlive and badge.Parent do
+			if firstPulse then
+				badgeScale.Scale = 0.72
+				firstPulse = false
+			end
+
+			for _, step in ipairs(NOTIFICATION_BADGE_PULSE_STEPS) do
+				if not playStep(step) then
+					break
+				end
+			end
+
+			if isAlive and badge.Parent then
+				task.wait(NOTIFICATION_BADGE_PULSE_COOLDOWN)
+			end
+		end
+
+		if animationThread == coroutine.running() then
+			animationThread = nil
+		end
+	end)
+
+	return function(): ()
+		if not isAlive then
+			return
+		end
+		isAlive = false
+		for _, tween in ipairs(activeTweens) do
+			tween:Cancel()
+		end
+		table.clear(activeTweens)
+
+		local threadToCancel = animationThread
+		animationThread = nil
+		if threadToCancel and threadToCancel ~= coroutine.running() and coroutine.status(threadToCancel) ~= "dead" then
+			pcall(task.cancel, threadToCancel)
+		end
+
+		if badgeScale.Parent then
+			badgeScale.Scale = 1
+		end
+		if badge.Parent then
+			badge.Position = originalPosition
+			badge.Rotation = originalRotation
+		end
+	end
+end
+
 local function resetHoverAndClickVisualState(root: Instance)
 	for trackedFrame, state in pairs(HoverStates) do
 		if trackedFrame == root or trackedFrame:IsDescendantOf(root) then
@@ -933,7 +1096,7 @@ local function resetHoverAndClickVisualState(root: Instance)
 	end
 end
 
-function VisualFunctions.SetFrameDisabledState(frame: Frame?, isDisabled: boolean, colorMultiplier: number?)
+function VisualFunctions.SetFrameDisabledState(frame: GuiObject?, isDisabled: boolean, colorMultiplier: number?)
 	if not frame then
 		return
 	end
@@ -979,7 +1142,7 @@ function VisualFunctions.SetTextLabelDisabledState(label: TextLabel?, isDisabled
 	applyColorToDescendants(label, if isDisabled then colorMultiplier or 0.75 else 1, not isDisabled)
 end
 
-function VisualFunctions.SetFrameInteractableState(frame: Frame?, isInteractable: boolean)
+function VisualFunctions.SetFrameInteractableState(frame: GuiObject?, isInteractable: boolean)
 	if not frame then
 		return
 	end
@@ -1021,7 +1184,7 @@ function VisualFunctions.RefreshFrameInteractionColors(frame: GuiObject?)
 	end
 end
 
-function VisualFunctions.OpenWindow(frame: Frame)
+function VisualFunctions.OpenWindow(frame: GuiObject)
 	local originalSize = frame:GetAttribute("OriginalSize") :: UDim2? or frame.Size
 	local originalPos = frame:GetAttribute("OriginalPosition") :: UDim2? or frame.Position
 
@@ -1066,7 +1229,7 @@ function VisualFunctions.OpenWindow(frame: Frame)
 	sizeTween:Play()
 end
 
-function VisualFunctions.CloseWindow(frame: Frame)
+function VisualFunctions.CloseWindow(frame: GuiObject)
 	local originalSize = frame:GetAttribute("OriginalSize") :: UDim2? or frame.Size
 	local originalPos = frame:GetAttribute("OriginalPosition") :: UDim2? or frame.Position
 	local closeSize =
@@ -1693,7 +1856,7 @@ local function clearTutorialOnlyNotificationControls(frame: GuiObject)
 	end
 end
 
-local function hideNotificationFrame(frame: Frame, label: TextLabel?)
+local function hideNotificationFrame(frame: GuiObject, label: TextLabel?)
 	clearAnimationMaid(frame)
 	activeNotificationKey = nil
 	frame.Visible = false
@@ -1709,7 +1872,7 @@ local function hasNotificationText(message: string): boolean
 end
 
 local function playNotificationCloseAnimation(
-	frame: Frame,
+	frame: GuiObject,
 	animationMaid: Maid,
 	startPos: UDim2,
 	label: TextLabel?
@@ -1748,7 +1911,7 @@ local function playNotificationCloseAnimation(
 	animationMaid:GiveTask(fConnection)
 end
 
-function VisualFunctions.BindNotificationVisibilityGuard(frame: Frame, cleanupMaid: any)
+function VisualFunctions.BindNotificationVisibilityGuard(frame: GuiObject, cleanupMaid: any)
 	local function validateVisibleNotification()
 		if not frame.Visible then
 			return

@@ -6,11 +6,11 @@
     "BottomSurface": "Smooth",
     "CanCollide": false,
     "CanTouch": false,
-    "CFrame": [-4201.9463, 55.3784, -10510.3359, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "CFrame": [-4203.5171, 54.2462, -10969.2695, -1, 0, 0, 0, 1, 0, 0, 0, -1],
     "Color": [58, 125, 21],
     "Locked": true,
     "MaterialVariant": "Studs",
-    "Size": [60.8339, 3.0417, 60.834],
+    "Size": [59.3954, 2.9698, 59.3955],
     "TopSurface": "Smooth"
   }
 }

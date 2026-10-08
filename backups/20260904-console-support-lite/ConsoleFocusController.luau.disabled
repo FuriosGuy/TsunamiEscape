@@ -1,0 +1,798 @@
+--!strict
+
+local ContextActionService = game:GetService("ContextActionService")
+local GuiService = game:GetService("GuiService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
+local Maid = require(ReplicatedStorage.Modules.Maid)
+
+local ConsoleFocusController = {}
+ConsoleFocusController.__index = ConsoleFocusController
+
+local MODULE_NAME = "ConsoleFocusController"
+local BACK_ACTION_NAME = "SpeedBrainrotConsoleBack"
+
+type ScopeDefinition = {
+	name: string,
+	priority: number,
+	allowBack: boolean,
+}
+
+type Scope = {
+	name: string,
+	root: Instance,
+	priority: number,
+	allowBack: boolean,
+}
+
+type ConsoleFocusControllerObject = {
+	root: ScreenGui,
+	scopes: { [string]: Scope },
+	scopeOrder: { string },
+	modalRoots: { [Instance]: boolean },
+	selectedByScope: { [string]: GuiObject? },
+	activeScopeName: string?,
+	instanceMaids: { [Instance]: any },
+	originalSelectable: { [GuiObject]: boolean },
+	originalSelectionOrder: { [GuiObject]: number },
+	originalSelectionNeighbors: { [GuiObject]: { [string]: GuiObject? } },
+	maid: any,
+	gamepadActive: boolean,
+	autoSelectGuiEnabled: boolean?,
+	guiNavigationEnabled: boolean?,
+	alive: boolean,
+	refreshing: boolean,
+	new: (root: ScreenGui) -> ConsoleFocusControllerObject,
+	_setGamepadActive: (self: ConsoleFocusControllerObject, isActive: boolean) -> (),
+	Init: (self: ConsoleFocusControllerObject) -> (),
+	RegisterScope: (self: ConsoleFocusControllerObject, name: string, scopeRoot: Instance, priority: number, allowBack: boolean) -> (),
+	Destroy: (self: ConsoleFocusControllerObject) -> (),
+}
+
+local SCOPE_DEFINITIONS: { ScopeDefinition } = {
+	{ name = "LoadingFrame", priority = 100, allowBack = false },
+	{ name = "SpinWheelFrame", priority = 95, allowBack = true },
+	{ name = "PromptBuyProductsFrame", priority = 92, allowBack = true },
+	{ name = "ReturnToStageFrame", priority = 90, allowBack = false },
+	{ name = "DailyRewardFrame", priority = 85, allowBack = true },
+	{ name = "RewardsFrame", priority = 80, allowBack = true },
+	{ name = "RebirthFrame", priority = 75, allowBack = true },
+	{ name = "VerifyFrame", priority = 70, allowBack = true },
+	{ name = "ShopFrame", priority = 65, allowBack = true },
+	{ name = "KartFrame", priority = 60, allowBack = true },
+	{ name = "TrailFrame", priority = 55, allowBack = true },
+	{ name = "TrollFrame", priority = 50, allowBack = true },
+	{ name = "NotificationFrame", priority = 45, allowBack = false },
+	{ name = "MinigameNotificationFrame", priority = 40, allowBack = false },
+}
+
+local function isGamepadInputType(inputType: Enum.UserInputType): boolean
+	return inputType == Enum.UserInputType.Gamepad1
+		or inputType == Enum.UserInputType.Gamepad2
+		or inputType == Enum.UserInputType.Gamepad3
+		or inputType == Enum.UserInputType.Gamepad4
+end
+
+local function isWithin(instance: Instance, root: Instance): boolean
+	return instance == root or instance:IsDescendantOf(root)
+end
+
+local function getBooleanProperty(instance: Instance, propertyName: string): boolean?
+	local ok, value = pcall(function()
+		return (instance :: any)[propertyName]
+	end)
+	if ok and typeof(value) == "boolean" then
+		return value
+	end
+	return nil
+end
+
+local function isVisibleInHierarchy(instance: Instance, root: Instance, screenGui: ScreenGui): boolean
+	if not isWithin(instance, root) then
+		return false
+	end
+
+	local current: Instance? = instance
+	while current do
+		if current:IsA("GuiObject") and not current.Visible then
+			return false
+		end
+		if current == root then
+			break
+		end
+		current = current.Parent
+	end
+
+	return screenGui.Enabled
+end
+
+local function isOnScreen(instance: GuiObject): boolean
+	local camera = Workspace.CurrentCamera
+	if not camera or instance.AbsoluteSize.X <= 0 or instance.AbsoluteSize.Y <= 0 then
+		return false
+	end
+
+	local viewportSize = camera.ViewportSize
+	local position = instance.AbsolutePosition
+	local size = instance.AbsoluteSize
+	return position.X < viewportSize.X
+		and position.Y < viewportSize.Y
+		and position.X + size.X > 0
+		and position.Y + size.Y > 0
+end
+
+local function isInteractableInHierarchy(instance: Instance, root: Instance): boolean
+	local current: Instance? = instance
+	while current do
+		if current:IsA("GuiObject") then
+			if current:GetAttribute("UiDisabled") == true then
+				return false
+			end
+			if getBooleanProperty(current, "Interactable") == false then
+				return false
+			end
+		end
+		if current == root then
+			break
+		end
+		current = current.Parent
+	end
+	return true
+end
+
+local function isFocusableType(instance: Instance): boolean
+	return instance:IsA("GuiButton") or instance:IsA("TextBox")
+end
+
+local function getLayoutOrder(instance: GuiObject): number
+	local ok, value = pcall(function()
+		return (instance :: any).LayoutOrder
+	end)
+	if ok and typeof(value) == "number" then
+		return value
+	end
+	return 0
+end
+
+local function getNumberProperty(instance: Instance, propertyName: string): number?
+	local ok, value = pcall(function()
+		return (instance :: any)[propertyName]
+	end)
+	if ok and typeof(value) == "number" then
+		return value
+	end
+	return nil
+end
+
+local function getGuiObjectProperty(instance: GuiObject, propertyName: string): GuiObject?
+	local ok, value = pcall(function()
+		return (instance :: any)[propertyName]
+	end)
+	if ok and (value == nil or typeof(value) == "Instance" and value:IsA("GuiObject")) then
+		return value
+	end
+	return nil
+end
+
+type SelectionDirection = "Left" | "Right" | "Up" | "Down"
+
+local function getGuiObjectCenter(instance: GuiObject): Vector2
+	return instance.AbsolutePosition + instance.AbsoluteSize / 2
+end
+
+local function findDirectionalNeighbor(
+	control: GuiObject,
+	controls: { GuiObject },
+	direction: SelectionDirection
+): GuiObject?
+	local controlCenter = getGuiObjectCenter(control)
+	local horizontal = direction == "Left" or direction == "Right"
+	local bestControl: GuiObject? = nil
+	local bestScore = math.huge
+
+	for _, candidate in ipairs(controls) do
+		if candidate ~= control then
+			local candidateCenter = getGuiObjectCenter(candidate)
+			local deltaX = candidateCenter.X - controlCenter.X
+			local deltaY = candidateCenter.Y - controlCenter.Y
+			local isInDirection = if direction == "Left"
+				then deltaX < 0
+				elseif direction == "Right"
+				then deltaX > 0
+				elseif direction == "Up"
+				then deltaY < 0
+				else deltaY > 0
+
+			if isInDirection then
+				local primaryDistance = if horizontal then math.abs(deltaX) else math.abs(deltaY)
+				local secondaryDistance = if horizontal then math.abs(deltaY) else math.abs(deltaX)
+				local score = primaryDistance + secondaryDistance * 2
+				if score < bestScore then
+					bestScore = score
+					bestControl = candidate
+				end
+			end
+		end
+	end
+
+	return bestControl
+end
+
+function ConsoleFocusController.new(root: ScreenGui): ConsoleFocusControllerObject
+	local self = setmetatable({
+		root = root,
+		scopes = {},
+		scopeOrder = {},
+		modalRoots = {},
+		selectedByScope = {},
+		activeScopeName = nil,
+		instanceMaids = {},
+		originalSelectable = {},
+		originalSelectionOrder = {},
+		originalSelectionNeighbors = {},
+		maid = Maid.new(),
+		gamepadActive = false,
+		autoSelectGuiEnabled = nil,
+		guiNavigationEnabled = nil,
+		alive = true,
+		refreshing = false,
+	}, ConsoleFocusController)
+
+	return self :: any
+end
+
+function ConsoleFocusController._isFocusable(
+	self: ConsoleFocusControllerObject,
+	instance: Instance,
+	scope: Scope
+): boolean
+	if not isFocusableType(instance) or not isWithin(instance, scope.root) then
+		return false
+	end
+	if not isVisibleInHierarchy(instance, scope.root, self.root) then
+		return false
+	end
+	if not isOnScreen(instance :: GuiObject) then
+		return false
+	end
+	if not isInteractableInHierarchy(instance, scope.root) then
+		return false
+	end
+	-- Active is a GuiButton property; do not reject TextBoxes that are valid input controls.
+	if instance:IsA("GuiButton") and getBooleanProperty(instance, "Active") == false then
+		return false
+	end
+	return true
+end
+
+function ConsoleFocusController._isExcludedFromScope(
+	self: ConsoleFocusControllerObject,
+	instance: Instance,
+	scope: Scope
+): boolean
+	if scope.name ~= "HUD" then
+		return false
+	end
+
+	for modalRoot in pairs(self.modalRoots) do
+		if isWithin(instance, modalRoot) then
+			return true
+		end
+	end
+	return false
+end
+
+function ConsoleFocusController._collectControls(
+	self: ConsoleFocusControllerObject,
+	scope: Scope
+): { GuiObject }
+	local controls: { GuiObject } = {}
+	if not isVisibleInHierarchy(scope.root, self.root, self.root) then
+		return controls
+	end
+
+	for _, descendant in ipairs(scope.root:GetDescendants()) do
+		if not self:_isExcludedFromScope(descendant, scope) and self:_isFocusable(descendant, scope) then
+			table.insert(controls, descendant :: GuiObject)
+		end
+	end
+	local controlSet: { [GuiObject]: boolean } = {}
+	for _, control in ipairs(controls) do
+		controlSet[control] = true
+	end
+
+	table.sort(controls, function(a, b)
+		local aLayout = getLayoutOrder(a)
+		local bLayout = getLayoutOrder(b)
+		if aLayout ~= bLayout then
+			return aLayout < bLayout
+		end
+
+		if a.AbsolutePosition.Y ~= b.AbsolutePosition.Y then
+			return a.AbsolutePosition.Y < b.AbsolutePosition.Y
+		end
+		if a.AbsolutePosition.X ~= b.AbsolutePosition.X then
+			return a.AbsolutePosition.X < b.AbsolutePosition.X
+		end
+		return a:GetFullName() < b:GetFullName()
+	end)
+
+	for index, control in ipairs(controls) do
+		if self.originalSelectable[control] == nil then
+			self.originalSelectable[control] = getBooleanProperty(control, "Selectable") == true
+		end
+		local selectionOrder = getNumberProperty(control, "SelectionOrder")
+		if selectionOrder ~= nil and self.originalSelectionOrder[control] == nil then
+			self.originalSelectionOrder[control] = selectionOrder
+		end
+		pcall(function()
+			(control :: any).Selectable = true
+		end)
+		pcall(function()
+			(control :: any).SelectionOrder = index
+		end)
+
+		if scope.name ~= "HUD" then
+			local originalNeighbors = self.originalSelectionNeighbors[control]
+			if not originalNeighbors then
+				originalNeighbors = {}
+				for _, direction in ipairs({ "Left", "Right", "Up", "Down" }) do
+					local propertyName = "NextSelection" .. direction
+					originalNeighbors[propertyName] = getGuiObjectProperty(control, propertyName)
+				end
+				self.originalSelectionNeighbors[control] = originalNeighbors
+			end
+
+			for _, direction in ipairs({ "Left", "Right", "Up", "Down" }) do
+				local propertyName = "NextSelection" .. direction
+				local neighbor = findDirectionalNeighbor(control, controls, direction :: SelectionDirection)
+				local originalNeighbor = originalNeighbors[propertyName]
+				if originalNeighbor and not controlSet[originalNeighbor] then
+					originalNeighbor = nil
+				end
+				pcall(function()
+					(control :: any)[propertyName] = neighbor or originalNeighbor
+				end)
+			end
+		end
+	end
+
+	return controls
+end
+
+function ConsoleFocusController._getActiveScope(
+	self: ConsoleFocusControllerObject
+): (Scope?, { GuiObject })
+	for _, scopeName in ipairs(self.scopeOrder) do
+		local scope = self.scopes[scopeName]
+		if scope and scope.name ~= "HUD" and isVisibleInHierarchy(scope.root, self.root, self.root) then
+			local controls = self:_collectControls(scope)
+			-- Empty notification containers must not trap controller focus behind invisible children.
+			if #controls > 0 or scope.name == "LoadingFrame" then
+				return scope, controls
+			end
+		end
+	end
+
+	local hudScope = self.scopes.HUD
+	if hudScope then
+		return hudScope, self:_collectControls(hudScope)
+	end
+	return nil, {}
+end
+
+function ConsoleFocusController._scrollIntoView(self: ConsoleFocusControllerObject, control: GuiObject)
+	local scrollingFrame = control:FindFirstAncestorWhichIsA("ScrollingFrame")
+	if not scrollingFrame or not scrollingFrame:IsDescendantOf(self.root) then
+		return
+	end
+
+	local viewTop = scrollingFrame.AbsolutePosition.Y
+	local viewBottom = viewTop + scrollingFrame.AbsoluteSize.Y
+	local controlTop = control.AbsolutePosition.Y
+	local controlBottom = controlTop + control.AbsoluteSize.Y
+	local canvasY = scrollingFrame.CanvasPosition.Y
+
+	if controlTop < viewTop then
+		scrollingFrame.CanvasPosition = Vector2.new(scrollingFrame.CanvasPosition.X, math.max(0, canvasY + controlTop - viewTop))
+	elseif controlBottom > viewBottom then
+		scrollingFrame.CanvasPosition = Vector2.new(
+			scrollingFrame.CanvasPosition.X,
+			math.max(0, canvasY + controlBottom - viewBottom)
+		)
+	end
+end
+
+function ConsoleFocusController._setSelected(self: ConsoleFocusControllerObject, control: GuiObject?)
+	if not self.alive or not self.gamepadActive then
+		return
+	end
+	if control and (
+		not control.Parent
+		or not isWithin(control, self.root)
+		or not isVisibleInHierarchy(control, self.root, self.root)
+		or not isInteractableInHierarchy(control, self.root)
+		or getBooleanProperty(control, "Selectable") ~= true
+		or not isOnScreen(control)
+	) then
+		return
+	end
+
+	local selectedObject = GuiService.SelectedObject
+	if selectedObject == control then
+		if control then
+			self:_scrollIntoView(control)
+		end
+		return
+	end
+
+	local ok, err = pcall(function()
+		GuiService.SelectedObject = control
+	end)
+	if not ok then
+		DebugModule.debugWarn(
+			string.format("Failed to set selected object | target=%s | error=%s", control and control:GetFullName() or "nil", tostring(err)),
+			MODULE_NAME
+		)
+		return
+	end
+
+	if control then
+		self:_scrollIntoView(control)
+	end
+end
+
+function ConsoleFocusController._setGamepadActive(
+	self: ConsoleFocusControllerObject,
+	isActive: boolean
+)
+	if not self.alive then
+		return
+	end
+
+	if self.gamepadActive == isActive then
+		if isActive then
+			self:_refresh()
+		end
+		return
+	end
+
+	self.gamepadActive = isActive
+	if isActive then
+		pcall(function()
+			(GuiService :: any).AutoSelectGuiEnabled = true
+			(GuiService :: any).GuiNavigationEnabled = true
+		end)
+		self:_refresh()
+		return
+	end
+
+	if GuiService.SelectedObject and GuiService.SelectedObject:IsDescendantOf(self.root) then
+		pcall(function()
+			GuiService.SelectedObject = nil
+		end)
+	end
+	self.activeScopeName = nil
+	if self.autoSelectGuiEnabled ~= nil then
+		pcall(function()
+			(GuiService :: any).AutoSelectGuiEnabled = self.autoSelectGuiEnabled
+		end)
+	end
+	if self.guiNavigationEnabled ~= nil then
+		pcall(function()
+			(GuiService :: any).GuiNavigationEnabled = self.guiNavigationEnabled
+		end)
+	end
+end
+
+function ConsoleFocusController._refresh(self: ConsoleFocusControllerObject)
+	if not self.alive or not self.gamepadActive or self.refreshing then
+		return
+	end
+
+	self.refreshing = true
+	local scope, controls = self:_getActiveScope()
+	local nextScopeName = if scope then scope.name else nil
+	local selectedObject = GuiService.SelectedObject
+	if not scope or scope.name == "HUD" then
+		-- TopbarPlus owns selection outside this ScreenGui; do not steal it for the HUD.
+		self.activeScopeName = nextScopeName
+		if selectedObject and selectedObject:IsDescendantOf(self.root) then
+			self:_setSelected(nil)
+		end
+		self.refreshing = false
+		return
+	end
+
+	if self.activeScopeName ~= nextScopeName then
+		local oldScopeName = self.activeScopeName
+		if oldScopeName and selectedObject and selectedObject:IsA("GuiObject") then
+			local oldScope = self.scopes[oldScopeName]
+			if oldScope and self:_isFocusable(selectedObject, oldScope) then
+				self.selectedByScope[oldScopeName] = selectedObject
+			end
+		end
+		self.activeScopeName = nextScopeName
+	end
+
+	local currentSelection = if scope
+		and selectedObject
+		and selectedObject:IsA("GuiObject")
+		and self:_isFocusable(selectedObject, scope)
+	then selectedObject else nil
+	local preferred = if nextScopeName then self.selectedByScope[nextScopeName] else nil
+	local selectedControl = if currentSelection then currentSelection
+		elseif scope and preferred and self:_isFocusable(preferred, scope) then preferred
+		else controls[1]
+	if scope and selectedControl then
+		self.selectedByScope[scope.name] = selectedControl
+		self:_setSelected(selectedControl)
+	elseif selectedObject and selectedObject:IsDescendantOf(self.root) then
+		self:_setSelected(nil)
+	end
+
+	self.refreshing = false
+end
+
+function ConsoleFocusController._trackInstance(
+	self: ConsoleFocusControllerObject,
+	instance: Instance,
+	trackLayout: boolean?
+)
+	if not instance:IsA("GuiObject") or self.instanceMaids[instance] then
+		return
+	end
+
+	local instanceMaid = Maid.new()
+	self.instanceMaids[instance] = instanceMaid
+	local refresh = function()
+		self:_refresh()
+	end
+
+	instanceMaid:GiveTask(instance:GetPropertyChangedSignal("Visible"):Connect(refresh))
+	instanceMaid:GiveTask(instance:GetPropertyChangedSignal("Interactable"):Connect(refresh))
+	instanceMaid:GiveTask(instance:GetAttributeChangedSignal("UiDisabled"):Connect(refresh))
+	if trackLayout then
+		instanceMaid:GiveTask(instance:GetPropertyChangedSignal("Position"):Connect(refresh))
+		instanceMaid:GiveTask(instance:GetPropertyChangedSignal("Size"):Connect(refresh))
+	end
+	if instance:IsA("GuiButton") or instance:IsA("TextBox") then
+		instanceMaid:GiveTask(instance:GetPropertyChangedSignal("Selectable"):Connect(refresh))
+	end
+	if instance:IsA("GuiButton") then
+		instanceMaid:GiveTask(instance:GetPropertyChangedSignal("Active"):Connect(refresh))
+	end
+end
+
+function ConsoleFocusController._untrackInstance(self: ConsoleFocusControllerObject, instance: Instance)
+	local instanceMaid = self.instanceMaids[instance]
+	if instanceMaid then
+		instanceMaid:DoCleaning()
+		self.instanceMaids[instance] = nil
+	end
+	self.originalSelectable[instance :: GuiObject] = nil
+	self.originalSelectionOrder[instance :: GuiObject] = nil
+	self.originalSelectionNeighbors[instance :: GuiObject] = nil
+end
+
+function ConsoleFocusController._findBackButton(self: ConsoleFocusControllerObject, scope: Scope): GuiButton?
+	local names = { "ExitButton", "CloseButton", "CancelButton" }
+	for _, name in ipairs(names) do
+		local namedInstance = scope.root:FindFirstChild(name, true)
+		if namedInstance then
+			if namedInstance:IsA("GuiButton") and self:_isFocusable(namedInstance, scope) then
+				return namedInstance
+			end
+			local nestedButton = namedInstance:FindFirstChildWhichIsA("GuiButton", true)
+			if nestedButton and self:_isFocusable(nestedButton, scope) then
+				return nestedButton
+			end
+		end
+	end
+	return nil
+end
+
+function ConsoleFocusController._handleBack(
+	self: ConsoleFocusControllerObject,
+	_: string,
+	inputState: Enum.UserInputState,
+	_: InputObject
+): Enum.ContextActionResult
+	if inputState ~= Enum.UserInputState.Begin or not self.gamepadActive then
+		return Enum.ContextActionResult.Pass
+	end
+
+	local focusedTextBox = UserInputService:GetFocusedTextBox()
+	if focusedTextBox and focusedTextBox:IsDescendantOf(self.root) then
+		focusedTextBox:ReleaseFocus()
+		self:_refresh()
+		return Enum.ContextActionResult.Sink
+	end
+
+	local scopeName = self.activeScopeName
+	local scope = if scopeName then self.scopes[scopeName] else nil
+	if not scope or scope.name == "HUD" or not scope.allowBack then
+		return Enum.ContextActionResult.Pass
+	end
+
+	local backButton = self:_findBackButton(scope)
+	if backButton then
+		local ok, err = pcall(function()
+			backButton:Activate()
+		end)
+		if not ok then
+			DebugModule.debugWarn(
+				string.format("Back action failed | scope=%s | error=%s", scope.name, tostring(err)),
+				MODULE_NAME
+			)
+		end
+		return Enum.ContextActionResult.Sink
+	end
+
+	DebugModule.debugWarn("Back action had no close button", MODULE_NAME)
+	return Enum.ContextActionResult.Pass
+end
+
+function ConsoleFocusController.RegisterScope(
+	self: ConsoleFocusControllerObject,
+	name: string,
+	scopeRoot: Instance,
+	priority: number,
+	allowBack: boolean
+)
+	if not self.alive or (not scopeRoot:IsA("GuiObject") and not scopeRoot:IsA("ScreenGui")) then
+		return
+	end
+
+	local oldScope = self.scopes[name]
+	if oldScope and oldScope.root == scopeRoot then
+		return
+	end
+
+	self.scopes[name] = {
+		name = name,
+		root = scopeRoot,
+		priority = priority,
+		allowBack = allowBack,
+	}
+	if not oldScope then
+		table.insert(self.scopeOrder, name)
+	end
+
+	table.sort(self.scopeOrder, function(a, b)
+		return self.scopes[a].priority > self.scopes[b].priority
+	end)
+	self:_trackInstance(scopeRoot, true)
+	for _, descendant in ipairs(scopeRoot:GetDescendants()) do
+		self:_trackInstance(descendant)
+	end
+	self:_refresh()
+end
+
+function ConsoleFocusController.Init(self: ConsoleFocusControllerObject)
+	if not self.alive then
+		return
+	end
+
+	for _, definition in ipairs(SCOPE_DEFINITIONS) do
+		local scopeRoot = self.root:FindFirstChild(definition.name)
+		if scopeRoot then
+			self.modalRoots[scopeRoot] = true
+			self:RegisterScope(definition.name, scopeRoot, definition.priority, definition.allowBack)
+		end
+	end
+	self:RegisterScope("HUD", self.root, 0, false)
+
+	self.autoSelectGuiEnabled = getBooleanProperty(GuiService, "AutoSelectGuiEnabled")
+	self.guiNavigationEnabled = getBooleanProperty(GuiService, "GuiNavigationEnabled")
+
+	self.maid:GiveTask(self.root.DescendantAdded:Connect(function(instance)
+		self:_trackInstance(instance)
+		self:_refresh()
+	end))
+	self.maid:GiveTask(self.root.DescendantRemoving:Connect(function(instance)
+		self:_untrackInstance(instance)
+		self:_refresh()
+	end))
+	self.maid:GiveTask(self.root:GetPropertyChangedSignal("Enabled"):Connect(function()
+		self:_refresh()
+	end))
+	self.maid:GiveTask(UserInputService.LastInputTypeChanged:Connect(function(inputType)
+		self:_setGamepadActive(isGamepadInputType(inputType))
+	end))
+	self.maid:GiveTask(UserInputService:GetPropertyChangedSignal("GamepadEnabled"):Connect(function()
+		local isActive = UserInputService.GamepadEnabled
+			and isGamepadInputType(UserInputService:GetLastInputType())
+		self:_setGamepadActive(isActive)
+	end))
+	self.maid:GiveTask(GuiService:GetPropertyChangedSignal("SelectedObject"):Connect(function()
+		if self.gamepadActive then
+			self:_refresh()
+		end
+	end))
+	self.maid:GiveTask(function()
+		ContextActionService:UnbindAction(BACK_ACTION_NAME)
+	end)
+	ContextActionService:BindActionAtPriority(
+		BACK_ACTION_NAME,
+		function(actionName: string, inputState: Enum.UserInputState, inputObject: InputObject)
+			return self:_handleBack(actionName, inputState, inputObject)
+		end,
+		false,
+		Enum.ContextActionPriority.High.Value,
+		Enum.KeyCode.ButtonB
+	)
+	self.maid:GiveTask(function()
+		for instance, instanceMaid in pairs(self.instanceMaids) do
+			instanceMaid:DoCleaning()
+			self.instanceMaids[instance] = nil
+		end
+		for instance, wasSelectable in pairs(self.originalSelectable) do
+			if instance.Parent then
+				pcall(function()
+					(instance :: any).Selectable = wasSelectable
+				end)
+			end
+			self.originalSelectable[instance] = nil
+		end
+		for instance, selectionOrder in pairs(self.originalSelectionOrder) do
+			if instance.Parent then
+				pcall(function()
+					(instance :: any).SelectionOrder = selectionOrder
+				end)
+			end
+			self.originalSelectionOrder[instance] = nil
+		end
+		for instance, neighbors in pairs(self.originalSelectionNeighbors) do
+			if instance.Parent then
+				for propertyName, neighbor in pairs(neighbors) do
+					pcall(function()
+						(instance :: any)[propertyName] = neighbor
+					end)
+				end
+			end
+			self.originalSelectionNeighbors[instance] = nil
+		end
+	end)
+
+	local initialGamepadActive = isGamepadInputType(UserInputService:GetLastInputType())
+		or UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
+	self:_setGamepadActive(initialGamepadActive)
+	DebugModule.debugInfo("Console focus controller initialized", MODULE_NAME)
+end
+
+function ConsoleFocusController.Destroy(self: ConsoleFocusControllerObject)
+	if not self.alive then
+		return
+	end
+
+	self.alive = false
+	if GuiService.SelectedObject and GuiService.SelectedObject:IsDescendantOf(self.root) then
+		pcall(function()
+			GuiService.SelectedObject = nil
+		end)
+	end
+	self.maid:DoCleaning()
+	if self.autoSelectGuiEnabled ~= nil then
+		pcall(function()
+			(GuiService :: any).AutoSelectGuiEnabled = self.autoSelectGuiEnabled
+		end)
+	end
+	if self.guiNavigationEnabled ~= nil then
+		pcall(function()
+			(GuiService :: any).GuiNavigationEnabled = self.guiNavigationEnabled
+		end)
+	end
+	self.scopes = {}
+	self.scopeOrder = {}
+	self.modalRoots = {}
+	self.selectedByScope = {}
+	self.originalSelectionNeighbors = {}
+	self.activeScopeName = nil
+	DebugModule.debugInfo("Console focus controller destroyed", MODULE_NAME)
+end
+
+return ConsoleFocusController

@@ -1,5 +1,6 @@
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Maid = require(Modules:WaitForChild("Maid"))
@@ -10,6 +11,7 @@ local VisualFunctions = require(UIFolder:WaitForChild("VisualFunctions"))
 local SharedFolder = Modules:WaitForChild("Shared")
 local NumberFormatting = require(SharedFolder:WaitForChild("NumberFormatting"))
 local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Client"))
+local CoreConfigShared = require(SharedFolder:WaitForChild("CoreConfig_Shared"))
 local PlaytimeRewardsConfig = require(Modules:WaitForChild("Shared"):WaitForChild("PlaytimeRewardsConfig"))
 local ColorConfig = require(Modules:WaitForChild("Config"):WaitForChild("ColorConfig"))
 
@@ -19,9 +21,29 @@ PlaytimeRewardsUI.__index = PlaytimeRewardsUI
 local MODULE_NAME = "PlaytimeRewardsUI"
 local PLAYTIME_ELAPSED_ATTRIBUTE = "PlaytimeRewardElapsed"
 local PLAYTIME_CLAIMED_ATTRIBUTE = "PlaytimeRewardsClaimed"
+local FREE_TREADMILL_CLAIMED_ATTRIBUTE = if RunService:IsStudio()
+	then "FreeTreadmillStudioClaimed"
+	else "FreeTreadmillClaimed"
+local FREE_TREADMILL_REMAINING_ATTRIBUTE = "FreeTreadmillClaimRemainingSeconds"
+local FREE_TREADMILL_CLAIM_ID = "FreeTreadmill"
 local COUNTDOWN_UPDATE_INTERVAL = 0.2
 local COMPACT_NUMBER_THRESHOLD_LENGTH = 20
 local READY_TEXT_STYLE = ColorConfig.UI.PlaytimeRewards.ReadyTextStyle
+local treadmillConfig = CoreConfigShared.treadmills
+assert(typeof(treadmillConfig) == "table", "CoreConfigShared.treadmills is required")
+local freeTreadmillClaimSessionSeconds = treadmillConfig.freeTreadmillClaimSessionSeconds
+local studioFreeTreadmillClaimSessionSeconds = treadmillConfig.studioFreeTreadmillClaimSessionSeconds
+assert(
+	typeof(freeTreadmillClaimSessionSeconds) == "number" and freeTreadmillClaimSessionSeconds >= 0,
+	"CoreConfigShared.treadmills.freeTreadmillClaimSessionSeconds must be non-negative"
+)
+assert(
+	typeof(studioFreeTreadmillClaimSessionSeconds) == "number" and studioFreeTreadmillClaimSessionSeconds >= 0,
+	"CoreConfigShared.treadmills.studioFreeTreadmillClaimSessionSeconds must be non-negative"
+)
+local FREE_TREADMILL_SESSION_SECONDS = math.floor(
+	if RunService:IsStudio() then studioFreeTreadmillClaimSessionSeconds else freeTreadmillClaimSessionSeconds
+)
 local playtimeConfig = if CoreConfig.clientDebug and CoreConfig.clientDebug.playtimeRewards
 	then CoreConfig.clientDebug.playtimeRewards
 	else nil
@@ -266,6 +288,13 @@ function PlaytimeRewardsUI.new(options: ControllerOptions)
 		then options.onClaimableCountChanged
 		else nil
 	self.lastClaimableCount = -1
+	self.freeTreadmillButtonFrame = nil
+	self.freeTreadmillClaimButton = nil
+	self.freeTreadmillCountdownLabel = nil
+	self.freeTreadmillClaimLabel = nil
+	self.freeTreadmillClaimLabelDefaultText = nil
+	self.freeTreadmillClaimPending = false
+	self.freeTreadmillClaimPendingUntil = 0
 
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local remote = remotes:FindFirstChild("PlaytimeRewardAction")
@@ -280,6 +309,7 @@ function PlaytimeRewardsUI.new(options: ControllerOptions)
 
 	self:Rebuild()
 	self:Bind()
+	self:BindFreeTreadmillButton()
 	self:Refresh()
 
 	return self
@@ -302,19 +332,19 @@ function PlaytimeRewardsUI:NotifyClaimableCount(claimableCount: number)
 	end
 end
 
-function PlaytimeRewardsUI:GetRewardListAndTemplate(): (Frame?, Frame?)
+function PlaytimeRewardsUI:GetRewardListAndTemplate(): (GuiObject?, Frame?)
 	local rewardsFrame = self.root:FindFirstChild("RewardsFrame", true)
-	if not rewardsFrame or not rewardsFrame:IsA("Frame") then
+	if not rewardsFrame or not rewardsFrame:IsA("GuiObject") then
 		return nil, nil
 	end
 
 	local bodyFrame = rewardsFrame:FindFirstChild("BodyFrame")
-	if not bodyFrame or not bodyFrame:IsA("Frame") then
+	if not bodyFrame or not bodyFrame:IsA("GuiObject") then
 		return nil, nil
 	end
 
 	local list = bodyFrame:FindFirstChild("List")
-	if not list or not list:IsA("Frame") then
+	if not list or not list:IsA("GuiObject") then
 		return nil, nil
 	end
 
@@ -392,6 +422,8 @@ function PlaytimeRewardsUI:Rebuild()
 		end
 
 		entryFrame.Parent = list
+		VisualFunctions.SetupFrameHover(entryFrame, 1.1, 15, 1.5)
+		VisualFunctions.SetupFrameClick(entryFrame, 0.95, -15, 0.75)
 
 		local entry: RewardEntry = {
 			tier = tier,
@@ -548,10 +580,154 @@ function PlaytimeRewardsUI:ApplyClaimedState(entry: RewardEntry)
 	entry.isClaimed = true
 end
 
+function PlaytimeRewardsUI:BindFreeTreadmillButton()
+	local candidate = self.root:FindFirstChild("FreeTreadmillButtonFrame", true)
+	local frame = if candidate and candidate:IsA("GuiObject") then candidate else nil
+	if not frame then
+		return
+	end
+
+	if self.freeTreadmillButtonFrame ~= frame then
+		self.maid.FreeTreadmillButtonConnection = nil
+		self.maid.FreeTreadmillDescendantAdded = nil
+		self.freeTreadmillButtonFrame = frame
+		self.freeTreadmillClaimButton = nil
+		self.freeTreadmillCountdownLabel = nil
+		self.freeTreadmillClaimLabel = nil
+		self.freeTreadmillClaimLabelDefaultText = nil
+		self.freeTreadmillClaimPending = false
+		self.freeTreadmillClaimPendingUntil = 0
+		self.maid.FreeTreadmillDescendantAdded = frame.DescendantAdded:Connect(function(descendant)
+			if
+				descendant.Name == "TextButton"
+				or descendant.Name == "CountdownLabel"
+				or descendant.Name == "ClaimLabel"
+			then
+				self:BindFreeTreadmillButton()
+			end
+		end)
+	end
+
+	local buttonCandidate = frame:FindFirstChild("TextButton", true)
+	local claimButton = if buttonCandidate and buttonCandidate:IsA("GuiButton") then buttonCandidate else nil
+	if claimButton ~= self.freeTreadmillClaimButton then
+		self.maid.FreeTreadmillButtonConnection = nil
+		self.freeTreadmillClaimButton = claimButton
+		if claimButton then
+			self.maid.FreeTreadmillButtonConnection = claimButton.Activated:Connect(function()
+				if
+					self.destroyed
+					or self.freeTreadmillClaimPending
+					or self.player:GetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE) == true
+					or self.player:GetAttribute("Data_Loaded") ~= true
+				then
+					return
+				end
+
+				local remaining = self.player:GetAttribute(FREE_TREADMILL_REMAINING_ATTRIBUTE)
+				local remainingSeconds = if typeof(remaining) == "number"
+					then math.max(0, math.floor(remaining))
+					else FREE_TREADMILL_SESSION_SECONDS
+				if remainingSeconds > 0 or not self.playtimeRewardAction then
+					return
+				end
+
+				self.freeTreadmillClaimPending = true
+				self.freeTreadmillClaimPendingUntil = os.clock() + 4
+				self:RefreshFreeTreadmillButton()
+				local fired, fireError = pcall(
+					self.playtimeRewardAction.FireServer,
+					self.playtimeRewardAction,
+					"Claim",
+					FREE_TREADMILL_CLAIM_ID
+				)
+				if not fired then
+					self.freeTreadmillClaimPending = false
+					self.freeTreadmillClaimPendingUntil = 0
+					DebugModule.debugWarn(
+						string.format("Free treadmill claim request failed: %s", tostring(fireError)),
+						MODULE_NAME
+					)
+					self:RefreshFreeTreadmillButton()
+				end
+			end)
+		end
+	end
+
+	local countdownCandidate = frame:FindFirstChild("CountdownLabel", true)
+	self.freeTreadmillCountdownLabel = if countdownCandidate and countdownCandidate:IsA("TextLabel")
+		then countdownCandidate
+		else nil
+	local claimLabelCandidate = frame:FindFirstChild("ClaimLabel", true)
+	local claimLabel = if claimLabelCandidate and claimLabelCandidate:IsA("TextLabel")
+		then claimLabelCandidate
+		else nil
+	if claimLabel ~= self.freeTreadmillClaimLabel then
+		self.freeTreadmillClaimLabel = claimLabel
+		self.freeTreadmillClaimLabelDefaultText = if claimLabel then claimLabel.Text else nil
+	end
+
+	self:RefreshFreeTreadmillButton()
+end
+
+function PlaytimeRewardsUI:RefreshFreeTreadmillButton()
+	local frame = self.freeTreadmillButtonFrame
+	if not frame or frame.Parent == nil then
+		return
+	end
+
+	local claimed = self.player:GetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE) == true
+	frame.Visible = not claimed
+	local button = self.freeTreadmillClaimButton
+	if claimed then
+		self.freeTreadmillClaimPending = false
+		if button then
+			button.Active = false
+			button.Interactable = false
+			button.Selectable = false
+		end
+		return
+	end
+
+	if self.freeTreadmillClaimPending and os.clock() >= self.freeTreadmillClaimPendingUntil then
+		self.freeTreadmillClaimPending = false
+		self.freeTreadmillClaimPendingUntil = 0
+	end
+
+	local remainingAttribute = self.player:GetAttribute(FREE_TREADMILL_REMAINING_ATTRIBUTE)
+	local remainingSeconds = if typeof(remainingAttribute) == "number"
+		then math.max(0, math.floor(remainingAttribute))
+		else FREE_TREADMILL_SESSION_SECONDS
+	local isReady = remainingSeconds <= 0
+	local canClaim = isReady and self.player:GetAttribute("Data_Loaded") == true
+		and not self.freeTreadmillClaimPending
+
+	if self.freeTreadmillCountdownLabel then
+		self.freeTreadmillCountdownLabel.Text = formatCountdown(remainingSeconds)
+		self.freeTreadmillCountdownLabel.Visible = not isReady
+	end
+	if self.freeTreadmillClaimLabel then
+		if self.freeTreadmillClaimPending then
+			self.freeTreadmillClaimLabel.Text = "CLAIMING..."
+		elseif isReady then
+			self.freeTreadmillClaimLabel.Text = "CLAIM"
+		else
+			self.freeTreadmillClaimLabel.Text = self.freeTreadmillClaimLabelDefaultText or "FREE 2X TREADMILL"
+		end
+	end
+
+	if button then
+		button.Active = canClaim
+		button.Interactable = canClaim
+		button.Selectable = canClaim
+	end
+end
+
 function PlaytimeRewardsUI:Refresh()
 	if self.destroyed then
 		return
 	end
+	self:RefreshFreeTreadmillButton()
 
 	if next(self.entries) == nil then
 		self:Rebuild()
@@ -613,8 +789,20 @@ function PlaytimeRewardsUI:Bind()
 	self.maid:GiveTask(self.player:GetAttributeChangedSignal(PLAYTIME_CLAIMED_ATTRIBUTE):Connect(function()
 		self:Refresh()
 	end))
+	self.maid:GiveTask(self.player:GetAttributeChangedSignal(FREE_TREADMILL_REMAINING_ATTRIBUTE):Connect(function()
+		self:RefreshFreeTreadmillButton()
+	end))
+	self.maid:GiveTask(self.player:GetAttributeChangedSignal(FREE_TREADMILL_CLAIMED_ATTRIBUTE):Connect(function()
+		self:RefreshFreeTreadmillButton()
+	end))
+	self.maid:GiveTask(self.player:GetAttributeChangedSignal("Data_Loaded"):Connect(function()
+		self:RefreshFreeTreadmillButton()
+	end))
 
 	self.maid:GiveTask(self.root.DescendantAdded:Connect(function(descendant)
+		if descendant.Name == "FreeTreadmillButtonFrame" then
+			self:BindFreeTreadmillButton()
+		end
 		if descendant.Name == "RewardsFrame" or descendant.Name == "PlaytimeRewardButton_Template" then
 			task.defer(function()
 				if self.destroyed then
@@ -622,6 +810,27 @@ function PlaytimeRewardsUI:Bind()
 				end
 				self:Rebuild()
 				self:Refresh()
+			end)
+		end
+	end))
+	self.maid:GiveTask(self.root.DescendantRemoving:Connect(function(descendant)
+		if descendant == self.freeTreadmillButtonFrame then
+			self.maid.FreeTreadmillButtonConnection = nil
+			self.maid.FreeTreadmillDescendantAdded = nil
+			self.freeTreadmillButtonFrame = nil
+			self.freeTreadmillClaimButton = nil
+			self.freeTreadmillCountdownLabel = nil
+			self.freeTreadmillClaimLabel = nil
+			self.freeTreadmillClaimLabelDefaultText = nil
+		elseif
+			descendant == self.freeTreadmillClaimButton
+			or descendant == self.freeTreadmillCountdownLabel
+			or descendant == self.freeTreadmillClaimLabel
+		then
+			task.defer(function()
+				if not self.destroyed then
+					self:BindFreeTreadmillButton()
+				end
 			end)
 		end
 	end))

@@ -4,23 +4,17 @@ local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
-local LobbyRegionUtils = require(ReplicatedStorage.Modules.LobbyRegionUtils)
+local FavoriteGamePromptAttempted = ReplicatedStorage.Remotes:WaitForChild("FavoriteGamePromptAttempted") :: RemoteEvent
 
 local FavoriteGamePrompt = {}
 
 local FAVORITE_ITEM_TYPE = Enum.AvatarItemType.Asset
-local DEFERRED_PROMPT_DELAY_SECONDS = 90
 
 type CleanupFunction = () -> ()
 
-local function cancelThread(threadValue: thread?)
-	if threadValue and threadValue ~= coroutine.running() and coroutine.status(threadValue) ~= "dead" then
-		pcall(task.cancel, threadValue)
-	end
-end
-
 function FavoriteGamePrompt.PromptAfterLoadingIfEligible(player: Player): boolean
-	if not LobbyRegionUtils.IsPlayerInsideCurrentWorldLobby(player) then
+	if player:GetAttribute("FavoriteGamePromptAttempted") == true then
+		DebugModule.debugInfo("Favorite prompt skipped; attempt already recorded", "FavoriteGamePrompt")
 		return false
 	end
 
@@ -29,27 +23,14 @@ function FavoriteGamePrompt.PromptAfterLoadingIfEligible(player: Player): boolea
 		return false
 	end
 
-	local favoriteCheckSucceeded, isFavorite = pcall(function(): boolean
-		return AvatarEditorService:GetFavoriteAsync(placeId, FAVORITE_ITEM_TYPE)
+	local persistSuccess, persistError = pcall(function()
+		FavoriteGamePromptAttempted:FireServer()
 	end)
-	if not favoriteCheckSucceeded or typeof(isFavorite) ~= "boolean" then
+	if not persistSuccess then
 		DebugModule.debugWarn(
-			string.format(
-				"Failed favorite status check for placeId %d: %s",
-				placeId,
-				tostring(isFavorite)
-			),
+			"Failed to record favorite prompt attempt: " .. tostring(persistError),
 			"FavoriteGamePrompt"
 		)
-		return false
-	end
-
-	if isFavorite then
-		DebugModule.debugInfo(
-			string.format("Favorite prompt skipped; player already favorited placeId %d", placeId),
-			"FavoriteGamePrompt"
-		)
-		return false
 	end
 
 	local successPrompt, promptError = pcall(function()
@@ -70,7 +51,6 @@ function FavoriteGamePrompt.StartDeferredPrompt(player: Player, isAlive: (() -> 
 	local alive = true
 	local didAttempt = false
 	local completionConnection: RBXScriptConnection? = nil
-	local delayThread: thread? = nil
 
 	local function cleanup()
 		if not alive then
@@ -82,8 +62,6 @@ function FavoriteGamePrompt.StartDeferredPrompt(player: Player, isAlive: (() -> 
 			completionConnection:Disconnect()
 			completionConnection = nil
 		end
-		cancelThread(delayThread)
-		delayThread = nil
 	end
 
 	local function canContinue(): boolean
@@ -94,10 +72,6 @@ function FavoriteGamePrompt.StartDeferredPrompt(player: Player, isAlive: (() -> 
 	end
 
 	local function tryPrompt()
-		if delayThread == coroutine.running() then
-			delayThread = nil
-		end
-
 		if didAttempt or not canContinue() then
 			return
 		end
@@ -113,7 +87,6 @@ function FavoriteGamePrompt.StartDeferredPrompt(player: Player, isAlive: (() -> 
 	end
 
 	completionConnection = player:GetAttributeChangedSignal("TutorialCompleted"):Connect(tryPrompt)
-	delayThread = task.delay(DEFERRED_PROMPT_DELAY_SECONDS, tryPrompt)
 
 	return cleanup
 end

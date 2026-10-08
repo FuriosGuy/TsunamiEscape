@@ -71,15 +71,15 @@ type Controller = {
 	root: Instance,
 	player: Player,
 	maid: any,
-	frame: Frame?,
-	mainFrame: Frame?,
+	frame: GuiObject?,
+	mainFrame: GuiObject?,
 	modalVisibilityController: any,
 	confettiHost: GuiObject?,
 	confettiPlayer: any,
 	arrow: GuiObject?,
 	spinWheelButtonFrame: GuiObject?,
 	spinWheelLightRay: GuiObject?,
-	spinButtonFrame: Frame?,
+	spinButtonFrame: GuiObject?,
 	spinButton: TextButton?,
 	spinLabel: TextLabel?,
 	spinLabelShineOverlay: TextLabel?,
@@ -94,11 +94,12 @@ type Controller = {
 	mainFrameOriginalScale: number?,
 	nextSpinLabel: TextLabel?,
 	nextSpinLabel1: TextLabel?,
-	watchAdButtonFrame: Frame?,
+	watchAdButtonFrame: GuiObject?,
 	watchAdButton: TextButton?,
 	exitButton: GuiButton?,
 	rewardFrames: { [SpinWheelConfig.RewardId]: GuiObject },
 	badge: GuiObject?,
+	badgeAnimationCleanup: (() -> ())?,
 	blurEffect: BlurEffect?,
 	createdBlur: boolean,
 	isOpen: boolean,
@@ -218,6 +219,7 @@ function SpinWheelUI.new(root: Instance): Controller
 		exitButton = nil,
 		rewardFrames = {},
 		badge = nil,
+		badgeAnimationCleanup = nil,
 		blurEffect = nil,
 		createdBlur = false,
 		isOpen = false,
@@ -254,7 +256,7 @@ end
 function SpinWheelUI:findReferences()
 	local frameInstance = self.root:FindFirstChild("SpinWheelFrame", true)
 	local buttonFrame = self.root:FindFirstChild("SpinWheelButtonFrame", true)
-	if not frameInstance or not frameInstance:IsA("Frame") then
+	if not frameInstance or not frameInstance:IsA("GuiObject") then
 		DebugModule.debugWarn("SpinWheelFrame missing", MODULE_NAME)
 		return false
 	end
@@ -264,7 +266,8 @@ function SpinWheelUI:findReferences()
 	end
 
 	self.frame = frameInstance
-	self.mainFrame = frameInstance:FindFirstChild("MainFrame") :: Frame?
+	local mainFrame = frameInstance:FindFirstChild("MainFrame")
+	self.mainFrame = if mainFrame and mainFrame:IsA("GuiObject") then mainFrame else nil
 	local confettiHost = self.root:FindFirstChild("ConfettiFrame", true)
 	self.confettiHost = if confettiHost and confettiHost:IsA("GuiObject") then confettiHost else nil
 	if self.confettiHost then
@@ -282,14 +285,15 @@ function SpinWheelUI:findReferences()
 	if self.spinWheelLightRay then
 		self.spinWheelLightRay.Visible = false
 	end
-	self.spinButtonFrame = frameInstance:FindFirstChild("SpinButton") :: Frame?
+	local spinButtonFrame = frameInstance:FindFirstChild("SpinButton")
+	self.spinButtonFrame = if spinButtonFrame and spinButtonFrame:IsA("GuiObject") then spinButtonFrame else nil
 	local spinButton = findGuiButton(self.spinButtonFrame)
 	self.spinButton = if spinButton and spinButton:IsA("TextButton") then spinButton else nil
 	self.spinLabel = findTextLabel(frameInstance, "SpinLabel")
 	self.nextSpinLabel = findTextLabel(frameInstance, "NextSpinLabel")
 	self.nextSpinLabel1 = findTextLabel(frameInstance, "NextSpinLabel1")
 	local watchAdButtonFrame = frameInstance:FindFirstChild("WatchAdButton")
-	self.watchAdButtonFrame = if watchAdButtonFrame and watchAdButtonFrame:IsA("Frame") then watchAdButtonFrame else nil
+	self.watchAdButtonFrame = if watchAdButtonFrame and watchAdButtonFrame:IsA("GuiObject") then watchAdButtonFrame else nil
 	local watchAdButton = findGuiButton(watchAdButtonFrame)
 	self.watchAdButton = if watchAdButton and watchAdButton:IsA("TextButton") then watchAdButton else nil
 	self.exitButton = findGuiButton(frameInstance:FindFirstChild("ExitButton"))
@@ -492,7 +496,7 @@ function SpinWheelUI:setButtonEnabled(button: GuiButton, isEnabled: boolean)
 	button.Active = isEnabled
 	button.AutoButtonColor = isEnabled
 	button.Selectable = isEnabled
-	if button.Parent and button.Parent:IsA("Frame") then
+	if button.Parent and button.Parent:IsA("GuiObject") then
 		button.Parent.Interactable = isEnabled
 	end
 end
@@ -585,9 +589,18 @@ function SpinWheelUI:hasSpinAvailable(): boolean
 	return nextFreeSpinPlaytime > 0 and totalPlaytime >= nextFreeSpinPlaytime
 end
 
+function SpinWheelUI:stopBadgeAnimation()
+	local stopAnimation = self.badgeAnimationCleanup
+	self.badgeAnimationCleanup = nil
+	if stopAnimation then
+		stopAnimation()
+	end
+end
+
 function SpinWheelUI:updateAvailabilityBadge()
 	local shouldShow = self:hasSpinAvailable()
 	if not shouldShow then
+		self:stopBadgeAnimation()
 		if self.badge then
 			self.badge:Destroy()
 			self.badge = nil
@@ -604,12 +617,14 @@ function SpinWheelUI:updateAvailabilityBadge()
 	local count = math.max(1, math.floor(getNumberAttribute(self.player, SPINS_ATTRIBUTE, 0)))
 	local countText = tostring(count)
 	if self.badge == nil or self.badge.Parent == nil then
+		self:stopBadgeAnimation()
 		local template = self.root:FindFirstChild("NotifShow_Template", true)
 		if template and template:IsA("GuiObject") then
 			self.badge = template:Clone()
 			self.badge.Name = BADGE_NAME
 			self.badge.Visible = true
 			self.badge.Parent = buttonFrame
+			self.badgeAnimationCleanup = VisualFunctions.StartNotificationBadgeAnimation(self.badge)
 		end
 	end
 
@@ -1735,6 +1750,7 @@ function SpinWheelUI:Destroy()
 	self:stopAvailabilityWatcher()
 	self:stopSpinTween()
 	self:stopGrantThread()
+	self:stopBadgeAnimation()
 	if self.badge then
 		self.badge:Destroy()
 		self.badge = nil

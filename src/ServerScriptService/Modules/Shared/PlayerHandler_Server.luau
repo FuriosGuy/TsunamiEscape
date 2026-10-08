@@ -464,12 +464,8 @@ end
 
 function PlayerHandler.CalculateAwardedWins(player: Player, amount: number): number
 	local winMultiplier = getNumericAttribute(player, "WinMultiplier", 1)
-	local combinedMultiplier = combineWinMultipliers(
-		winMultiplier,
-		nil,
-		nil,
-		PlayerHandler.GetPremiumMultiplier(player)
-	)
+	local combinedMultiplier =
+		combineWinMultipliers(winMultiplier, nil, nil, PlayerHandler.GetPremiumMultiplier(player))
 	return math.max(0, math.round(amount * combinedMultiplier))
 end
 
@@ -721,7 +717,12 @@ function PlayerHandler.SyncEventUnlocks(player: Player, eventName: string): { st
 			end
 			table.insert(unlockedRewards, rewardId)
 			DebugModule.debugInfo(
-				string.format("Migrated event ownership | event=%s | player=%s | reward=%s", eventName, player.Name, rewardId),
+				string.format(
+					"Migrated event ownership | event=%s | player=%s | reward=%s",
+					eventName,
+					player.Name,
+					rewardId
+				),
 				"PlayerHandler"
 			)
 			continue
@@ -733,7 +734,12 @@ function PlayerHandler.SyncEventUnlocks(player: Player, eventName: string): { st
 				PlayerHandler.AddOwnedTrail(player, rewardId)
 				table.insert(unlockedRewards, rewardId)
 				DebugModule.debugInfo(
-					string.format("Unlocked permanent event trail | event=%s | player=%s | trail=%s", eventName, player.Name, rewardId),
+					string.format(
+						"Unlocked permanent event trail | event=%s | player=%s | trail=%s",
+						eventName,
+						player.Name,
+						rewardId
+					),
 					"PlayerHandler"
 				)
 			end
@@ -741,7 +747,12 @@ function PlayerHandler.SyncEventUnlocks(player: Player, eventName: string): { st
 			PlayerHandler.AddOwnedKart(player, rewardId)
 			table.insert(unlockedRewards, rewardId)
 			DebugModule.debugInfo(
-				string.format("Unlocked permanent event kart | event=%s | player=%s | kart=%s", eventName, player.Name, rewardId),
+				string.format(
+					"Unlocked permanent event kart | event=%s | player=%s | kart=%s",
+					eventName,
+					player.Name,
+					rewardId
+				),
 				"PlayerHandler"
 			)
 		end
@@ -791,12 +802,7 @@ function PlayerHandler.GetPlaytimeWinsMultiplier(player: Player): number
 	local miscMult = getNumericAttribute(player, "Misc_XPSpeedMultiplier", 1)
 	local devMult = getNumericAttribute(player, "DevProduct_XPSpeedMultiplier", 1)
 	local reducedDevMult = 1 + math.max(0, devMult - 1) * 0.1
-	local combinedWinMult = combineWinMultipliers(
-		winMult,
-		nil,
-		nil,
-		PlayerHandler.GetPremiumMultiplier(player)
-	)
+	local combinedWinMult = combineWinMultipliers(winMult, nil, nil, PlayerHandler.GetPremiumMultiplier(player))
 
 	return rebirthMult * combinedWinMult * miscMult * reducedDevMult
 end

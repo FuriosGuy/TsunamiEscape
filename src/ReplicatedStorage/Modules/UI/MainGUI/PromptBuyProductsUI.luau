@@ -55,7 +55,7 @@ type ProductCandidate = {
 type PromptBuyProductsUIObject = {
 	screenGui: ScreenGui,
 	player: Player,
-	frame: Frame,
+	frame: GuiObject,
 	productImage: ImageLabel?,
 	priceIcon: ImageLabel?,
 	countdownLabel: TextLabel,
@@ -122,7 +122,7 @@ local PREMIUM_BUY_BUTTON_TEXT = "SUBSCRIBE"
 local function findRequiredChild(root: Instance, name: string, className: string): Instance
 	local child = root:FindFirstChild(name, true)
 	assert(
-		child and child.ClassName == className,
+		child and child:IsA(className),
 		string.format("%s.%s must be a %s", root:GetFullName(), name, className)
 	)
 	return child
@@ -331,11 +331,11 @@ end
 function PromptBuyProductsUI.new(screenGui: Instance): PromptBuyProductsUIType
 	assert(screenGui:IsA("ScreenGui"), "PromptBuyProductsUI requires a ScreenGui root")
 
-	local frame = findRequiredChild(screenGui, "PromptBuyProductsFrame", "Frame") :: Frame
-	local bodyFrame = findRequiredChild(frame, "BodyFrame", "Frame") :: Frame
-	local buyFrame = findRequiredChild(frame, "BuyButton", "Frame") :: GuiObject
-	local watchAdFrame = findRequiredChild(frame, "WatchAdButton", "Frame") :: GuiObject
-	local exitFrame = findRequiredChild(frame, "ExitButton", "Frame") :: GuiObject
+	local frame = findRequiredChild(screenGui, "PromptBuyProductsFrame", "GuiObject") :: GuiObject
+	local bodyFrame = findRequiredChild(frame, "BodyFrame", "GuiObject") :: GuiObject
+	local buyFrame = findRequiredChild(frame, "BuyButton", "GuiObject") :: GuiObject
+	local watchAdFrame = findRequiredChild(frame, "WatchAdButton", "GuiObject") :: GuiObject
+	local exitFrame = findRequiredChild(frame, "ExitButton", "GuiObject") :: GuiObject
 
 	local self = setmetatable({
 		screenGui = screenGui :: ScreenGui,

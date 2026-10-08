@@ -1,12 +1,15 @@
 {
-  "className": "Frame",
+  "className": "CanvasGroup",
   "properties": {
     "AnchorPoint": [0.5, 0.5],
-    "BackgroundColor3": [1, 0.3059, 0.3059],
-    "BorderColor3": [0, 0, 0],
+    "Attributes": {
+      "CreateFrameShadow": true,
+      "ShadowDarkenFactor": 0.75
+    },
+    "BackgroundTransparency": 1,
     "BorderSizePixel": 0,
-    "Position": [[0.5, 0.0], [0.0654, 0.0]],
-    "Size": [[0.9988, 0.0], [0.1295, 0.0]],
+    "Position": [[0.5, 0.0], [0.0703, 0.0]],
+    "Size": [[0.9988, 0.0], [0.1392, 0.0]],
     "ZIndex": 2
   }
 }

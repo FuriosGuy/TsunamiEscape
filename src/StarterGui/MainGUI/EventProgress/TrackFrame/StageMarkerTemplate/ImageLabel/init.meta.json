@@ -9,7 +9,7 @@
     "ImageContent": "rbxasset://textures/ui/GuiImagePlaceholder.png",
     "Position": [[0.5, 0.0], [0.5, 0.0]],
     "ScaleType": "Crop",
-    "Size": [[1.0, 0.0], [1.0, 0.0]],
+    "Size": [[1.3224, 0.0], [1.0, 0.0]],
     "ZIndex": 5
   }
 }

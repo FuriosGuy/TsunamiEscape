@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
+local CoreConfigShared = require(ReplicatedStorage.Modules.Shared.CoreConfig_Shared)
 local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 
 local MouseTooltipController = {}
@@ -81,6 +82,18 @@ local TOOLTIP_DEFINITIONS: { [string]: TooltipDefinition } = table.freeze({
 	},
 	PlaytimeButtonFrame = {
 		description = "Play to unlock 12 gifts across an hour! Claim XP Speed, Wins, Levels, and a bonus bundle.",
+	},
+	FreeTreadmillButtonFrame = {
+		description = function(): string
+			local treadmillConfig = CoreConfigShared.treadmills
+			local configuredSeconds = if typeof(treadmillConfig) == "table"
+				and typeof(treadmillConfig.freeTreadmillClaimSessionSeconds) == "number"
+				then treadmillConfig.freeTreadmillClaimSessionSeconds
+				else 20 * 60
+			local sessionMinutes = math.max(1, math.ceil(configuredSeconds / 60))
+			return ("Play for %d minutes this session to claim permanent 2x treadmill access. Timer resets on rejoin.")
+				:format(sessionMinutes)
+		end,
 	},
 	RebirthButtonFrame = {
 		description = "Reach max level to rebirth! Your Speed resets, but you gain +0.5x permanent XP multiplier. Wins stay!",
@@ -162,7 +175,7 @@ local TOOLTIP_DEFINITIONS: { [string]: TooltipDefinition } = table.freeze({
 			return target:GetAttribute("EventTooltipEnabled") == true
 		end,
 		descriptionForTarget = function(target: GuiObject): string
-			local card = target:FindFirstAncestorWhichIsA("Frame")
+			local card = target:FindFirstAncestorWhichIsA("GuiObject")
 			local description = card and card:GetAttribute("EventTooltipDescription")
 			return if typeof(description) == "string" and description ~= ""
 				then description

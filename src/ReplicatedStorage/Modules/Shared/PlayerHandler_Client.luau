@@ -125,7 +125,10 @@ function PlayerHandler.CalculatePlaytimeWinsAward(player: Player, amount: number
 	local devMultiplier = getNumericAttribute(player, "DevProduct_XPSpeedMultiplier", 1)
 	local reducedDevMultiplier = 1 + math.max(0, devMultiplier - 1) * 0.1
 	local combinedWinMultiplier = combineWinMultipliers(winMultiplier, getPremiumMultiplier(player))
-	return math.max(0, math.round(amount * rebirthMultiplier * combinedWinMultiplier * miscMultiplier * reducedDevMultiplier))
+	return math.max(
+		0,
+		math.round(amount * rebirthMultiplier * combinedWinMultiplier * miscMultiplier * reducedDevMultiplier)
+	)
 end
 
 function PlayerHandler.GetNextRebirthStats(player: Player): { NextMaxLevel: number, NextMultiplier: number }
