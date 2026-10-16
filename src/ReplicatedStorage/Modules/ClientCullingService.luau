@@ -15,7 +15,6 @@ type SupportedCullInstance = Instance
 type CullState = {
 	wasCulled: boolean,
 	previousEnabled: boolean?,
-	previousLocalTransparencyModifier: number?,
 	previousCastShadow: boolean?,
 	previousRate: number?,
 	wasRateReduced: boolean,
@@ -30,7 +29,6 @@ type CullConfig = {
 	autoTagBillboards: boolean,
 	autoTagSurfaceGuis: boolean,
 	autoTagDecorativeEffects: boolean,
-	autoTagDecorativeTextures: boolean,
 	billboardDistance: number,
 	surfaceGuiDistance: number,
 	particleDistance: number,
@@ -40,7 +38,6 @@ type CullConfig = {
 	lightDistance: number,
 	beamDistance: number,
 	trailDistance: number,
-	textureDistance: number,
 	autoCullDecorativeShadows: boolean,
 	shadowDistance: number,
 }
@@ -54,8 +51,6 @@ ClientCullingService.Tags = table.freeze({
 	Light = "ClientCullableLight",
 	Beam = "ClientCullableBeam",
 	Trail = "ClientCullableTrail",
-	Texture = "ClientCullableTexture",
-	Decal = "ClientCullableDecal",
 	Shadow = "ClientCullableShadow",
 })
 
@@ -68,7 +63,6 @@ local DEFAULT_CONFIG: CullConfig = {
 	autoTagBillboards = true,
 	autoTagSurfaceGuis = true,
 	autoTagDecorativeEffects = true,
-	autoTagDecorativeTextures = true,
 	billboardDistance = 300,
 	surfaceGuiDistance = 300,
 	particleDistance = 180,
@@ -78,7 +72,6 @@ local DEFAULT_CONFIG: CullConfig = {
 	lightDistance = 220,
 	beamDistance = 250,
 	trailDistance = 200,
-	textureDistance = 600,
 	autoCullDecorativeShadows = true,
 	shadowDistance = 400,
 }
@@ -152,10 +145,6 @@ local function getConfig(): CullConfig
 			rawConfig.autoTagDecorativeEffects,
 			DEFAULT_CONFIG.autoTagDecorativeEffects
 		),
-		autoTagDecorativeTextures = readBoolean(
-			rawConfig.autoTagDecorativeTextures,
-			DEFAULT_CONFIG.autoTagDecorativeTextures
-		),
 		billboardDistance = readNumber(rawConfig.billboardDistance, DEFAULT_CONFIG.billboardDistance),
 		surfaceGuiDistance = readNumber(rawConfig.surfaceGuiDistance, DEFAULT_CONFIG.surfaceGuiDistance),
 		particleDistance = readNumber(rawConfig.particleDistance, DEFAULT_CONFIG.particleDistance),
@@ -169,7 +158,6 @@ local function getConfig(): CullConfig
 		lightDistance = readNumber(rawConfig.lightDistance, DEFAULT_CONFIG.lightDistance),
 		beamDistance = readNumber(rawConfig.beamDistance, DEFAULT_CONFIG.beamDistance),
 		trailDistance = readNumber(rawConfig.trailDistance, DEFAULT_CONFIG.trailDistance),
-		textureDistance = readNumber(rawConfig.textureDistance, DEFAULT_CONFIG.textureDistance),
 		autoCullDecorativeShadows = readBoolean(
 			rawConfig.autoCullDecorativeShadows,
 			DEFAULT_CONFIG.autoCullDecorativeShadows
@@ -413,10 +401,6 @@ local function isSupportedForTag(tag: string, instance: Instance): boolean
 		return instance:IsA("Beam")
 	elseif tag == ClientCullingService.Tags.Trail then
 		return instance:IsA("Trail")
-	elseif tag == ClientCullingService.Tags.Texture then
-		return instance:IsA("Texture")
-	elseif tag == ClientCullingService.Tags.Decal then
-		return instance:IsA("Decal")
 	elseif tag == ClientCullingService.Tags.Shadow then
 		return instance:IsA("BasePart")
 	end
@@ -456,17 +440,11 @@ local function getCullDistanceForTag(tag: string, config: CullConfig): number
 		return config.beamDistance
 	elseif tag == ClientCullingService.Tags.Trail then
 		return config.trailDistance
-	elseif tag == ClientCullingService.Tags.Texture or tag == ClientCullingService.Tags.Decal then
-		return config.textureDistance
 	elseif tag == ClientCullingService.Tags.Shadow then
 		return config.shadowDistance
 	end
 
 	return 0
-end
-
-local function isTransparencyCullable(instance: SupportedCullInstance): boolean
-	return instance:IsA("Texture") or instance:IsA("Decal")
 end
 
 local function isShadowCullable(instance: SupportedCullInstance): boolean
@@ -487,13 +465,9 @@ local function restoreInstance(instance: Instance)
 		return
 	end
 
-	if state.wasCulled and instance.Parent ~= nil then
-		if isTransparencyCullable(instance :: SupportedCullInstance) then
-			local previousTransparency = state.previousLocalTransparencyModifier
-			if previousTransparency ~= nil and (instance:IsA("Texture") or instance:IsA("Decal")) then
-				instance.LocalTransparencyModifier = previousTransparency
-			end
-		elseif isShadowCullable(instance :: SupportedCullInstance) then
+	-- Restore while unparented too, so streamed/reparented effects do not stay hidden.
+	if state.wasCulled then
+		if isShadowCullable(instance :: SupportedCullInstance) then
 			local previousCastShadow = state.previousCastShadow
 			if previousCastShadow ~= nil and instance:IsA("BasePart") then
 				instance.CastShadow = previousCastShadow
@@ -516,7 +490,6 @@ local function applyCullState(instance: SupportedCullInstance, shouldCull: boole
 		state = {
 			wasCulled = false,
 			previousEnabled = nil,
-			previousLocalTransparencyModifier = nil,
 			previousCastShadow = nil,
 			previousRate = nil,
 			wasRateReduced = false,
@@ -526,9 +499,7 @@ local function applyCullState(instance: SupportedCullInstance, shouldCull: boole
 
 	if shouldCull then
 		if not state.wasCulled then
-			if instance:IsA("Texture") or instance:IsA("Decal") then
-				state.previousLocalTransparencyModifier = instance.LocalTransparencyModifier
-			elseif instance:IsA("BasePart") then
+			if instance:IsA("BasePart") then
 				state.previousCastShadow = instance.CastShadow
 			else
 				state.previousEnabled = getEnabled(instance)
@@ -541,9 +512,7 @@ local function applyCullState(instance: SupportedCullInstance, shouldCull: boole
 			state.previousRate = nil
 			state.wasRateReduced = false
 		end
-		if instance:IsA("Texture") or instance:IsA("Decal") then
-			instance.LocalTransparencyModifier = 1
-		elseif instance:IsA("BasePart") then
+		if instance:IsA("BasePart") then
 			instance.CastShadow = false
 		else
 			setEnabled(instance, false)
@@ -552,10 +521,7 @@ local function applyCullState(instance: SupportedCullInstance, shouldCull: boole
 	end
 
 	if state.wasCulled then
-		if (instance:IsA("Texture") or instance:IsA("Decal")) and state.previousLocalTransparencyModifier ~= nil then
-			instance.LocalTransparencyModifier = state.previousLocalTransparencyModifier
-			state.previousLocalTransparencyModifier = nil
-		elseif instance:IsA("BasePart") and state.previousCastShadow ~= nil then
+		if instance:IsA("BasePart") and state.previousCastShadow ~= nil then
 			instance.CastShadow = state.previousCastShadow
 			state.previousCastShadow = nil
 		elseif state.previousEnabled ~= nil then
@@ -564,7 +530,6 @@ local function applyCullState(instance: SupportedCullInstance, shouldCull: boole
 		end
 		state.wasCulled = false
 		state.previousEnabled = nil
-		state.previousLocalTransparencyModifier = nil
 		state.previousCastShadow = nil
 	end
 
@@ -590,8 +555,6 @@ local function isSupportedInstance(instance: Instance): boolean
 		or instance:IsA("Light")
 		or instance:IsA("Beam")
 		or instance:IsA("Trail")
-		or instance:IsA("Texture")
-		or instance:IsA("Decal")
 		or instance:IsA("BasePart")
 end
 
@@ -764,16 +727,6 @@ local function getAutoTagForInstance(instance: Instance, config: CullConfig): st
 			return nil
 		end
 		tag = ClientCullingService.Tags.Trail
-	elseif instance:IsA("Texture") then
-		if not config.autoTagDecorativeTextures then
-			return nil
-		end
-		tag = ClientCullingService.Tags.Texture
-	elseif instance:IsA("Decal") then
-		if not config.autoTagDecorativeTextures then
-			return nil
-		end
-		tag = ClientCullingService.Tags.Decal
 	elseif instance:IsA("BasePart") then
 		if not shouldCullDecorativeShadows(config) then
 			return nil
@@ -796,7 +749,7 @@ local function autoTagInstance(instance: Instance, config: CullConfig)
 		if shouldSkipGuiAutoTag(instance) then
 			return
 		end
-	elseif instance:IsA("Texture") or instance:IsA("Decal") or instance:IsA("BasePart") then
+	elseif instance:IsA("BasePart") then
 		if shouldSkipDecorativeSpatialAutoTag(instance) then
 			return
 		end
@@ -955,8 +908,6 @@ local function updateCulling()
 	updateTaggedSet(ClientCullingService.Tags.Light, config, cameraPosition, distanceMultiplier)
 	updateTaggedSet(ClientCullingService.Tags.Beam, config, cameraPosition, distanceMultiplier)
 	updateTaggedSet(ClientCullingService.Tags.Trail, config, cameraPosition, distanceMultiplier)
-	updateTaggedSet(ClientCullingService.Tags.Texture, config, cameraPosition, distanceMultiplier)
-	updateTaggedSet(ClientCullingService.Tags.Decal, config, cameraPosition, distanceMultiplier)
 
 	local shouldCullShadows = shouldCullDecorativeShadows(config)
 	if shouldCullShadows then
@@ -1023,15 +974,12 @@ function ClientCullingService.Start()
 	bindTagTracking(ClientCullingService.Tags.Light)
 	bindTagTracking(ClientCullingService.Tags.Beam)
 	bindTagTracking(ClientCullingService.Tags.Trail)
-	bindTagTracking(ClientCullingService.Tags.Texture)
-	bindTagTracking(ClientCullingService.Tags.Decal)
 	bindTagTracking(ClientCullingService.Tags.Shadow)
 
 	if
 		config.autoTagBillboards
 		or config.autoTagSurfaceGuis
 		or config.autoTagDecorativeEffects
-		or config.autoTagDecorativeTextures
 		or shouldCullDecorativeShadows(config)
 	then
 		autoTagExistingCullables()

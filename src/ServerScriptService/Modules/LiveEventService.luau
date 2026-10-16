@@ -6,6 +6,7 @@ local HttpService = game:GetService("HttpService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CoreConfig = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("CoreConfig_Server"))
 local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
+local HalloweenEventConfig = require(ReplicatedStorage.Modules.Config.HalloweenEventConfig)
 local Maid = require(Modules:WaitForChild("Maid"))
 local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
 local LiveEventSchedule = require(script.Parent:WaitForChild("LiveEventSchedule"))
@@ -16,6 +17,7 @@ type LiveEventEffects = {
 	xpMultiplier: number?,
 	winButtonMultiplier: number?,
 	walkSpeedMultiplier: number?,
+	luckMultiplier: number?,
 }
 
 type LiveEventUnlock = {
@@ -50,6 +52,8 @@ type LiveEventDefinition = {
 	priority: number?,
 	displayText: string?,
 	displayColor: Color3?,
+	multiplierChoices: { number }?,
+	multiplierRandomSeed: number?,
 	winPopupImageAssetId: string?,
 	startText: string?,
 	startSound: string?,
@@ -127,11 +131,13 @@ local publishedActiveIds = ""
 local publishedXPMultiplier = 1
 local publishedWinButtonMultiplier = 1
 local publishedWalkSpeedMultiplier = 1
+local publishedLuckMultiplier = 1
 local publishedEnvironmentName = "Default"
 local publishedUpcomingEvents = ""
 local publishedEventBlockEvents = ""
 local publishedBloodmoonCycleStartUnix = 0
 local publishedBloodmoonNextStartUnix = 0
+local studioSeasonalEnvironmentTestEnded = false
 local studioDebugRandom = Random.new()
 local studioDebugSelectedEventId: string? = nil
 local studioDebugCycleStartedAt = 0
@@ -140,6 +146,7 @@ local liveRotationWarningShown = false
 
 local ROTATION_HASH_MODULUS = 2147483647
 local ROTATION_MAX_ADVANCE_STEPS = 10000
+local WEEK_SECONDS = 7 * 24 * 60 * 60
 
 local function getStateFolder(): Folder
 	local existing = ReplicatedStorage:FindFirstChild("LiveEventState")
@@ -155,6 +162,22 @@ local function getStateFolder(): Folder
 end
 
 local stateFolder = getStateFolder()
+
+local function bindEnvironmentCommand(player: Player)
+	local connectionKey = "EventEnvironmentCommand_" .. tostring(player.UserId)
+	maid[connectionKey] = player.Chatted:Connect(function(message: string)
+		local action = string.match(string.lower(message), "^%s*/e%s+environment%s+(%a+)%s*$")
+		if action ~= "on" and action ~= "off" then
+			return
+		end
+		local isEnabled = action == "on"
+		player:SetAttribute("EventEnvironmentEnabled", isEnabled)
+		DebugModule.debugInfo(
+			"Event environment " .. (if isEnabled then "enabled" else "disabled") .. " by " .. player.Name,
+			MODULE_NAME
+		)
+	end)
+end
 
 local function getConfigEvents(): { LiveEventDefinition }
 	local liveEventsConfig = CoreConfig.liveEvents
@@ -637,11 +660,13 @@ local function applyPlayerMultipliers(
 	player: Player,
 	xpMultiplier: number,
 	winButtonMultiplier: number,
-	walkSpeedMultiplier: number
+	walkSpeedMultiplier: number,
+	luckMultiplier: number
 )
 	player:SetAttribute("LiveEvent_XPMultiplier", xpMultiplier)
 	player:SetAttribute("LiveEvent_WinButtonMultiplier", winButtonMultiplier)
 	player:SetAttribute("LiveEvent_WalkSpeedMultiplier", walkSpeedMultiplier)
+	player:SetAttribute("LiveEvent_LuckMultiplier", luckMultiplier)
 end
 
 local function getRefreshInterval(): number
@@ -654,6 +679,51 @@ local function getRefreshInterval(): number
 	end
 
 	return DEFAULT_REFRESH_INTERVAL
+end
+
+local function getStudioSeasonalEnvironmentTestDuration(): number?
+	if not RunService:IsStudio() then
+		return nil
+	end
+
+	local seasonalEnvironment = CoreConfig.seasonalEnvironment
+	if typeof(seasonalEnvironment) ~= "table"
+		or seasonalEnvironment.enabled ~= true
+		or seasonalEnvironment.studioTestEndingCountdownEnabled ~= true
+	then
+		return nil
+	end
+
+	local duration = seasonalEnvironment.studioTestEndingCountdownSeconds
+	if typeof(duration) ~= "number" or duration <= 0 then
+		return nil
+	end
+
+	return duration
+end
+
+local function scheduleStudioSeasonalEnvironmentTestEnd()
+	local duration = getStudioSeasonalEnvironmentTestDuration()
+	studioSeasonalEnvironmentTestEnded = false
+	stateFolder:SetAttribute("StudioSeasonalEnvironmentTestEnded", false)
+	if duration == nil then
+		return
+	end
+
+	local token = refreshToken
+	local countdownThread = task.delay(duration, function()
+		if not initialized or token ~= refreshToken then
+			return
+		end
+
+		studioSeasonalEnvironmentTestEnded = true
+		LiveEventService.Refresh()
+	end)
+	maid.StudioSeasonalEnvironmentCountdown = function()
+		if coroutine.status(countdownThread) ~= "dead" then
+			pcall(task.cancel, countdownThread)
+		end
+	end
 end
 
 local function isEventActive(eventDefinition: LiveEventDefinition, timestamp: number): boolean
@@ -700,6 +770,60 @@ local function isEventActive(eventDefinition: LiveEventDefinition, timestamp: nu
 	return LiveEventSchedule.IsActive(eventDefinition.schedule, timestamp)
 end
 
+local function getEventMultiplier(eventDefinition: LiveEventDefinition, timestamp: number): number?
+	local choices = eventDefinition.multiplierChoices
+	if typeof(choices) ~= "table" or #choices == 0 then
+		return nil
+	end
+
+	local schedule = eventDefinition.schedule
+	local cycleStartUnix = if typeof(schedule) == "table"
+		then LiveEventSchedule.GetStartUnix(schedule, timestamp)
+		else nil
+	if typeof(cycleStartUnix) ~= "number" then
+		cycleStartUnix = timestamp - timestamp % WEEK_SECONDS
+	elseif isEventActive(eventDefinition, timestamp) and schedule.kind == "WeekendTokyoToPacific" then
+		cycleStartUnix -= WEEK_SECONDS
+	end
+
+	local seed = eventDefinition.multiplierRandomSeed or 1
+	local normalizedSeed = math.floor(math.abs(seed)) % ROTATION_HASH_MODULUS
+	local normalizedStart = math.floor(math.abs(cycleStartUnix)) % ROTATION_HASH_MODULUS
+	local startText = string.format("%.0f", normalizedStart)
+	local hash = normalizedSeed
+	for index = 1, #startText do
+		hash = (hash * 65599 + string.byte(startText, index)) % ROTATION_HASH_MODULUS
+	end
+	local choiceIndex = (hash % #choices) + 1
+	local selectedMultiplier = choices[choiceIndex]
+	return if typeof(selectedMultiplier) == "number" and selectedMultiplier >= 1 then selectedMultiplier else nil
+end
+
+local function getEventDisplayText(eventDefinition: LiveEventDefinition, timestamp: number): string
+	local displayText = eventDefinition.displayText or ""
+	local multiplier = getEventMultiplier(eventDefinition, timestamp)
+	if multiplier ~= nil then
+		displayText = string.gsub(displayText, "{MULTIPLIER}", tostring(multiplier))
+	end
+	return string.upper(displayText)
+end
+
+local function getResolvedEventEffects(eventDefinition: LiveEventDefinition, timestamp: number): LiveEventEffects?
+	local configuredEffects = eventDefinition.effects
+	if not configuredEffects then
+		return nil
+	end
+
+	local resolvedEffects: LiveEventEffects = table.clone(configuredEffects)
+	local multiplier = getEventMultiplier(eventDefinition, timestamp)
+	if multiplier ~= nil then
+		resolvedEffects.xpMultiplier = multiplier
+		resolvedEffects.winButtonMultiplier = multiplier
+		resolvedEffects.luckMultiplier = multiplier
+	end
+	return resolvedEffects
+end
+
 function LiveEventService.IsEventActive(eventId: string): boolean
 	if typeof(eventId) ~= "string" or eventId == "" then
 		return false
@@ -731,12 +855,12 @@ local function escapeRichText(value: string): string
 	return escaped
 end
 
-local function formatBannerText(activeEvents: { LiveEventDefinition }): string
+local function formatBannerText(activeEvents: { LiveEventDefinition }, timestamp: number): string
 	local eventTexts: { string } = {}
 	for _, eventDefinition in ipairs(activeEvents) do
-		local displayText = eventDefinition.displayText
+		local displayText = getEventDisplayText(eventDefinition, timestamp)
 		if typeof(displayText) == "string" and displayText ~= "" then
-			local formattedText = escapeRichText(string.upper(displayText))
+			local formattedText = escapeRichText(displayText)
 			local displayColor = eventDefinition.displayColor
 			if typeof(displayColor) == "Color3" then
 				formattedText = string.format('<font color="%s">%s</font>', colorToHex(displayColor), formattedText)
@@ -901,8 +1025,11 @@ local function serializeEventBlockUi(eventDefinition: LiveEventDefinition): { [s
 	}
 end
 
-local function serializeEventEffects(eventDefinition: LiveEventDefinition): { [string]: number }?
-	local effects = eventDefinition.effects
+local function serializeEventEffects(
+	eventDefinition: LiveEventDefinition,
+	timestamp: number
+): { [string]: number }?
+	local effects = getResolvedEventEffects(eventDefinition, timestamp)
 	if not effects then
 		return nil
 	end
@@ -916,6 +1043,9 @@ local function serializeEventEffects(eventDefinition: LiveEventDefinition): { [s
 	end
 	if typeof(effects.walkSpeedMultiplier) == "number" then
 		serializedEffects.walkSpeedMultiplier = effects.walkSpeedMultiplier
+	end
+	if typeof(effects.luckMultiplier) == "number" then
+		serializedEffects.luckMultiplier = effects.luckMultiplier
 	end
 
 	return if next(serializedEffects) == nil then nil else serializedEffects
@@ -1132,7 +1262,7 @@ local function encodeActiveEvents(activeEvents: { LiveEventDefinition }, timesta
 				else ""
 			table.insert(serializedEvents, {
 				id = eventDefinition.id,
-				displayText = string.upper(eventDefinition.displayText),
+				displayText = getEventDisplayText(eventDefinition, timestamp),
 				displayColor = displayColor,
 				winPopupImageAssetId = if typeof(eventDefinition.winPopupImageAssetId) == "string"
 					then eventDefinition.winPopupImageAssetId
@@ -1145,7 +1275,7 @@ local function encodeActiveEvents(activeEvents: { LiveEventDefinition }, timesta
 					else "",
 				kartWinsAttribute = eventDefinition.kartWinsAttribute or "",
 				stageWinAwards = serializeStageWinAwards(eventDefinition.stageWinAwards),
-				effects = serializeEventEffects(eventDefinition),
+				effects = serializeEventEffects(eventDefinition, timestamp),
 				showCountdown = eventDefinition.showCountdown ~= false,
 				environmentName = if typeof(eventDefinition.environmentName) == "string"
 					then eventDefinition.environmentName
@@ -1171,7 +1301,7 @@ local function encodeUpcomingEvents(upcomingEvents: { UpcomingEvent }): string
 				else ""
 			table.insert(serializedEvents, {
 				id = eventDefinition.id,
-				displayText = string.upper(eventDefinition.displayText),
+				displayText = getEventDisplayText(eventDefinition, upcomingEvent.startsAtUnix),
 				displayColor = displayColor,
 				winPopupImageAssetId = if typeof(eventDefinition.winPopupImageAssetId) == "string"
 					then eventDefinition.winPopupImageAssetId
@@ -1184,7 +1314,7 @@ local function encodeUpcomingEvents(upcomingEvents: { UpcomingEvent }): string
 					else "",
 				kartWinsAttribute = eventDefinition.kartWinsAttribute or "",
 				stageWinAwards = serializeStageWinAwards(eventDefinition.stageWinAwards),
-				effects = serializeEventEffects(eventDefinition),
+				effects = serializeEventEffects(eventDefinition, upcomingEvent.startsAtUnix),
 				environmentName = if typeof(eventDefinition.environmentName) == "string"
 					then eventDefinition.environmentName
 					else "",
@@ -1200,7 +1330,12 @@ end
 
 local function scheduleRefresh()
 	local token = refreshToken
-	local refreshThread = task.delay(getRefreshInterval(), function()
+	local refreshDelay = getRefreshInterval()
+	local nextHalloweenUnlock = HalloweenEventConfig.GetNextUnlockUnixTimestamp(DateTime.now().UnixTimestamp)
+	if nextHalloweenUnlock then
+		refreshDelay = math.min(refreshDelay, math.max(nextHalloweenUnlock - DateTime.now().UnixTimestamp, 0.1))
+	end
+	local refreshThread = task.delay(refreshDelay, function()
 		if not initialized or token ~= refreshToken then
 			return
 		end
@@ -1224,6 +1359,7 @@ function LiveEventService.Refresh()
 	local xpMultiplier = 1
 	local winButtonMultiplier = 1
 	local walkSpeedMultiplier = 1
+	local luckMultiplier = 1
 	local bloodmoonNextStartUnix = 0
 	local studioDebugEventId = getStudioDebugEventId()
 
@@ -1231,7 +1367,7 @@ function LiveEventService.Refresh()
 		if eventDefinition.enabled ~= false and (studioDebugEventId == nil or eventDefinition.id == studioDebugEventId) then
 			if isEventActive(eventDefinition, timestamp) then
 				table.insert(activeEvents, eventDefinition)
-				local effects = eventDefinition.effects
+				local effects = getResolvedEventEffects(eventDefinition, timestamp)
 				if effects then
 					if typeof(effects.xpMultiplier) == "number" then
 						xpMultiplier *= math.max(0, effects.xpMultiplier)
@@ -1241,6 +1377,9 @@ function LiveEventService.Refresh()
 					end
 					if typeof(effects.walkSpeedMultiplier) == "number" then
 						walkSpeedMultiplier *= math.max(0, effects.walkSpeedMultiplier)
+					end
+					if typeof(effects.luckMultiplier) == "number" then
+						luckMultiplier *= math.max(0, effects.luckMultiplier)
 					end
 				end
 			else
@@ -1316,7 +1455,7 @@ function LiveEventService.Refresh()
 		return a.startsAtUnix < b.startsAtUnix
 	end)
 
-	local bannerText = formatBannerText(activeEvents)
+	local bannerText = formatBannerText(activeEvents, timestamp)
 	local activeEventsJson = encodeActiveEvents(activeEvents, timestamp)
 	local upcomingEventsJson = encodeUpcomingEvents(upcomingEventsForUi)
 	local eventBlockEventsJson = encodeUpcomingEvents(eventBlockEvents)
@@ -1328,6 +1467,24 @@ function LiveEventService.Refresh()
 			break
 		end
 	end
+	local seasonalEnvironment = CoreConfig.seasonalEnvironment
+	local utcMonth = DateTime.fromUnixTimestamp(timestamp):ToUniversalTime().Month
+	local studioSeasonalTestEnded = RunService:IsStudio()
+		and typeof(seasonalEnvironment) == "table"
+		and seasonalEnvironment.studioTestEndingCountdownEnabled == true
+		and studioSeasonalEnvironmentTestEnded
+	if typeof(seasonalEnvironment) == "table"
+		and seasonalEnvironment.enabled == true
+		and seasonalEnvironment.month == utcMonth
+		and environmentName == "Default"
+		and typeof(seasonalEnvironment.environmentName) == "string"
+		and seasonalEnvironment.environmentName ~= ""
+		and seasonalEnvironment.environmentName ~= "Default"
+		and not studioSeasonalTestEnded
+	then
+		environmentName = seasonalEnvironment.environmentName
+	end
+	stateFolder:SetAttribute("StudioSeasonalEnvironmentTestEnded", studioSeasonalTestEnded)
 	local activeIds: { string } = {}
 	for _, eventDefinition in ipairs(activeEvents) do
 		if typeof(eventDefinition.id) == "string" then
@@ -1337,6 +1494,14 @@ function LiveEventService.Refresh()
 
 	local bannerActive = bannerText ~= ""
 	local activeIdsText = table.concat(activeIds, ",")
+	local halloweenPartTwoActive = typeof(seasonalEnvironment) == "table"
+		and seasonalEnvironment.enabled == true
+		and seasonalEnvironment.month == utcMonth
+		and HalloweenEventConfig.IsDateAvailable(timestamp)
+	local seasonalEnvironmentActive = typeof(seasonalEnvironment) == "table"
+		and seasonalEnvironment.enabled == true
+		and seasonalEnvironment.month == utcMonth
+		and not studioSeasonalTestEnded
 	local stateChanged = not hasPublishedState
 		or bannerActive ~= publishedBannerActive
 		or bannerText ~= publishedBannerText
@@ -1344,10 +1509,13 @@ function LiveEventService.Refresh()
 		or xpMultiplier ~= publishedXPMultiplier
 		or winButtonMultiplier ~= publishedWinButtonMultiplier
 		or walkSpeedMultiplier ~= publishedWalkSpeedMultiplier
+		or luckMultiplier ~= publishedLuckMultiplier
 		or environmentName ~= publishedEnvironmentName
 		or bloodmoonCycleStartUnix ~= publishedBloodmoonCycleStartUnix
 		or bloodmoonNextStartUnix ~= publishedBloodmoonNextStartUnix
 		or bloodmoonNextStartUnix ~= stateFolder:GetAttribute("BloodmoonNextStartUnix")
+		or halloweenPartTwoActive ~= stateFolder:GetAttribute("HalloweenPartTwoActive")
+		or seasonalEnvironmentActive ~= stateFolder:GetAttribute("SeasonalEnvironmentActive")
 		or activeEventsJson ~= stateFolder:GetAttribute("ActiveEvents")
 		or upcomingEventsJson ~= publishedUpcomingEvents
 		or upcomingEventsJson ~= stateFolder:GetAttribute("UpcomingEvents")
@@ -1364,6 +1532,7 @@ function LiveEventService.Refresh()
 	publishedXPMultiplier = xpMultiplier
 	publishedWinButtonMultiplier = winButtonMultiplier
 	publishedWalkSpeedMultiplier = walkSpeedMultiplier
+	publishedLuckMultiplier = luckMultiplier
 	publishedEnvironmentName = environmentName
 	publishedUpcomingEvents = upcomingEventsJson
 	publishedEventBlockEvents = eventBlockEventsJson
@@ -1375,7 +1544,10 @@ function LiveEventService.Refresh()
 	stateFolder:SetAttribute("XPMultiplier", xpMultiplier)
 	stateFolder:SetAttribute("WinButtonMultiplier", winButtonMultiplier)
 	stateFolder:SetAttribute("WalkSpeedMultiplier", walkSpeedMultiplier)
+	stateFolder:SetAttribute("LuckMultiplier", luckMultiplier)
 	stateFolder:SetAttribute("EnvironmentName", environmentName)
+	stateFolder:SetAttribute("HalloweenPartTwoActive", halloweenPartTwoActive)
+	stateFolder:SetAttribute("SeasonalEnvironmentActive", seasonalEnvironmentActive)
 	stateFolder:SetAttribute("BloodmoonCycleStartUnix", bloodmoonCycleStartUnix)
 	stateFolder:SetAttribute("BloodmoonNextStartUnix", bloodmoonNextStartUnix)
 	stateFolder:SetAttribute("ActiveEvents", activeEventsJson)
@@ -1395,7 +1567,7 @@ function LiveEventService.Refresh()
 		for _, eventDefinition in ipairs(activeEvents) do
 			syncEventCycle(player, eventDefinition, timestamp)
 		end
-		applyPlayerMultipliers(player, xpMultiplier, winButtonMultiplier, walkSpeedMultiplier)
+		applyPlayerMultipliers(player, xpMultiplier, winButtonMultiplier, walkSpeedMultiplier, luckMultiplier)
 	end
 end
 
@@ -1407,8 +1579,10 @@ function LiveEventService.Init()
 	refreshToken += 1
 	initializedAt = os.clock()
 	initializedUnixTimestamp = DateTime.now().UnixTimestamp
+	scheduleStudioSeasonalEnvironmentTestEnd()
 
 	maid.PlayerAdded = Players.PlayerAdded:Connect(function(player: Player)
+		bindEnvironmentCommand(player)
 		local dataLoadedConnectionKey = "LiveEventDataLoaded_" .. tostring(player.UserId)
 		maid[dataLoadedConnectionKey] = player:GetAttributeChangedSignal("Data_Loaded"):Connect(function()
 			syncConfiguredEventCycles(player, DateTime.now().UnixTimestamp)
@@ -1417,17 +1591,23 @@ function LiveEventService.Init()
 		local xpMultiplier = stateFolder:GetAttribute("XPMultiplier")
 		local winButtonMultiplier = stateFolder:GetAttribute("WinButtonMultiplier")
 		local walkSpeedMultiplier = stateFolder:GetAttribute("WalkSpeedMultiplier")
+		local luckMultiplier = stateFolder:GetAttribute("LuckMultiplier")
 		syncConfiguredEventCycles(player, DateTime.now().UnixTimestamp)
 		applyPlayerMultipliers(
 			player,
 			if typeof(xpMultiplier) == "number" then xpMultiplier else 1,
 			if typeof(winButtonMultiplier) == "number" then winButtonMultiplier else 1,
-			if typeof(walkSpeedMultiplier) == "number" then walkSpeedMultiplier else 1
+			if typeof(walkSpeedMultiplier) == "number" then walkSpeedMultiplier else 1,
+			if typeof(luckMultiplier) == "number" then luckMultiplier else 1
 		)
 	end)
 	maid.PlayerRemoving = Players.PlayerRemoving:Connect(function(player: Player)
 		maid["LiveEventDataLoaded_" .. tostring(player.UserId)] = nil
+		maid["EventEnvironmentCommand_" .. tostring(player.UserId)] = nil
 	end)
+	for _, player in ipairs(Players:GetPlayers()) do
+		bindEnvironmentCommand(player)
+	end
 	LiveEventService.Refresh()
 	scheduleRefresh()
 	DebugModule.debugPrint("Live event service initialized", MODULE_NAME)
@@ -1452,14 +1632,18 @@ function LiveEventService.Destroy()
 	stateFolder:SetAttribute("XPMultiplier", 1)
 	stateFolder:SetAttribute("WinButtonMultiplier", 1)
 	stateFolder:SetAttribute("WalkSpeedMultiplier", 1)
+	stateFolder:SetAttribute("LuckMultiplier", 1)
 	stateFolder:SetAttribute("EnvironmentName", "Default")
+	stateFolder:SetAttribute("HalloweenPartTwoActive", false)
+	stateFolder:SetAttribute("SeasonalEnvironmentActive", false)
+	stateFolder:SetAttribute("StudioSeasonalEnvironmentTestEnded", false)
 	stateFolder:SetAttribute("BloodmoonCycleStartUnix", 0)
 	stateFolder:SetAttribute("BloodmoonNextStartUnix", 0)
 	stateFolder:SetAttribute("ActiveEvents", "[]")
 	stateFolder:SetAttribute("UpcomingEvents", "[]")
 	stateFolder:SetAttribute("EventBlockEvents", "[]")
 	for _, player in ipairs(Players:GetPlayers()) do
-		applyPlayerMultipliers(player, 1, 1, 1)
+		applyPlayerMultipliers(player, 1, 1, 1, 1)
 	end
 end
 

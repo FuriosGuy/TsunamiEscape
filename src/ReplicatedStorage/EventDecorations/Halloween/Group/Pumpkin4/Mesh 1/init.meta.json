@@ -1,0 +1,18 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Pumpkin_01_Halloween_Pack_M_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [16.8396, 9.4758, -98.6313, -0.8192, 0, 0.5736, 0, 1, 0, -0.5736, 0, -0.8192],
+    "InitialSize": [0.6827, 0.6805, 0.6949],
+    "MeshContent": "rbxassetid://121269252548577",
+    "PivotOffset": [-29.2751, -1.9758, 68.5649, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [3.9643, 3.9516, 4.035],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

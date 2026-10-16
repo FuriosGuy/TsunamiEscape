@@ -2,7 +2,7 @@
   "className": "Texture",
   "properties": {
     "Color3": [0.6784, 0.5412, 0],
-    "Face": "Right",
+    "Face": "Left",
     "OffsetStudsU": 4,
     "StudsPerTileU": 8,
     "StudsPerTileV": 8,

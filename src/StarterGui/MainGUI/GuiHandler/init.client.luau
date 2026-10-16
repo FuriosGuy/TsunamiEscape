@@ -19,8 +19,10 @@ local PetInventoryUIController = require(ReplicatedStorage.Modules.UI.MainGUI.Pe
 local PetMultiplierUI = require(ReplicatedStorage.Modules.UI.MainGUI.PetMultiplierUI)
 local PetLuckyBlockScreenController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockScreenController)
 local PetLuckyBlockShopController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockShopController)
+local HalloweenCandyShopUIController = require(ReplicatedStorage.Modules.UI.MainGUI.HalloweenCandyShopUIController)
 local PetLuckyBlockBillboardVisualController =
 	require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockBillboardVisualController)
+local HalloweenCandyUIController = require(ReplicatedStorage.Modules.UI.MainGUI.HalloweenCandyUIController)
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local GUI_HANDLER_SINGLETON_KEY = "__SpeedBrainrotMainGuiHandler"
 
@@ -61,12 +63,22 @@ notificationLayoutController:Init()
 
 MainOrchestrator.Init(script.Parent)
 
+local halloweenCandyUIController = HalloweenCandyUIController.new(script.Parent :: ScreenGui)
+halloweenCandyUIController:Init()
+
 local spinWheelUI = SpinWheelUI.new(script.Parent)
 spinWheelUI:Init()
 
 local petLuckyBlockScreenController = PetLuckyBlockScreenController.new(script.Parent :: ScreenGui)
 if petLuckyBlockScreenController then
 	petLuckyBlockScreenController:Init()
+end
+
+local halloweenCandyShopUIController = if petLuckyBlockScreenController
+	then HalloweenCandyShopUIController.new(script.Parent :: ScreenGui, petLuckyBlockScreenController)
+	else nil
+if halloweenCandyShopUIController then
+	halloweenCandyShopUIController:Init()
 end
 
 local petLuckyBlockShopController = if petLuckyBlockScreenController
@@ -118,9 +130,13 @@ DebugModule.debugPrint(
 
 local function cleanupGuiHandlerSingleton()
 	notificationLayoutController:Destroy()
+	halloweenCandyUIController:Destroy()
 	spinWheelUI:Destroy()
 	if petLuckyBlockShopController then
 		petLuckyBlockShopController:Destroy()
+	end
+	if halloweenCandyShopUIController then
+		halloweenCandyShopUIController:Destroy()
 	end
 	if petLuckyBlockScreenController then
 		petLuckyBlockScreenController:Destroy()

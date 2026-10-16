@@ -18,6 +18,8 @@ local MainFunctions = require(ReplicatedStorage.Modules.UI.MainFunctions)
 local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
 local SpinWheelConfig = require(ReplicatedStorage.Modules.Config.SpinWheelConfig)
 local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
+local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
+local HalloweenCandyShopConfig = require(ReplicatedStorage.Modules.Shared.HalloweenCandyShopConfig)
 local FavoriteGamePrompt = require(ReplicatedStorage.Modules.FavoriteGamePrompt)
 local TutorialNotificationSystem = require(script.Parent:WaitForChild("TutorialNotificationSystem"))
 local PlaytimeRewardsUI = require(script.Parent:WaitForChild("PlaytimeRewardsUI"))
@@ -112,8 +114,11 @@ local function isLiveEventActive(eventId: string?): boolean
 	end
 
 	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
-	if not liveEventState then
+	if not liveEventState or not liveEventState:IsA("Folder") then
 		return false
+	end
+	if eventId == "Halloween" then
+		return liveEventState:GetAttribute("EnvironmentName") == "Halloween"
 	end
 
 	local activeEventIds = liveEventState:GetAttribute("ActiveEventIds")
@@ -135,9 +140,10 @@ end
 
 local function canBuyEventProduct(config: { [string]: any }, isOwned: boolean): boolean
 	local eventId = getKartEventId(config)
+	local productKey = config.productKey or config.ProductKey
 	return not isOwned
 		and eventId ~= nil
-		and typeof(config.productKey) == "string"
+		and typeof(productKey) == "string"
 		and isLiveEventActive(eventId)
 end
 
@@ -540,6 +546,12 @@ function MainOrchestrator.Init(root: Instance)
 		refresh = nil :: (() -> ())?,
 	}
 	local trailAffordableUIState = {
+		buttonFrame = nil :: GuiObject?,
+		template = nil :: GuiObject?,
+		badge = nil :: GuiObject?,
+		refresh = nil :: (() -> ())?,
+	}
+	local candyShopAffordableUIState = {
 		buttonFrame = nil :: GuiObject?,
 		template = nil :: GuiObject?,
 		badge = nil :: GuiObject?,
@@ -1778,8 +1790,18 @@ function MainOrchestrator.Init(root: Instance)
 			rebirthReadyUIState.template = instance
 			kartPurchaseUIState.template = instance
 			trailAffordableUIState.template = instance
+			candyShopAffordableUIState.template = instance
 			playtimeClaimableUIState.template = instance
 			verifyClaimableUIState.template = instance
+		elseif instance.Name == "RotateImage" and instance:FindFirstAncestor("CandyCountFrame") then
+			candyShopAffordableUIState.buttonFrame = instance
+			if candyShopAffordableUIState.refresh then
+				deferSessionCallback(function()
+					if candyShopAffordableUIState.refresh then
+						candyShopAffordableUIState.refresh()
+					end
+				end)
+			end
 		elseif instance.Name == "RebirthButtonFrame" then
 			rebirthReadyUIState.buttonFrame = instance
 			local lightRay = instance:FindFirstChild("LightRay", true)
@@ -2134,6 +2156,9 @@ function MainOrchestrator.Init(root: Instance)
 		elseif instance.Name == "ShopFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.ShopFrame = instance
 			instance.Visible = false
+		elseif instance.Name == "CandyShopFrame" and instance:IsA("GuiObject") then
+			VisualFunctions.ActiveFrameGroup.CandyShopFrame = instance
+			instance.Visible = false
 		elseif instance.Name == "RebirthConfirmFrame" and instance:IsA("GuiObject") then
 			VisualFunctions.ActiveFrameGroup.RebirthConfirmFrame = instance
 			instance.Visible = false
@@ -2356,6 +2381,7 @@ function MainOrchestrator.Init(root: Instance)
 			and not purchaseButtonNames[instance.Name]
 			and not instance:FindFirstAncestor("KartFrame")
 			and not instance:FindFirstAncestor("TrailFrame")
+			and not (instance.Name == "RotateImage" and instance:FindFirstAncestor("CandyCountFrame"))
 		then
 			bindGuiButton(genericButton, "genericClick", function()
 				SoundService.PlayGuiSound("Click")
@@ -2363,6 +2389,26 @@ function MainOrchestrator.Init(root: Instance)
 		end
 		if instance.Name == "RotateImage" and instance:FindFirstAncestor("WinCountFrame") then
 			WinCountShopShortcut.Bind(instance, sessionMaid)
+		end
+		if instance.Name == "RotateImage" and instance:FindFirstAncestor("CandyCountFrame") then
+			local button = if instance:IsA("GuiButton")
+				then instance
+				else instance:FindFirstChildWhichIsA("GuiButton", true)
+			if button then
+				bindGuiButton(button, "toggle:CandyShopFrame", function()
+					local targetFrame = VisualFunctions.ActiveFrameGroup.CandyShopFrame
+					local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
+					if
+						not targetFrame
+						or not liveEventState
+						or liveEventState:GetAttribute("HalloweenPartTwoActive") ~= true
+					then
+						return
+					end
+					SoundService.PlayGuiSound(if targetFrame.Visible then "Close" else "Click")
+					MainFunctions.ToggleFrame("CandyShopFrame")
+				end)
+			end
 		end
 
 		if targetFrameName then
@@ -2803,6 +2849,84 @@ function MainOrchestrator.Init(root: Instance)
 			trailAffordableUIState.refresh = nil
 			updateButtonNotificationBadge(trailAffordableUIState, false, "TrailAffordableNotification", "0")
 		end)
+		local function setCandyShopLightRayVisible(isVisible: boolean)
+			local buttonFrame = candyShopAffordableUIState.buttonFrame
+			local lightRay = buttonFrame and buttonFrame:FindFirstChild("LightRay", true)
+			if lightRay and lightRay:IsA("GuiObject") then
+				lightRay.Visible = isVisible
+			end
+		end
+
+		local function refreshAffordableCandyShopBadge()
+			local eventState = ReplicatedStorage:FindFirstChild("LiveEventState")
+			local eventAvailable = eventState ~= nil
+				and eventState:GetAttribute("HalloweenPartTwoActive") == true
+			if player:GetAttribute("Data_Loaded") ~= true or not eventAvailable then
+				setCandyShopLightRayVisible(false)
+				updateButtonNotificationBadge(candyShopAffordableUIState, false, "CandyShopAffordableNotification", "0")
+				return
+			end
+
+			local candyValue = player:GetAttribute("HalloweenCandyCount")
+			local candyCount = if typeof(candyValue) == "number" then math.max(0, math.floor(candyValue)) else 0
+			local ownedKarts = PlayerHandler.GetOwnedKarts(player)
+			local ownedTrails = PlayerHandler.GetOwnedTrails(player)
+			local affordableCount = 0
+			for _, product in ipairs(HalloweenCandyShopConfig.Products) do
+				if product.candyPurchasable ~= false then
+					local owned = if product.kind == "Kart"
+						then ownedKarts[product.ownedName] == true
+						elseif product.kind == "Trail"
+						then ownedTrails[product.ownedName] == true
+						else false
+					if not owned and candyCount >= product.candyPrice then
+						affordableCount += 1
+					end
+				end
+			end
+			local candyCostPerRoll = PetConfig.LuckyBlocks.Event.eventCandyPricePerRoll.Halloween
+			if typeof(candyCostPerRoll) == "number" and candyCostPerRoll > 0 then
+				for _, rollCount in ipairs({ 1, 3, 5 }) do
+					if candyCount >= candyCostPerRoll * rollCount then
+						affordableCount += 1
+					end
+				end
+			end
+			setCandyShopLightRayVisible(affordableCount > 0)
+			updateButtonNotificationBadge(
+				candyShopAffordableUIState,
+				affordableCount > 0,
+				"CandyShopAffordableNotification",
+				tostring(affordableCount)
+			)
+		end
+		candyShopAffordableUIState.refresh = refreshAffordableCandyShopBadge
+		sessionMaid:GiveTask(function()
+			candyShopAffordableUIState.refresh = nil
+			setCandyShopLightRayVisible(false)
+			updateButtonNotificationBadge(candyShopAffordableUIState, false, "CandyShopAffordableNotification", "0")
+		end)
+		for _, attributeName in ipairs({ "Data_Loaded", "HalloweenCandyCount", "OwnedKarts", "OwnedTrails" }) do
+			sessionMaid:GiveTask(player:GetAttributeChangedSignal(attributeName):Connect(refreshAffordableCandyShopBadge))
+		end
+		local function bindCandyShopEventState(eventState: Instance)
+			if not eventState:IsA("Folder") or eventState.Name ~= "LiveEventState" then
+				return
+			end
+			sessionMaid:GiveTask(
+				eventState:GetAttributeChangedSignal("HalloweenPartTwoActive"):Connect(refreshAffordableCandyShopBadge)
+			)
+			sessionMaid:GiveTask(
+				eventState:GetAttributeChangedSignal("EnvironmentName"):Connect(refreshAffordableCandyShopBadge)
+			)
+			refreshAffordableCandyShopBadge()
+		end
+		local currentEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
+		if currentEventState then
+			bindCandyShopEventState(currentEventState)
+		end
+		sessionMaid:GiveTask(ReplicatedStorage.ChildAdded:Connect(bindCandyShopEventState))
+		refreshAffordableCandyShopBadge()
 		local playtimeClaimableCount = 0
 		local function refreshPlaytimeClaimableBadge()
 			if player:GetAttribute("Data_Loaded") ~= true then
@@ -4006,18 +4130,36 @@ function MainOrchestrator.Init(root: Instance)
 
 
 		if ReplicatedStorage:FindFirstChild("LiveEventState") and ReplicatedStorage.LiveEventState:IsA("Folder") then
+			local liveEventState = ReplicatedStorage.LiveEventState :: Folder
 			sessionMaid:GiveTask(
-				(ReplicatedStorage.LiveEventState :: Folder)
-					:GetAttributeChangedSignal("ActiveEventIds")
-					:Connect(productCache.buildKartShop)
+				liveEventState:GetAttributeChangedSignal("ActiveEventIds"):Connect(function()
+					productCache.buildKartShop()
+					productCache.buildTrailShop()
+				end)
+			)
+			sessionMaid:GiveTask(
+				liveEventState:GetAttributeChangedSignal("EnvironmentName"):Connect(function()
+					productCache.buildKartShop()
+					productCache.buildTrailShop()
+				end)
 			)
 		end
 		sessionMaid:GiveTask(ReplicatedStorage.ChildAdded:Connect(function(child: Instance)
 			if child.Name == "LiveEventState" and child:IsA("Folder") then
 				sessionMaid:GiveTask(
-					child:GetAttributeChangedSignal("ActiveEventIds"):Connect(productCache.buildKartShop)
+					child:GetAttributeChangedSignal("ActiveEventIds"):Connect(function()
+						productCache.buildKartShop()
+						productCache.buildTrailShop()
+					end)
+				)
+				sessionMaid:GiveTask(
+					child:GetAttributeChangedSignal("EnvironmentName"):Connect(function()
+						productCache.buildKartShop()
+						productCache.buildTrailShop()
+					end)
 				)
 				productCache.buildKartShop()
+				productCache.buildTrailShop()
 			end
 		end))
 

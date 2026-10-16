@@ -1,6 +1,8 @@
+local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local DebugModule = require(ReplicatedStorage.Modules:WaitForChild("DebugModule"))
 local Maid = require(ReplicatedStorage.Modules:WaitForChild("Maid"))
@@ -8,9 +10,12 @@ local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Client)
 local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 
 local EnvironmentService = {}
+local localPlayer = Players.LocalPlayer
 
 local MODULE_NAME = "EnvironmentService"
 local OWNED_EFFECT_ATTRIBUTE = "EnvironmentServiceOwned"
+local EVENT_DECORATION_ATTRIBUTE = "EnvironmentServiceEventDecoration"
+local PHYSICAL_CANDY_SHOP_NAME = "PhysicalCandyShop"
 local TRANSITION_COMPLETE_ATTRIBUTE = "EnvironmentTransitionComplete"
 local environmentConfig = CoreConfig.environment
 local transitionDurationSeconds = if typeof(environmentConfig) == "table"
@@ -61,9 +66,161 @@ local maid = Maid.new()
 local initialized = false
 local stateFolder: Folder? = nil
 local currentEnvironmentName = ""
+local requestedEnvironmentName = "Default"
 local globalShadowsOverride: boolean? = nil
 local ownedEffects: { [string]: Instance } = {}
 local transitionMaid = Maid.new()
+local eventDecorationWorldsMaid = Maid.new()
+local eventDecorationWorldMaid = Maid.new()
+local eventDecorationTemplatesMaid = Maid.new()
+local eventDecorationWorlds: Instance? = nil
+local eventDecorationTemplates: Folder? = nil
+local activeEventDecoration: Model? = nil
+local activeEventDecorationTemplate: Model? = nil
+local activePhysicalCandyShop: Model? = nil
+local activePhysicalCandyShopTemplate: Model? = nil
+
+local function clearEventDecoration()
+	local decoration = activeEventDecoration
+	activeEventDecoration = nil
+	activeEventDecorationTemplate = nil
+	if decoration then
+		decoration:Destroy()
+	end
+end
+
+local function reconcileEventDecoration(environmentName: string)
+	local sourceFolder = ReplicatedStorage:FindFirstChild("EventDecorations")
+	local candidate = sourceFolder and sourceFolder:FindFirstChild(environmentName)
+	local template = if candidate and candidate:IsA("Model") then candidate else nil
+	local worlds = Workspace:FindFirstChild("Worlds")
+	local world = worlds and worlds:FindFirstChild("World1")
+	local destination = world and world:FindFirstChild("Decorations")
+
+	if template == nil or destination == nil then
+		clearEventDecoration()
+		return
+	end
+
+	if activeEventDecoration
+		and activeEventDecoration.Parent == destination
+		and activeEventDecorationTemplate == template
+	then
+		return
+	end
+
+	clearEventDecoration()
+	local clone = template:Clone()
+	if clone == nil then
+		DebugModule.debugWarn("Could not clone event decoration | name=" .. environmentName, MODULE_NAME)
+		return
+	end
+
+	clone:SetAttribute(EVENT_DECORATION_ATTRIBUTE, true)
+	clone:SetAttribute("EnvironmentServiceEnvironmentName", environmentName)
+	clone.Parent = destination
+	activeEventDecoration = clone
+	activeEventDecorationTemplate = template
+	DebugModule.debugInfo("Event decoration applied | name=" .. environmentName, MODULE_NAME)
+end
+
+local function clearPhysicalCandyShop()
+	local shop = activePhysicalCandyShop
+	activePhysicalCandyShop = nil
+	activePhysicalCandyShopTemplate = nil
+	if shop then
+		shop:Destroy()
+	end
+end
+
+local function reconcilePhysicalCandyShop()
+	local isAvailable = stateFolder ~= nil and stateFolder:GetAttribute("HalloweenPartTwoActive") == true
+	local decorations = ReplicatedStorage:FindFirstChild("EventDecorations")
+	local templateInstance = decorations and decorations:FindFirstChild(PHYSICAL_CANDY_SHOP_NAME)
+	local template = if templateInstance and templateInstance:IsA("Model") then templateInstance else nil
+	local worlds = Workspace:FindFirstChild("Worlds")
+	local world = worlds and worlds:FindFirstChild("World1")
+	local destination = world and world:FindFirstChild("Decorations")
+
+	if not isAvailable or not template or not destination then
+		clearPhysicalCandyShop()
+		return
+	end
+
+	if activePhysicalCandyShop
+		and activePhysicalCandyShop.Parent == destination
+		and activePhysicalCandyShopTemplate == template
+	then
+		return
+	end
+
+	clearPhysicalCandyShop()
+	local clone = template:Clone()
+	clone:SetAttribute(EVENT_DECORATION_ATTRIBUTE, true)
+	clone:SetAttribute("EnvironmentServiceEnvironmentName", "Halloween")
+	clone.Parent = destination
+	activePhysicalCandyShop = clone
+	activePhysicalCandyShopTemplate = template
+	DebugModule.debugInfo("Halloween physical candy shop applied", MODULE_NAME)
+end
+
+local function bindEventDecorationWorld(world: Instance?)
+	eventDecorationWorldMaid:DoCleaning()
+	if world then
+		eventDecorationWorldMaid.DecorationsAdded = world.ChildAdded:Connect(function(child: Instance)
+			if child.Name == "Decorations" then
+				reconcileEventDecoration(requestedEnvironmentName)
+				reconcilePhysicalCandyShop()
+			end
+		end)
+		eventDecorationWorldMaid.DecorationsRemoved = world.ChildRemoved:Connect(function(child: Instance)
+			if child.Name == "Decorations" then
+				clearEventDecoration()
+				clearPhysicalCandyShop()
+			end
+		end)
+	end
+	reconcileEventDecoration(requestedEnvironmentName)
+	reconcilePhysicalCandyShop()
+end
+
+local function bindEventDecorationWorlds(worlds: Instance)
+	eventDecorationWorldsMaid:DoCleaning()
+	eventDecorationWorlds = worlds
+	eventDecorationWorldsMaid.WorldAdded = worlds.ChildAdded:Connect(function(child: Instance)
+		if child.Name == "World1" then
+			bindEventDecorationWorld(child)
+		end
+	end)
+	eventDecorationWorldsMaid.WorldRemoved = worlds.ChildRemoved:Connect(function(child: Instance)
+		if child.Name == "World1" then
+			bindEventDecorationWorld(nil)
+		end
+	end)
+	bindEventDecorationWorld(worlds:FindFirstChild("World1"))
+end
+
+local function bindEventDecorationTemplates(folder: Folder)
+	eventDecorationTemplatesMaid:DoCleaning()
+	eventDecorationTemplates = folder
+	eventDecorationTemplatesMaid.TemplateAdded = folder.ChildAdded:Connect(function(child: Instance)
+		if child.Name == requestedEnvironmentName then
+			reconcileEventDecoration(requestedEnvironmentName)
+		elseif child.Name == PHYSICAL_CANDY_SHOP_NAME then
+			reconcilePhysicalCandyShop()
+		end
+	end)
+	eventDecorationTemplatesMaid.TemplateRemoved = folder.ChildRemoved:Connect(function(child: Instance)
+		if child == activeEventDecorationTemplate or child.Name == requestedEnvironmentName then
+			reconcileEventDecoration(requestedEnvironmentName)
+		end
+		if child == activePhysicalCandyShopTemplate or child.Name == PHYSICAL_CANDY_SHOP_NAME then
+			reconcilePhysicalCandyShop()
+		end
+	end)
+	reconcileEventDecoration(requestedEnvironmentName)
+	reconcilePhysicalCandyShop()
+end
 
 local function getEnvironmentProfile(environmentName: string): Folder?
 	local environments = ReplicatedStorage:FindFirstChild("Environments")
@@ -335,7 +492,8 @@ local function applyEnvironment(environmentName: string, animate: boolean?)
 	transitionMaid:DoCleaning()
 
 	local requestedName = if environmentName == "" then "Default" else environmentName
-	local profile = getEnvironmentProfile(requestedName)
+	local lightingProfileName = if requestedName == "Halloween" then "Default" else requestedName
+	local profile = getEnvironmentProfile(lightingProfileName)
 	if not profile then
 		return
 	end
@@ -374,6 +532,10 @@ local function applyEnvironment(environmentName: string, animate: boolean?)
 		currentEnvironmentName = resolvedName
 		DebugModule.debugInfo("Applied environment | name=" .. resolvedName, MODULE_NAME)
 	end
+
+	requestedEnvironmentName = requestedName
+	reconcileEventDecoration(requestedName)
+	reconcilePhysicalCandyShop()
 end
 
 local function refreshFromState(animate: boolean)
@@ -382,13 +544,21 @@ local function refreshFromState(animate: boolean)
 	end
 
 	local environmentName = stateFolder:GetAttribute("EnvironmentName")
-	applyEnvironment(if typeof(environmentName) == "string" then environmentName else "Default", animate)
+	local isEventEnvironmentEnabled = localPlayer == nil
+		or localPlayer:GetAttribute("EventEnvironmentEnabled") ~= false
+	applyEnvironment(
+		if isEventEnvironmentEnabled and typeof(environmentName) == "string" then environmentName else "Default",
+		animate
+	)
 end
 
 local function bindStateFolder(folder: Folder)
 	stateFolder = folder
 	maid.EnvironmentName = folder:GetAttributeChangedSignal("EnvironmentName"):Connect(function()
 		refreshFromState(true)
+	end)
+	maid.HalloweenPartTwoActive = folder:GetAttributeChangedSignal("HalloweenPartTwoActive"):Connect(function()
+		refreshFromState(false)
 	end)
 	refreshFromState(false)
 end
@@ -399,6 +569,47 @@ function EnvironmentService.Start()
 	end
 	initialized = true
 	applyEnvironment("Default", false)
+
+	local worlds = Workspace:FindFirstChild("Worlds")
+	if worlds then
+		bindEventDecorationWorlds(worlds)
+	end
+	maid.EventDecorationWorldsAdded = Workspace.ChildAdded:Connect(function(child: Instance)
+		if child.Name == "Worlds" then
+			bindEventDecorationWorlds(child)
+		end
+	end)
+	maid.EventDecorationWorldsRemoved = Workspace.ChildRemoved:Connect(function(child: Instance)
+		if child == eventDecorationWorlds then
+			eventDecorationWorldsMaid:DoCleaning()
+			eventDecorationWorlds = nil
+			bindEventDecorationWorld(nil)
+		end
+	end)
+
+	local eventDecorations = ReplicatedStorage:FindFirstChild("EventDecorations")
+	if eventDecorations and eventDecorations:IsA("Folder") then
+		bindEventDecorationTemplates(eventDecorations)
+	end
+	maid.EventDecorationTemplatesAdded = ReplicatedStorage.ChildAdded:Connect(function(child: Instance)
+		if child.Name == "EventDecorations" and child:IsA("Folder") then
+			bindEventDecorationTemplates(child)
+		end
+	end)
+	maid.EventDecorationTemplatesRemoved = ReplicatedStorage.ChildRemoved:Connect(function(child: Instance)
+		if child == eventDecorationTemplates then
+			eventDecorationTemplatesMaid:DoCleaning()
+			eventDecorationTemplates = nil
+			reconcileEventDecoration(requestedEnvironmentName)
+			reconcilePhysicalCandyShop()
+		end
+	end)
+
+	if localPlayer then
+		maid.EventEnvironmentEnabled = localPlayer:GetAttributeChangedSignal("EventEnvironmentEnabled"):Connect(function()
+			refreshFromState(false)
+		end)
+	end
 
 	local existingState = ReplicatedStorage:FindFirstChild("LiveEventState")
 	if existingState and existingState:IsA("Folder") then
@@ -438,11 +649,18 @@ function EnvironmentService.Stop()
 
 	initialized = false
 	maid:DoCleaning()
+	eventDecorationWorldsMaid:DoCleaning()
+	eventDecorationWorldMaid:DoCleaning()
+	eventDecorationTemplatesMaid:DoCleaning()
+	eventDecorationWorlds = nil
+	eventDecorationTemplates = nil
 	stateFolder = nil
 	globalShadowsOverride = nil
 	applyEnvironment("Default", false)
+	clearEventDecoration()
 	transitionMaid:DoCleaning()
 	currentEnvironmentName = ""
+	requestedEnvironmentName = "Default"
 	ownedEffects = {}
 end
 

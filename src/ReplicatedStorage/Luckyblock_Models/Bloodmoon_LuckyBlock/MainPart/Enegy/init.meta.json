@@ -16,13 +16,13 @@
     "Rate": 35,
     "Rotation": [-360, 360],
     "Size": [{
-        "envelope": 0.6431,
+        "envelope": 0.643,
         "time": 0.0,
-        "value": 0.7717
+        "value": 0.7716
       }, {
-        "envelope": 0.6431,
+        "envelope": 0.643,
         "time": 1.0,
-        "value": 1.2861
+        "value": 1.286
       }],
     "Speed": [0.0013, 0.0013],
     "Texture": "rbxassetid://106157690415710",

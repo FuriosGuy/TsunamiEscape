@@ -1,0 +1,15 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Bones_03_Halloween_Pack_M_0"
+    },
+    "CFrame": [6.1918, 8.8029, -66.5217, -0.9587, 0, -0.2843, 0, 1, 0, 0.2843, 0, -0.9587],
+    "InitialSize": [1.2339, 0.2651, 1.1784],
+    "MeshContent": "rbxassetid://103035363008580",
+    "Size": [5.1461, 1.1058, 4.9145],
+    "Tags": ["_BrushtoolBrushed"],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

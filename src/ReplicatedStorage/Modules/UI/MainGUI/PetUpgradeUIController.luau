@@ -416,7 +416,9 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 			end
 		end
 		if luckyBlockLuckPromptButton and luckyBlockLuckPromptButton:IsA("TextButton") then
-			luckyBlockLuckPromptButton.Text = string.format("%dx Luck", nextLuckMultiplier)
+			luckyBlockLuckPromptButton.Text = if nextTierAvailable
+				then string.format("%dx Luck", nextLuckMultiplier)
+				else "MAXED"
 		end
 		local luckPurchasesAllowed = player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
 			and player:GetAttribute("Pet_PaidRandomItemsRestricted") ~= true
@@ -431,8 +433,12 @@ function PetUpgradeUIController.new(screenGui: ScreenGui): PetUpgradeUIControlle
 		end
 
 		if luckyBlockLuckButtonFrame and luckyBlockLuckButtonFrame:IsA("GuiObject") then
-			luckyBlockLuckButtonFrame.Visible = luckPurchasesAllowed
-			VisualFunctions.SetFrameDisabledState(luckyBlockLuckButtonFrame, not nextTierAvailable, 0.5)
+			luckyBlockLuckButtonFrame.Visible = true
+			VisualFunctions.SetFrameDisabledState(
+				luckyBlockLuckButtonFrame,
+				not nextTierAvailable or not luckPurchasesAllowed,
+				0.5
+			)
 		end
 		if luckyBlockLuckPriceLabel then
 			local nextProductKey = getNextLuckProductKey(luckMultiplier)

@@ -1,0 +1,13 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "CanCollide": false,
+    "CFrame": [-22.2262, 13.0511, 0.8089, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [124, 92, 70],
+    "InitialSize": [2.9806, 3.4274, 2.2994],
+    "Material": "WoodPlanks",
+    "MeshContent": "rbxassetid://2502358587",
+    "Size": [0.4127, 0.4953, 0.2889]
+  }
+}

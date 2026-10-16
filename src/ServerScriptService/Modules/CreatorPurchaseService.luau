@@ -83,6 +83,10 @@ local function isEventProductAvailable(productKey: string): boolean
 	if typeof(eventKartProducts) == "table" then
 		for eventName, eventProducts in pairs(eventKartProducts) do
 			if typeof(eventProducts) == "table" and eventProducts[productKey] ~= nil then
+				if eventName == "Halloween" then
+					local stateFolder = ReplicatedStorage:FindFirstChild("LiveEventState")
+					return stateFolder ~= nil and stateFolder:GetAttribute("HalloweenPartTwoActive") == true
+				end
 				return isLiveEventActive(tostring(eventName))
 			end
 		end

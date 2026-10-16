@@ -1,0 +1,16 @@
+{
+  "className": "Frame",
+  "properties": {
+    "Active": true,
+    "BackgroundColor3": [0, 0, 0],
+    "BackgroundTransparency": 1,
+    "BorderColor3": [0, 0, 0],
+    "BorderSizePixel": 0,
+    "ClipsDescendants": true,
+    "Position": [[0.0133, 0.0], [0.1835, 0.0]],
+    "Selectable": true,
+    "SelectionGroup": true,
+    "Size": [[0.9584, 0.0], [0.8091, 0.0]],
+    "ZIndex": 2
+  }
+}

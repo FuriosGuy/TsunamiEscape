@@ -5,12 +5,12 @@
     "CanCollide": false,
     "CanQuery": false,
     "CanTouch": false,
-    "CFrame": [-0.0006, 1.2861, -0.0003, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "CFrame": [-0.0006, 1.286, -0.0003, -1, 0, 0, 0, 1, 0, 0, 0, -1],
     "Color": [173, 0, 0],
     "InitialSize": [304.8545, 304.8544, 304.8546],
     "Massless": true,
     "Material": "Neon",
     "MeshContent": "rbxassetid://78404946537432",
-    "Size": [3.9878, 3.9878, 3.9878]
+    "Size": [3.9874, 3.9874, 3.9874]
   }
 }

@@ -1,0 +1,15 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Table_02_Halloween_Pack_M_0"
+    },
+    "CFrame": [3.5501, 9.5044, -72.0996, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "InitialSize": [5.1756, 1.3463, 2.5108],
+    "MeshContent": "rbxassetid://89688298475407",
+    "PivotOffset": [-0.0994, -1.2544, 2.4499, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [9.6449, 2.5088, 4.6789],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

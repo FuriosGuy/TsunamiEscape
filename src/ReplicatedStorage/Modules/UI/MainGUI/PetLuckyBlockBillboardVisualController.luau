@@ -6,11 +6,17 @@ local Workspace = game:GetService("Workspace")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
+local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
+
+type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | "BloodMoon" | "NeonRush" | "FrostbiteRally" | "Halloween"
+type PolicyParticleState = {
+	originalEnabled: boolean,
+	connection: RBXScriptConnection,
+}
 
 type Controller = {
 	alive: boolean,
-	policyPlayer: Player?,
 	maid: any?,
 	folderMaid: any?,
 	blocksFolder: Folder?,
@@ -30,13 +36,132 @@ local BILLBOARD_NAME = "LuckyBlockBillboard"
 local LOCK_BILLBOARD_NAME = "LockBillboard"
 local POLICY_LOCK_BILLBOARD_NAME = "PolicyLockBillboard"
 local POLICY_HIGHLIGHT_NAME = "LuckyBlockPolicyRestrictedHighlight"
-local EVENT_LOCK_HIGHLIGHT_NAME = "LuckyBlockInactiveEventHighlight"
+local EVENT_HIGHLIGHT_NAME = "LuckyBlockInactiveEventHighlight"
 local EVENT_AVAILABILITY_ATTRIBUTE = "LuckyBlockEventAvailable"
 local POLICY_RESTRICTED_ATTRIBUTE = "Pet_PaidRandomItemsRestricted"
 local POLICY_LOADED_ATTRIBUTE = "Pet_RandomItemPolicyLoaded"
 local DISABLED_COLOR_MULTIPLIER = 0.55
 local DISABLED_HIGHLIGHT_TRANSPARENCY = 0.55
+local localPlayer = Players.LocalPlayer
 local warnedMissingLockTemplate = false
+
+local MODEL_GROUP_ALIASES: { [string]: LuckyBlockGroup } = {
+	tier1luckyblock = "Tier1",
+	tier2luckyblock = "Tier2",
+	tier3luckyblock = "Tier3",
+	premiumluckyblock = "Premium",
+	robuxluckyblock = "Premium",
+	bloodmoonluckyblock = "BloodMoon",
+	neonluckyblock = "NeonRush",
+	frostbiteluckyblock = "FrostbiteRally",
+	halloweenluckyblock = "Halloween",
+}
+
+local function getLuckyBlockGroup(model: Model): LuckyBlockGroup?
+	local blockId = model:GetAttribute("LuckyBlockId")
+	local eventId = model:GetAttribute("LuckyBlockEventId")
+	if blockId == "Event" and typeof(eventId) == "string" then
+		if eventId == "BloodMoon" or eventId == "NeonRush" or eventId == "FrostbiteRally" or eventId == "Halloween" then
+			return eventId
+		end
+	end
+	if blockId == "Tier1" or blockId == "Tier2" or blockId == "Tier3" or blockId == "Premium" then
+		return blockId
+	end
+
+	local normalizedName = string.lower(string.gsub(model.Name, "[^%w]", ""))
+	return MODEL_GROUP_ALIASES[normalizedName]
+end
+
+local function arePaidRandomItemsAllowed(): boolean
+	return localPlayer:GetAttribute(POLICY_LOADED_ATTRIBUTE) == true
+		and localPlayer:GetAttribute(POLICY_RESTRICTED_ATTRIBUTE) == false
+end
+
+local function isPolicyRestrictedBlock(model: Model): boolean
+	if arePaidRandomItemsAllowed() then
+		return false
+	end
+
+	local group = getLuckyBlockGroup(model)
+	if not group or group == "Tier1" or group == "Tier2" or group == "Tier3" then
+		return false
+	end
+	if group == "Premium" then
+		return PetConfig.LuckyBlocks.Premium.rollCurrency == "Robux"
+	end
+
+	local candyPrices = PetConfig.LuckyBlocks.Event.eventCandyPricePerRoll
+	if candyPrices and typeof(candyPrices[group]) == "number" and candyPrices[group] > 0 then
+		return false
+	end
+	local robuxPrices = PetConfig.LuckyBlocks.Event.eventRobuxPricePerRoll
+	return PetConfig.LuckyBlocks.Event.rollCurrency == "Robux"
+		and robuxPrices ~= nil
+		and typeof(robuxPrices[group]) == "number"
+		and robuxPrices[group] > 0
+end
+
+local function hasActiveEventHighlight(model: Model): boolean
+	local highlight = model:FindFirstChild(EVENT_HIGHLIGHT_NAME)
+	return highlight ~= nil and highlight:IsA("Highlight") and highlight.Enabled
+end
+
+local function setPolicyHighlight(model: Model, enabled: boolean): ()
+	local existing = model:FindFirstChild(POLICY_HIGHLIGHT_NAME)
+	if existing and not existing:IsA("Highlight") then
+		DebugModule.debugWarn("Policy highlight name is occupied by wrong class | model=" .. model:GetFullName(), MODULE_NAME)
+		return
+	end
+
+	local highlight = existing :: Highlight?
+	if enabled and not highlight then
+		highlight = Instance.new("Highlight")
+		highlight.Name = POLICY_HIGHLIGHT_NAME
+		highlight.Parent = model
+	elseif not enabled and highlight then
+		highlight:Destroy()
+		return
+	end
+
+	if highlight then
+		highlight.Adornee = model
+		highlight.FillColor = Color3.new(0, 0, 0)
+		highlight.FillTransparency = DISABLED_HIGHLIGHT_TRANSPARENCY
+		highlight.OutlineTransparency = 1
+		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+		highlight.Enabled = enabled
+	end
+end
+
+local function setPolicyLockBillboard(mainPart: BasePart, enabled: boolean): ()
+	local existing = mainPart:FindFirstChild(POLICY_LOCK_BILLBOARD_NAME)
+	if existing and not existing:IsA("BillboardGui") then
+		DebugModule.debugWarn("Policy lock name is occupied by wrong class | part=" .. mainPart:GetFullName(), MODULE_NAME)
+		return
+	end
+
+	local lockBillboard = existing :: BillboardGui?
+	if enabled and not lockBillboard then
+		local interface = ReplicatedStorage:FindFirstChild("UserInterface")
+		local template = interface and interface:FindFirstChild(LOCK_BILLBOARD_NAME)
+		if not template or not template:IsA("BillboardGui") then
+			if not warnedMissingLockTemplate then
+				warnedMissingLockTemplate = true
+				DebugModule.debugWarn("ReplicatedStorage.UserInterface.LockBillboard is missing or wrong class", MODULE_NAME)
+			end
+			return
+		end
+
+		lockBillboard = template:Clone()
+		lockBillboard.Name = POLICY_LOCK_BILLBOARD_NAME
+		lockBillboard.Adornee = mainPart
+		lockBillboard.Enabled = true
+		lockBillboard.Parent = mainPart
+	elseif not enabled and lockBillboard then
+		lockBillboard:Destroy()
+	end
+end
 
 local function getLuckyBlocksFolder(instance: Instance): Folder?
 	if not instance:IsA("Folder") or instance.Name ~= "LuckyBlocks" then
@@ -52,21 +177,9 @@ local function getLuckyBlocksFolder(instance: Instance): Folder?
 	return instance
 end
 
-local function arePaidRandomItemsAllowed(player: Player?): boolean
-	return player ~= nil
-		and player:GetAttribute(POLICY_LOADED_ATTRIBUTE) == true
-		and player:GetAttribute(POLICY_RESTRICTED_ATTRIBUTE) == false
-end
-
-local function hasActiveEventLockHighlight(model: Model): boolean
-	local highlight = model:FindFirstChild(EVENT_LOCK_HIGHLIGHT_NAME)
-	return highlight ~= nil and highlight:IsA("Highlight") and highlight.Enabled
-end
-
 function PetLuckyBlockBillboardVisualController.new(): Controller
 	return setmetatable({
 		alive = false,
-		policyPlayer = Players.LocalPlayer,
 		maid = nil,
 		folderMaid = nil,
 		blocksFolder = nil,
@@ -90,139 +203,58 @@ function PetLuckyBlockBillboardVisualController._bindModel(self: Controller, mod
 	self.modelMaids[model] = modelMaid
 	local billboardMaid: any = nil
 	local boundBillboard: BillboardGui? = nil
-	local policyEmitterStates: { [ParticleEmitter]: boolean } = {}
-	local policyEmitterConnections: { [ParticleEmitter]: RBXScriptConnection } = {}
-	local changingEmitterState: { [ParticleEmitter]: boolean } = {}
-	local boundEventHighlights: { [Highlight]: boolean } = {}
-
-	local function setEmitterEnabled(emitter: ParticleEmitter, enabled: boolean): ()
-		if emitter.Enabled == enabled then
-			return
-		end
-		changingEmitterState[emitter] = enabled
-		emitter.Enabled = enabled
-	end
-
-	local function trackPolicyEmitter(emitter: ParticleEmitter, eventUnavailable: boolean): ()
-		if policyEmitterStates[emitter] == nil then
-			policyEmitterStates[emitter] = if eventUnavailable then false else emitter.Enabled
-			policyEmitterConnections[emitter] = emitter:GetPropertyChangedSignal("Enabled"):Connect(function()
-				local expectedLocalState = changingEmitterState[emitter]
-				if expectedLocalState ~= nil and emitter.Enabled == expectedLocalState then
-					changingEmitterState[emitter] = nil
-					return
-				end
-				changingEmitterState[emitter] = nil
-
-				local isEventUnavailable = model:GetAttribute(EVENT_AVAILABILITY_ATTRIBUTE) == false
-				policyEmitterStates[emitter] = if isEventUnavailable then false else emitter.Enabled
-				if not isEventUnavailable and not arePaidRandomItemsAllowed(self.policyPlayer) and emitter.Enabled then
-					setEmitterEnabled(emitter, false)
-				end
-			end)
-		elseif eventUnavailable then
-			policyEmitterStates[emitter] = false
-		end
-	end
-
-	local function refreshPolicyEmitters(): ()
-		local policyRestricted = not arePaidRandomItemsAllowed(self.policyPlayer)
-		local eventUnavailable = model:GetAttribute(EVENT_AVAILABILITY_ATTRIBUTE) == false
-		if policyRestricted then
+	local policyParticlesDisabled = false
+	local policyParticleStates: { [ParticleEmitter]: PolicyParticleState } = {}
+	local function setPolicyParticlesDisabled(disabled: boolean): ()
+		policyParticlesDisabled = disabled
+		if disabled then
 			for _, descendant in ipairs(model:GetDescendants()) do
-				if descendant:IsA("ParticleEmitter") then
-					trackPolicyEmitter(descendant, eventUnavailable)
-					setEmitterEnabled(descendant, false)
+				if descendant:IsA("ParticleEmitter") and not policyParticleStates[descendant] then
+					local emitter = descendant
+					local state: PolicyParticleState = {
+						originalEnabled = emitter.Enabled,
+						connection = emitter:GetPropertyChangedSignal("Enabled"):Connect(function()
+							if policyParticlesDisabled and emitter.Enabled then
+								emitter.Enabled = false
+							end
+						end),
+					}
+					policyParticleStates[emitter] = state
+					emitter.Enabled = false
 				end
 			end
 			return
 		end
 
-		for emitter, wasEnabled in pairs(table.clone(policyEmitterStates)) do
-			local connection = policyEmitterConnections[emitter]
-			if connection then
-				connection:Disconnect()
-				policyEmitterConnections[emitter] = nil
-			end
-			policyEmitterStates[emitter] = nil
+		for emitter, state in pairs(policyParticleStates) do
+			state.connection:Disconnect()
 			if emitter.Parent then
-				changingEmitterState[emitter] = nil
-				emitter.Enabled = wasEnabled
+				emitter.Enabled = state.originalEnabled
 			end
+			policyParticleStates[emitter] = nil
 		end
 	end
-
-	local function refreshPolicyLock(): ()
+	local function disableAddedPolicyEmitter(instance: Instance): ()
+		if policyParticlesDisabled and instance:IsA("ParticleEmitter") then
+			setPolicyParticlesDisabled(true)
+		end
+	end
+	local function refreshAvailability(): ()
 		local mainPart = model:FindFirstChild("MainPart")
 		if not mainPart or not mainPart:IsA("BasePart") then
 			return
 		end
 
-		local policyAllowsPaidRandomItems = arePaidRandomItemsAllowed(self.policyPlayer)
 		local eventUnavailable = model:GetAttribute(EVENT_AVAILABILITY_ATTRIBUTE) == false
-		local policyRestricted = not policyAllowsPaidRandomItems and not hasActiveEventLockHighlight(model)
-		refreshPolicyEmitters()
-		local policyLock = mainPart:FindFirstChild(POLICY_LOCK_BILLBOARD_NAME)
-		if policyLock and not policyLock:IsA("BillboardGui") then
-			return
-		end
-
-		local policyHighlight = model:FindFirstChild(POLICY_HIGHLIGHT_NAME)
-		if policyHighlight and not policyHighlight:IsA("Highlight") then
-			return
-		end
-		if policyRestricted then
-			local highlight = if policyHighlight then policyHighlight :: Highlight else Instance.new("Highlight")
-			highlight.Name = POLICY_HIGHLIGHT_NAME
-			highlight.Adornee = model
-			highlight.FillColor = Color3.new(0, 0, 0)
-			highlight.FillTransparency = DISABLED_HIGHLIGHT_TRANSPARENCY
-			highlight.OutlineTransparency = 1
-			highlight.DepthMode = Enum.HighlightDepthMode.Occluded
-			highlight.Enabled = true
-			if highlight.Parent ~= model then
-				highlight.Parent = model
-			end
-		elseif policyHighlight then
-			policyHighlight:Destroy()
-		end
-
-		if policyRestricted then
-			if not policyLock then
-				local userInterface = ReplicatedStorage:FindFirstChild("UserInterface")
-				local template = userInterface and userInterface:FindFirstChild(LOCK_BILLBOARD_NAME)
-				if template and template:IsA("BillboardGui") then
-					local clone = template:Clone()
-					clone.Name = POLICY_LOCK_BILLBOARD_NAME
-					clone.Adornee = mainPart
-					clone.Enabled = true
-					clone.Parent = mainPart
-				else
-					if not warnedMissingLockTemplate then
-						warnedMissingLockTemplate = true
-						DebugModule.debugWarn(
-							"ReplicatedStorage.UserInterface.LockBillboard is missing or has wrong class",
-							MODULE_NAME
-						)
-					end
-				end
-			end
-		elseif policyLock then
-			policyLock:Destroy()
-		end
+		local policyRestricted = isPolicyRestrictedBlock(model) and not eventUnavailable and not hasActiveEventHighlight(model)
+		setPolicyParticlesDisabled(policyRestricted)
+		setPolicyLockBillboard(mainPart, policyRestricted)
+		setPolicyHighlight(model, policyRestricted)
 
 		local prompt = mainPart:FindFirstChild("LuckyBlockOpenPrompt")
 		if prompt and prompt:IsA("ProximityPrompt") then
-			prompt.Enabled = policyAllowsPaidRandomItems and not eventUnavailable
+			prompt.Enabled = not eventUnavailable and not policyRestricted
 		end
-	end
-
-	local function bindEventHighlight(instance: Instance): ()
-		if not instance:IsA("Highlight") or instance.Name ~= EVENT_LOCK_HIGHLIGHT_NAME or boundEventHighlights[instance] then
-			return
-		end
-		boundEventHighlights[instance] = true
-		modelMaid:GiveTask(instance:GetPropertyChangedSignal("Enabled"):Connect(refreshPolicyLock))
 	end
 
 	local function clearBillboardBinding(): ()
@@ -245,7 +277,7 @@ function PetLuckyBlockBillboardVisualController._bindModel(self: Controller, mod
 
 		local function applyLabel(label: TextLabel): ()
 			local isDisabled = model:GetAttribute(EVENT_AVAILABILITY_ATTRIBUTE) == false
-				or not arePaidRandomItemsAllowed(self.policyPlayer)
+				or isPolicyRestrictedBlock(model)
 			VisualFunctions.SetTextLabelDisabledState(label, isDisabled, DISABLED_COLOR_MULTIPLIER)
 		end
 
@@ -262,11 +294,8 @@ function PetLuckyBlockBillboardVisualController._bindModel(self: Controller, mod
 		end
 
 		currentMaid:GiveTask(model:GetAttributeChangedSignal(EVENT_AVAILABILITY_ATTRIBUTE):Connect(refreshLabels))
-		local policyPlayer = self.policyPlayer
-		if policyPlayer then
-			currentMaid:GiveTask(policyPlayer:GetAttributeChangedSignal(POLICY_RESTRICTED_ATTRIBUTE):Connect(refreshLabels))
-			currentMaid:GiveTask(policyPlayer:GetAttributeChangedSignal(POLICY_LOADED_ATTRIBUTE):Connect(refreshLabels))
-		end
+		currentMaid:GiveTask(localPlayer:GetAttributeChangedSignal(POLICY_RESTRICTED_ATTRIBUTE):Connect(refreshLabels))
+		currentMaid:GiveTask(localPlayer:GetAttributeChangedSignal(POLICY_LOADED_ATTRIBUTE):Connect(refreshLabels))
 		currentMaid:GiveTask(instance.DescendantAdded:Connect(function(descendant: Instance)
 			if descendant:IsA("TextLabel") then
 				applyLabel(descendant)
@@ -280,52 +309,35 @@ function PetLuckyBlockBillboardVisualController._bindModel(self: Controller, mod
 		refreshLabels()
 	end
 
-	modelMaid:GiveTask(model.DescendantAdded:Connect(bindBillboard))
 	modelMaid:GiveTask(model.DescendantAdded:Connect(function(instance: Instance)
-		if instance.Name == "MainPart" or instance.Name == "LuckyBlockOpenPrompt" then
-			refreshPolicyLock()
-		elseif instance:IsA("ParticleEmitter") then
-			refreshPolicyEmitters()
-		elseif instance.Name == EVENT_LOCK_HIGHLIGHT_NAME then
-			bindEventHighlight(instance)
-			refreshPolicyLock()
+		bindBillboard(instance)
+		disableAddedPolicyEmitter(instance)
+	end))
+	modelMaid:GiveTask(model.DescendantAdded:Connect(function(instance: Instance)
+		if instance.Name == "MainPart" or instance.Name == "LuckyBlockOpenPrompt" or instance.Name == EVENT_HIGHLIGHT_NAME then
+			refreshAvailability()
 		end
 	end))
-	modelMaid:GiveTask(model:GetAttributeChangedSignal(EVENT_AVAILABILITY_ATTRIBUTE):Connect(refreshPolicyLock))
-	local policyPlayer = self.policyPlayer
-	if policyPlayer then
-		modelMaid:GiveTask(policyPlayer:GetAttributeChangedSignal(POLICY_RESTRICTED_ATTRIBUTE):Connect(refreshPolicyLock))
-		modelMaid:GiveTask(policyPlayer:GetAttributeChangedSignal(POLICY_LOADED_ATTRIBUTE):Connect(refreshPolicyLock))
-	end
+	modelMaid:GiveTask(model:GetAttributeChangedSignal(EVENT_AVAILABILITY_ATTRIBUTE):Connect(refreshAvailability))
+	modelMaid:GiveTask(localPlayer:GetAttributeChangedSignal(POLICY_RESTRICTED_ATTRIBUTE):Connect(refreshAvailability))
+	modelMaid:GiveTask(localPlayer:GetAttributeChangedSignal(POLICY_LOADED_ATTRIBUTE):Connect(refreshAvailability))
 	modelMaid:GiveTask(function()
 		clearBillboardBinding()
-		for emitter, wasEnabled in pairs(table.clone(policyEmitterStates)) do
-			local connection = policyEmitterConnections[emitter]
-			if connection then
-				connection:Disconnect()
-				policyEmitterConnections[emitter] = nil
-			end
-			policyEmitterStates[emitter] = nil
-			if emitter.Parent then
-				changingEmitterState[emitter] = nil
-				emitter.Enabled = wasEnabled
-			end
-		end
+		setPolicyParticlesDisabled(false)
+		setPolicyHighlight(model, false)
 		local mainPart = model:FindFirstChild("MainPart")
-		local policyLock = mainPart and mainPart:FindFirstChild(POLICY_LOCK_BILLBOARD_NAME)
-		if policyLock then
-			policyLock:Destroy()
-		end
-		local policyHighlight = model:FindFirstChild(POLICY_HIGHLIGHT_NAME)
-		if policyHighlight then
-			policyHighlight:Destroy()
+		if mainPart and mainPart:IsA("BasePart") then
+			setPolicyLockBillboard(mainPart, false)
+			local prompt = mainPart:FindFirstChild("LuckyBlockOpenPrompt")
+			if prompt and prompt:IsA("ProximityPrompt") then
+				prompt.Enabled = model:GetAttribute(EVENT_AVAILABILITY_ATTRIBUTE) ~= false
+			end
 		end
 	end)
 	for _, descendant in ipairs(model:GetDescendants()) do
 		bindBillboard(descendant)
-		bindEventHighlight(descendant)
 	end
-	refreshPolicyLock()
+	refreshAvailability()
 end
 
 function PetLuckyBlockBillboardVisualController._bindBlocksFolder(self: Controller, folder: Folder): ()
@@ -379,7 +391,6 @@ function PetLuckyBlockBillboardVisualController.Init(self: Controller): ()
 		return
 	end
 	self.alive = true
-	self.policyPlayer = Players.LocalPlayer
 	self.maid = Maid.new()
 
 	local function tryBindFolder(instance: Instance): ()
@@ -415,7 +426,6 @@ function PetLuckyBlockBillboardVisualController.Destroy(self: Controller): ()
 	end
 	self:_clearModelBindings()
 	self.blocksFolder = nil
-	self.policyPlayer = nil
 end
 
 return PetLuckyBlockBillboardVisualController

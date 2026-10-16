@@ -148,7 +148,7 @@ local function updateDescription(billboard: BillboardGui, group: LuckyBlockGroup
 	if group == "Premium" then
 		label.Text = "OP!"
 		themeName = "Purple"
-	elseif group == "BloodMoon" or group == "NeonRush" or group == "FrostbiteRally" then
+	elseif group == "BloodMoon" or group == "NeonRush" or group == "FrostbiteRally" or group == "Halloween" then
 		label.Text = "LIMITED!"
 		themeName = "Gold"
 	else

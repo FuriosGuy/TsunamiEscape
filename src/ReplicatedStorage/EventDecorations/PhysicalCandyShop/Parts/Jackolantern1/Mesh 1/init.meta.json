@@ -1,0 +1,15 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_PumpkinCandle_04_Halloween_Pack_M_0"
+    },
+    "CFrame": [9.0707, 9.2589, -75.4799, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "InitialSize": [0.7562, 0.386, 0.7645],
+    "MeshContent": "rbxassetid://93683785291606",
+    "PivotOffset": [-28.0877, -1.0089, 54.9832, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [3.9528, 2.0177, 3.996],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

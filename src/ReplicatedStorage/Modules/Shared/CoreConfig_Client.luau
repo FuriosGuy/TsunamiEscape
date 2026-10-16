@@ -30,15 +30,6 @@ CoreConfig.environment = {
 	atmosphereLeadSeconds = 0.5, -- Starts atmosphere before ambient and remaining environment values.
 }
 
--- World geometry tint overrides for active live events.
-CoreConfig.eventWorldVisuals = {
-	frostbiteRally = {
-		enabled = true,
-		eventId = "FrostbiteRally",
-		targetColor = Color3.fromRGB(202, 203, 209),
-	},
-}
-
 -- Client-side distance culling for non-gameplay visuals.
 CoreConfig.clientCulling = {
 	enabled = true, -- Master toggle for CollectionService-based client visual culling.
@@ -58,8 +49,6 @@ CoreConfig.clientCulling = {
 	lightDistance = 320, -- Light distance before tagged lights are disabled.
 	beamDistance = 360, -- Beam distance before tagged beams are disabled.
 	trailDistance = 300, -- Trail distance before tagged trails are disabled.
-	autoTagDecorativeTextures = true, -- Culls only decorative Terrain, Decorations, and VIPRooms textures/decals.
-	textureDistance = 600, -- Decorative Texture/Decal distance before local transparency is applied.
 	autoCullDecorativeShadows = true, -- Culls CastShadow only on distant decorative Terrain, Decorations, and VIPRooms parts.
 	shadowDistance = 400, -- Decorative part distance before local CastShadow is disabled.
 	remoteTrailEnabled = true, -- Enables client-only quality budgeting for observed player trails.
@@ -115,6 +104,7 @@ CoreConfig.eventBoard = {
 	secondaryEventTitles = {
 		-- EventBoard shows these only when no major event is active or upcoming.
 		"2X WEEKEND",
+		"MULTIPLIER WEEKEND",
 	},
 }
 
@@ -159,6 +149,7 @@ CoreConfig.promptBuy = {
 		PurpleTrail = "Trail",
 		BlueTrail = "Trail",
 		GreenTrail = "Trail",
+		HalloweenTrail = "Trail",
 	},
 	descriptionPools = {
 		Default = {

@@ -1,0 +1,16 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Cobwebs_02_Cobwebs_M_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [-230.6216, 34.815, 46.4369, -0.8192, 0.4698, -0.329, 0, -0.5736, -0.8192, -0.5736, -0.671, 0.4698],
+    "InitialSize": [1.0121, 0.1401, 0.9721],
+    "MeshContent": "rbxassetid://132818522589517",
+    "Size": [9.5916, 1.3273, 9.2121]
+  }
+}

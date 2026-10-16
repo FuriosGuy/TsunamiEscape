@@ -1,0 +1,9 @@
+{
+  "className": "Part",
+  "properties": {
+    "CFrame": [-22.5, 10.2118, -59.0001, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "Color": [0, 143, 156],
+    "EnableFluidForces": false,
+    "Size": [1.25, 1.5, 8.4924]
+  }
+}

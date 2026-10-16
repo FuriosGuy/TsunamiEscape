@@ -13,13 +13,13 @@
     "Lifetime": [0.4, 0.8],
     "Rotation": [-360, 360],
     "Size": [{
-        "envelope": 0.6431,
+        "envelope": 0.643,
         "time": 0.0,
-        "value": 1.9292
+        "value": 1.929
       }, {
-        "envelope": 0.6431,
+        "envelope": 0.643,
         "time": 1.0,
-        "value": 3.8583
+        "value": 3.858
       }],
     "Speed": [0.0013, 0.0013],
     "Texture": "rbxassetid://16771418430",

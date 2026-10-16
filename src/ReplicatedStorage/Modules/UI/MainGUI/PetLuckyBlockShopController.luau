@@ -1,7 +1,6 @@
 --!strict
 
 local Players = game:GetService("Players")
-local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
@@ -9,12 +8,13 @@ local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local NumberFormatting = require(ReplicatedStorage.Modules.Shared.NumberFormatting)
 local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
+local HalloweenEventConfig = require(ReplicatedStorage.Modules.Config.HalloweenEventConfig)
 local PetLuckyBlockUIController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockUIController)
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 
 type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | PetConfig.EventId
-type PurchaseKind = "Wins" | "Robux"
+type PurchaseKind = "Wins" | "Candy" | "Robux"
 type PriceBridge = {
 	RequestRoll: (
 		self: any,
@@ -45,11 +45,10 @@ type Controller = {
 	maid: any,
 	cards: { CardState },
 	selectedGroup: LuckyBlockGroup,
-	policyDisabled: boolean?,
 	alive: boolean,
 	_selectGroup: (self: Controller, group: LuckyBlockGroup) -> (),
 	_updatePolicyState: (self: Controller) -> (),
-	_updatePurchaseButtonState: (self: Controller, canPurchase: boolean) -> (),
+	_updatePurchaseButtonState: (self: Controller, canPurchaseWinsAndCandy: boolean, canPurchaseRobux: boolean) -> (),
 	_updateVisibility: (self: Controller) -> (),
 	_updateCards: (self: Controller) -> (),
 	_buildCards: (self: Controller) -> (),
@@ -71,6 +70,7 @@ local EVENT_IDS: { [PetConfig.EventId]: string } = {
 local GROUP_ORDER: { LuckyBlockGroup } = {
 	"BloodMoon",
 	"Premium",
+	"Halloween",
 	"NeonRush",
 	"FrostbiteRally",
 	"Tier3",
@@ -99,6 +99,11 @@ local function getRobuxPrice(group: LuckyBlockGroup): number
 end
 
 local function isEventAvailable(group: LuckyBlockGroup): boolean
+	if group == "Halloween" then
+		local state = ReplicatedStorage:FindFirstChild("LiveEventState")
+		return state ~= nil and state:GetAttribute("HalloweenPartTwoActive") == true
+	end
+
 	local eventId = EVENT_IDS[group :: PetConfig.EventId]
 	if not eventId then
 		return true
@@ -114,21 +119,6 @@ local function setCardText(card: CardState): ()
 	local price = NumberFormatting.FormatNumber(getRobuxPrice(card.group))
 	if card.button:IsA("TextButton") then
 		card.button.Text = string.upper(style.Label) .. "\n" .. ROBUX_ICON .. " " .. price
-	end
-end
-
-local function clearDisabledColorCache(root: Instance): ()
-	local function clearInstance(instance: Instance): ()
-		for attributeName in pairs(instance:GetAttributes()) do
-			if attributeName == "OriginalDisabledBaseColor" or string.sub(attributeName, 1, 14) == "OriginalColor_" then
-				instance:SetAttribute(attributeName, nil)
-			end
-		end
-	end
-
-	clearInstance(root)
-	for _, descendant in ipairs(root:GetDescendants()) do
-		clearInstance(descendant)
 	end
 end
 
@@ -228,7 +218,6 @@ function PetLuckyBlockShopController.new(mainGui: ScreenGui, priceBridge: PriceB
 		maid = Maid.new(),
 		cards = {},
 		selectedGroup = "BloodMoon",
-		policyDisabled = nil,
 		alive = true,
 	}, PetLuckyBlockShopController) :: Controller
 
@@ -239,7 +228,7 @@ function PetLuckyBlockShopController.new(mainGui: ScreenGui, priceBridge: PriceB
 			if not self.alive then
 				return
 			end
-			if EVENT_IDS[self.selectedGroup :: PetConfig.EventId] and not isEventAvailable(self.selectedGroup) then
+			if not isEventAvailable(self.selectedGroup) then
 				return
 			end
 			self.priceBridge:RequestRoll(self.selectedGroup, rollCount, purchaseKind, "Shop")
@@ -261,20 +250,44 @@ function PetLuckyBlockShopController._selectGroup(self: Controller, group: Lucky
 	self:_updateCards()
 end
 
-function PetLuckyBlockShopController._updatePurchaseButtonState(self: Controller, canPurchase: boolean): ()
+function PetLuckyBlockShopController._updatePurchaseButtonState(
+	self: Controller,
+	canPurchaseWinsAndCandy: boolean,
+	canPurchaseRobux: boolean
+): ()
 	local supportsWins = self.selectedGroup == "Tier1" or self.selectedGroup == "Tier2" or self.selectedGroup == "Tier3"
+	local supportsCandy = self.selectedGroup == "Halloween"
+	local candyPrices = PetConfig.LuckyBlocks.Event.eventCandyPricePerRoll
+	local candyCostPerRoll = if supportsCandy and candyPrices then candyPrices.Halloween else nil
+	local rawCandyBalance = Players.LocalPlayer:GetAttribute("HalloweenCandyCount")
+	local candyBalance = if typeof(rawCandyBalance) == "number"
+		then math.max(0, math.floor(rawCandyBalance))
+		else 0
 
 	for _, rollCount in ipairs(ROLL_COUNTS) do
 		local winsFrame = self.mainFrame:FindFirstChild("BuyButton_" .. tostring(rollCount) .. "x", true)
 		if winsFrame and winsFrame:IsA("GuiObject") then
 			winsFrame.Visible = supportsWins
-			VisualFunctions.SetFrameInteractableState(winsFrame, canPurchase and supportsWins)
+			VisualFunctions.SetFrameInteractableState(winsFrame, canPurchaseWinsAndCandy and supportsWins)
+		end
+
+		local candyFrame = self.mainFrame:FindFirstChild("CandyRoll_" .. tostring(rollCount) .. "x", true)
+		if candyFrame and candyFrame:IsA("GuiObject") then
+			local canAffordCandy = supportsCandy
+				and typeof(candyCostPerRoll) == "number"
+				and candyBalance >= candyCostPerRoll * rollCount
+			candyFrame.Visible = supportsCandy
+			VisualFunctions.SetFrameDisabledState(
+				candyFrame,
+				not canPurchaseWinsAndCandy or not canAffordCandy,
+				POLICY_DARKEN_MULTIPLIER
+			)
 		end
 
 		local robuxFrame = self.mainFrame:FindFirstChild("RobuxBuyButton_" .. tostring(rollCount) .. "x", true)
 		if robuxFrame and robuxFrame:IsA("GuiObject") then
 			robuxFrame.Visible = true
-			VisualFunctions.SetFrameInteractableState(robuxFrame, canPurchase)
+			VisualFunctions.SetFrameInteractableState(robuxFrame, canPurchaseRobux)
 		end
 	end
 end
@@ -283,20 +296,7 @@ function PetLuckyBlockShopController._updatePolicyState(self: Controller): ()
 	local player = Players.LocalPlayer
 	local policyAllowsPaidRandomItems = player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
 		and player:GetAttribute("Pet_PaidRandomItemsRestricted") == false
-	local isDisabled = not policyAllowsPaidRandomItems
-	if self.policyDisabled ~= isDisabled then
-		local selectedObject = GuiService.SelectedObject
-		if isDisabled and selectedObject and selectedObject:IsDescendantOf(self.sectionFrame) then
-			GuiService.SelectedObject = nil
-		end
-		self.policyDisabled = isDisabled
-		VisualFunctions.SetFrameDisabledState(self.sectionFrame, isDisabled, POLICY_DARKEN_MULTIPLIER)
-		if isDisabled then
-			-- Keep hidden template colors clean so newly cloned cards do not inherit dimmed visuals.
-			VisualFunctions.SetFrameDisabledState(self.template, false, POLICY_DARKEN_MULTIPLIER)
-		end
-	end
-	self:_updatePurchaseButtonState(policyAllowsPaidRandomItems)
+	self:_updatePurchaseButtonState(true, policyAllowsPaidRandomItems)
 end
 
 function PetLuckyBlockShopController._updateCards(self: Controller): ()
@@ -347,11 +347,27 @@ function PetLuckyBlockShopController.Init(self: Controller): ()
 		self:_updatePolicyState()
 		self:_updateCards()
 	end))
+	self.maid:GiveTask(player:GetAttributeChangedSignal("HalloweenCandyCount"):Connect(function()
+		local policyAllowsPaidRandomItems = player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
+			and player:GetAttribute("Pet_PaidRandomItemsRestricted") == false
+		self:_updatePurchaseButtonState(true, policyAllowsPaidRandomItems)
+	end))
 	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
 		or ReplicatedStorage:WaitForChild("LiveEventState", 10)
 	if liveEventState then
 		self.maid:GiveTask(liveEventState:GetAttributeChangedSignal("ActiveEventIds"):Connect(function()
 			self:_buildCards()
+		end))
+		self.maid:GiveTask(liveEventState:GetAttributeChangedSignal("EnvironmentName"):Connect(function()
+			self:_buildCards()
+		end))
+	end
+	local nextUnlockTimestamp = HalloweenEventConfig.GetNextUnlockUnixTimestamp(os.time())
+	if nextUnlockTimestamp then
+		self.maid:GiveTask(task.delay(math.max(nextUnlockTimestamp - os.time(), 0), function()
+			if self.alive then
+				self:_buildCards()
+			end
 		end))
 	end
 	self.maid:GiveTask(self.template.Destroying:Connect(function()
@@ -363,11 +379,6 @@ end
 function PetLuckyBlockShopController._buildCards(self: Controller): ()
 	if not self.alive then
 		return
-	end
-	if self.policyDisabled then
-		VisualFunctions.SetFrameDisabledState(self.sectionFrame, false, POLICY_DARKEN_MULTIPLIER)
-		clearDisabledColorCache(self.sectionFrame)
-		self.policyDisabled = nil
 	end
 	local existingByGroup: { [LuckyBlockGroup]: CardState } = {}
 	for _, card in ipairs(self.cards) do
@@ -386,7 +397,7 @@ function PetLuckyBlockShopController._buildCards(self: Controller): ()
 	local nextCards: { CardState } = {}
 	local selectedStillListed = false
 	for _, group in ipairs(sortedGroups) do
-		if EVENT_IDS[group :: PetConfig.EventId] and not isEventAvailable(group) then
+		if not isEventAvailable(group) then
 			continue
 		end
 		local card = existingByGroup[group]

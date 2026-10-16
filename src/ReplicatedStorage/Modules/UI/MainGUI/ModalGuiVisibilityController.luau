@@ -51,10 +51,13 @@ function ModalGuiVisibilityController.Capture(self: Controller, modalFrame: GuiO
 	self:Restore()
 	for _, child in ipairs(self.root:GetChildren()) do
 		if child:IsA("GuiObject") then
-			self.visibilitySnapshot[child] = {
-				visible = child.Visible,
-			}
-			if child ~= modalFrame and not PRESERVED_FRAME_NAMES[child.Name] then
+			local shouldHide = child ~= modalFrame and not PRESERVED_FRAME_NAMES[child.Name]
+			if child == modalFrame or shouldHide then
+				self.visibilitySnapshot[child] = {
+					visible = child.Visible,
+				}
+			end
+			if shouldHide then
 				child.Visible = false
 			end
 		end

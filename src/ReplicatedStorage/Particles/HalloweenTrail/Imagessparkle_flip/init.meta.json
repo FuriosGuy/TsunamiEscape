@@ -1,0 +1,31 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/sparkle_flip",
+  "properties": {
+    "Color": [{
+        "color": [1.0, 0.4902, 0.098],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.4902, 0.098],
+        "time": 1.0
+      }],
+    "EmissionDirection": "Back",
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.5, 2],
+    "LightInfluence": 1,
+    "Rate": 50,
+    "Rotation": [-15, 15],
+    "Size": [{
+        "envelope": 0.9375,
+        "time": 0.0,
+        "value": 0.9375
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Speed": [20, 20],
+    "Texture": "rbxassetid://115317702570755"
+  }
+}

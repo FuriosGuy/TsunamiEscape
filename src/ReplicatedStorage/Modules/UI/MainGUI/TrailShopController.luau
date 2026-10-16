@@ -117,6 +117,10 @@ function TrailShopController.new(options: Options): Controller
 			end
 
 			local isOwned = PlayerHandler.OwnsTrail(player, trailName)
+			local eventId = config.eventId
+			local isEventProduct = typeof(eventId) == "string" and eventId ~= ""
+			local eventProductAvailable = options.canBuyEventProduct(config, isOwned)
+			entry.frame.Visible = not isEventProduct or isOwned or eventProductAvailable
 			local isEquipped = player:GetAttribute("Trail_Equipped") == trailName
 			local currentWins = player:GetAttribute("WinCount") or 0
 			local isWheelOnly = config.RewardSource == "SpinWheel"
@@ -131,7 +135,7 @@ function TrailShopController.new(options: Options): Controller
 			frameGradient.Rotation = 90
 			frameGradient.Color = if isWheelOnly
 				then WHEEL_STYLE.Gradient
-				else ColorSequence.new(ColorConfig.Colors.White.Color, config.GradientBottomColor)
+				else config.Gradient or ColorSequence.new(ColorConfig.Colors.White.Color, config.GradientBottomColor)
 			VisualFunctions.RefreshFrameInteractionColors(entry.frame)
 
 			local trailImage = entry.frame:FindFirstChild("Image", true)
@@ -203,7 +207,10 @@ function TrailShopController.new(options: Options): Controller
 			end
 
 			if entry.robuxBuyButton then
-				entry.robuxBuyButton.Visible = not isWheelOnly and config.EventOnly ~= true and not isOwned
+				entry.robuxBuyButton.Visible = not isWheelOnly
+					and config.EventOnly ~= true
+					and not isOwned
+					and (not isEventProduct or eventProductAvailable)
 				if not config.CanBuyWithWins then
 					if entry.buyButton then
 						entry.robuxBuyButton.Position = entry.buyButton.Position
@@ -220,11 +227,10 @@ function TrailShopController.new(options: Options): Controller
 			end
 
 			if entry.equipButton then
-				local eventProductAvailable = options.canBuyEventProduct(config, isOwned)
 				entry.equipButton.Visible = isWheelOnly
 					or config.EventOnly == true
 					or isOwned
-					or eventProductAvailable
+					or (eventProductAvailable and not isEventProduct)
 				VisualFunctions.SetFrameInteractableState(
 					entry.equipButton,
 					if isEventLocked then false elseif isWheelOnly and not isOwned then true else isOwned
@@ -315,6 +321,9 @@ function TrailShopController.new(options: Options): Controller
 				if textButton and textButton:IsA("TextButton") then
 					shopMaid:GiveTask(textButton.Activated:Connect(function()
 						SoundService.PlayGuiSound("Click")
+						if typeof(config.eventId) == "string" and not options.canBuyEventProduct(config, false) then
+							return
+						end
 						local productKey = config.ProductKey
 						local productId = if typeof(productKey) == "string" then ProductService.DevProducts[productKey] else nil
 						if typeof(productId) == "number" and productId ~= 0 then

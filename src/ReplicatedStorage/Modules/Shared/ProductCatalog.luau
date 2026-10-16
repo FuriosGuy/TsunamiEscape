@@ -36,11 +36,17 @@ ProductCatalog.DevProducts = {
 	["+10M"] = 3559807556,
 
 	-- Event kart purchases.
+	["HalloweenCandyBoost"] = 3718114515,
 	["BloodDragon"] = 3710413009,
 	["CrimsonCell"] = 3710412649,
 	["IglooKart"] = 3712635767,
 	["SiegeTank"] = 3710413231,
 	["VoltVIper"] = 3712635731,
+	["PumpkinKart"] = 3718091560,
+	["CoffinKart"] = 3718091737,
+	["WitchBroom"] = 3718091877,
+	["HearseKart"] = 3718091990,
+	["HorsemanKart"] = 3718092197,
 
 	-- General progression and gameplay products.
 	["ClaimAllDaily"] = 3589872144,
@@ -88,6 +94,11 @@ ProductCatalog.DevProducts = {
 	["PetNeonRushLuckyBlockRoll3"] = 3715655228,
 	["PetNeonRushLuckyBlockRoll5"] = 3715655238,
 
+	-- Halloween Lucky Block roll bundles, ordered by roll count.
+	["PetHalloweenLuckyBlockRoll1"] = 3718091067,
+	["PetHalloweenLuckyBlockRoll3"] = 3718091125,
+	["PetHalloweenLuckyBlockRoll5"] = 3718091152,
+
 	-- Permanent pet luck tiers, ordered from lowest to highest.
 	["PetLuck2x"] = 3715602556,
 	["PetLuck4x"] = 3715602620,
@@ -120,6 +131,7 @@ ProductCatalog.DevProducts = {
 	["GalaxyTrail"] = 3572176684,
 	["GoldTrail"] = 3572176138,
 	["GreenTrail"] = 3572175108,
+	["HalloweenTrail"] = 3718090969,
 	["PurpleTrail"] = 3572175420,
 }
 
@@ -152,6 +164,28 @@ ProductCatalog.EventKartProducts = {
 		VoltVIper = {
 			KartName = "3_VoltVIper",
 			EventName = "NeonRush",
+		},
+	},
+	Halloween = {
+		PumpkinKart = {
+			KartName = "1_PumpkinKart",
+			EventName = "Halloween",
+		},
+		CoffinKart = {
+			KartName = "2_CoffinKart",
+			EventName = "Halloween",
+		},
+		WitchBroom = {
+			KartName = "3_WitchBroom",
+			EventName = "Halloween",
+		},
+		HearseKart = {
+			KartName = "4_HearseKart",
+			EventName = "Halloween",
+		},
+		HorsemanKart = {
+			KartName = "5_HorsemanKart",
+			EventName = "Halloween",
 		},
 	},
 }

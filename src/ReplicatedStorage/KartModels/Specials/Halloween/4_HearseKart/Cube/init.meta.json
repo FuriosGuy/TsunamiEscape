@@ -1,0 +1,13 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "CFrame": [-23.6879, 9.5798, -43.0288, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [86, 66, 54],
+    "InitialSize": [306.3855, 148.3441, 744.9513],
+    "Material": "Glacier",
+    "MaterialVariant": "2022 Stud",
+    "MeshContent": "rbxassetid://92804540045998",
+    "PivotOffset": [0, -0.5163, -1.1331, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [3.1669, 0.9682, 3.851]
+  }
+}

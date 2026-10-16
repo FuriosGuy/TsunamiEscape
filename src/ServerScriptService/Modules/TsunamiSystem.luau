@@ -31,27 +31,27 @@ type ActiveTsunamiState = {
 TsunamiSystem.TsunamiConfigs = {
 	["Very Slow"] = {
 		Chance = 25,
-		Speed = 65,
+		Speed = 40,
 	},
 	["Slow"] = {
 		Chance = 40,
-		Speed = 80,
+		Speed = 70,
 	},
 	["Medium"] = {
 		Chance = 60,
-		Speed = 120,
+		Speed = 100,
 	},
 	["Fast"] = {
 		Chance = 25,
-		Speed = 190,
+		Speed = 175,
 	},
 	["Very Fast"] = {
 		Chance = 15,
-		Speed = 220,
+		Speed = 250,
 	},
 	["Extremely Fast"] = {
 		Chance = 5,
-		Speed = 260,
+		Speed = 300,
 	},
 }
 

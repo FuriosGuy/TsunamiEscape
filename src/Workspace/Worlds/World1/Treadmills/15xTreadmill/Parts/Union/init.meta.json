@@ -4,6 +4,7 @@
     "Anchored": true,
     "CFrame": [40.3944, 16.118, 35.0874, 0.0, 0, -1.0, 0, 1, 0, 1.0, 0, 0.0],
     "Color": [123, 47, 123],
+    "Locked": true,
     "MaterialVariant": "Universal",
     "Size": [1.4449, 3.251, 5.2377],
     "UsePartColor": true

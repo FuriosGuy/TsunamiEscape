@@ -16,8 +16,8 @@
       "style": "Normal",
       "weight": "Regular"
     },
-    "Position": [[0.5902, 0.0], [0.0249, 0.0]],
-    "Size": [[0.5704, 0.0], [0.2393, 0.0]],
+    "Position": [[0.5902, 0.0], [0.0206, 0.0]],
+    "Size": [[0.5704, 0.0], [0.2308, 0.0]],
     "Text": "Win Streak 1x",
     "TextColor3": [0.9961, 0.7882, 0.1686],
     "TextScaled": true,

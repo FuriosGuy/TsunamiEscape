@@ -1,0 +1,17 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Bones_05_Halloween_Pack_M_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [16.3896, 10.9376, 63.4654, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "InitialSize": [0.8423, 0.3072, 0.8529],
+    "MeshContent": "rbxassetid://111027464057872",
+    "Size": [3.77, 1.3751, 3.8174],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

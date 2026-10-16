@@ -32,6 +32,7 @@ LeaderboardService.DEBUG_APPEND_FAKE_DATA = if leaderboardDebugConfig
 export type LeaderboardConfig = {
 	Name: string,
 	OrderedStoreName: string,
+	LegacyOrderedStoreName: string?,
 	AttributeName: string,
 	BoardPath: { string },
 	MaxEntries: number,
@@ -44,7 +45,15 @@ type LeaderboardEntryData = {
 	userId: number,
 	username: string,
 	value: number,
+	sortValue: number,
 }
+
+type OrderedStoreEntry = {
+	key: string,
+	value: any,
+}
+
+type OrderedStorePage = { OrderedStoreEntry }
 
 type LeaderboardBoardCache = {
 	scrollingFrame: ScrollingFrame,
@@ -59,18 +68,23 @@ local PLACE_COLORS: { [number]: Color3 } = {
 	[3] = Color3.fromRGB(139, 99, 31),
 }
 local DEFAULT_PLACE_COLOR = Color3.fromRGB(0, 102, 255)
--- OrderedDataStore accepts signed 64-bit integer-sized values. Luau numbers
--- lose exact integer precision above 2^53, but clamping at 2^53 incorrectly
--- capped the leaderboard at roughly 9.01 Qd. Keep a small margin below 2^63
--- so the value remains valid for the OrderedDataStore backend.
-local MAX_ORDERED_DATASTORE_INT = 9.22e18
 local EXACT_LUA_INTEGER_LIMIT = 9007199254740991
-local precisionWarningIssued = false
+local SIGNIFICANT_DIGITS = 13
+local SIGNIFICAND_LIMIT = 10 ^ SIGNIFICANT_DIGITS
+local SIGNIFICAND_SCALE = 10 ^ (SIGNIFICANT_DIGITS - 1)
+local MIN_SCORE_EXPONENT = -308
+local MAX_SCORE_EXPONENT = 308
+local MAX_EXPONENT_INDEX = MAX_SCORE_EXPONENT - MIN_SCORE_EXPONENT
+assert(
+	(MAX_EXPONENT_INDEX + 1) * SIGNIFICAND_LIMIT < EXACT_LUA_INTEGER_LIMIT,
+	"Leaderboard score encoding must stay below Luau's exact integer limit"
+)
 
 LeaderboardService.Configs = {
 	WinLeaderboard = {
 		Name = "WinLeaderboard",
-		OrderedStoreName = "WinLeaderboard_v1",
+		OrderedStoreName = "WinLeaderboard_v2",
+		LegacyOrderedStoreName = "WinLeaderboard_v1",
 		AttributeName = "WinCount",
 		BoardPath = { "Folder", "WinLeaderboard", "Leaderboard", "SurfaceGui", "ScrollingFrame" },
 		MaxEntries = 100,
@@ -79,7 +93,8 @@ LeaderboardService.Configs = {
 	},
 	SpeedLeaderboard = {
 		Name = "SpeedLeaderboard",
-		OrderedStoreName = "SpeedLeaderboard_v1",
+		OrderedStoreName = "SpeedLeaderboard_v2",
+		LegacyOrderedStoreName = "SpeedLeaderboard_v1",
 		AttributeName = "AllXPSpeed",
 		BoardPath = { "Folder", "SpeedLeaderboard", "Leaderboard", "SurfaceGui", "ScrollingFrame" },
 		MaxEntries = 100,
@@ -220,7 +235,7 @@ local function getPlayerBindingMaid(player: Player): Maid
 	return maid
 end
 
-local function normalizeOrderedDataStoreValue(rawValue: number): number?
+local function encodeLeaderboardValue(rawValue: number): number?
 	if rawValue ~= rawValue then
 		return nil
 	end
@@ -229,22 +244,62 @@ local function normalizeOrderedDataStoreValue(rawValue: number): number?
 		return nil
 	end
 
-	if rawValue > EXACT_LUA_INTEGER_LIMIT and not precisionWarningIssued then
-		precisionWarningIssued = true
-		DebugModule.debugWarn(
-			"Leaderboard values above 2^53 are stored with Luau number precision; OrderedDataStore support remains available up to its 64-bit limit.",
-			"LeaderboardService"
-		)
+	if rawValue <= 0 then
+		return 0
 	end
 
-	local clamped = math.clamp(rawValue, 0, MAX_ORDERED_DATASTORE_INT)
-	local rounded = math.floor(clamped + 0.5)
+	local exponent = math.clamp(math.floor(math.log10(rawValue)), MIN_SCORE_EXPONENT, MAX_SCORE_EXPONENT)
+	local normalizedValue = rawValue / (10 ^ exponent)
+	local significand = math.floor(normalizedValue * SIGNIFICAND_SCALE + 0.5)
 
-	if rounded ~= rounded then
+	if significand >= SIGNIFICAND_LIMIT then
+		if exponent < MAX_SCORE_EXPONENT then
+			exponent += 1
+			significand = SIGNIFICAND_SCALE
+		else
+			significand = SIGNIFICAND_LIMIT - 1
+		end
+	elseif significand < SIGNIFICAND_SCALE then
+		-- Scores below 1e-308 share the smallest representable leaderboard bucket.
+		significand = SIGNIFICAND_SCALE
+	end
+
+	local exponentIndex = exponent - MIN_SCORE_EXPONENT
+	local encodedValue = exponentIndex * SIGNIFICAND_LIMIT + significand
+	if encodedValue > EXACT_LUA_INTEGER_LIMIT then
 		return nil
 	end
 
-	return rounded
+	return encodedValue
+end
+
+
+local function decodeLeaderboardValue(encodedValue: number): number?
+	if encodedValue ~= encodedValue or encodedValue == math.huge or encodedValue == -math.huge then
+		return nil
+	end
+
+	if encodedValue <= 0 then
+		return 0
+	end
+
+	local integerValue = math.floor(encodedValue + 0.5)
+	local exponentIndex = math.floor(integerValue / SIGNIFICAND_LIMIT)
+	local significand = integerValue - exponentIndex * SIGNIFICAND_LIMIT
+	if exponentIndex < 0 or exponentIndex > MAX_EXPONENT_INDEX then
+		return nil
+	end
+	if significand < SIGNIFICAND_SCALE or significand >= SIGNIFICAND_LIMIT then
+		return nil
+	end
+
+	local exponent = exponentIndex + MIN_SCORE_EXPONENT
+	local decodedValue = (significand / SIGNIFICAND_SCALE) * (10 ^ exponent)
+	if decodedValue == math.huge then
+		return 1.7976931348623157e308
+	end
+
+	return decodedValue
 end
 
 local function clearPlayerBinding(player: Player)
@@ -314,7 +369,14 @@ local function buildEntriesSignature(entries: { LeaderboardEntryData }, maxEntri
 	for rank = 1, maxEntries do
 		local entry = entries[rank]
 		if entry then
-			parts[rank] = string.format("%d:%d:%s:%d", entry.rank, entry.userId, entry.username, entry.value)
+			parts[rank] = string.format(
+				"%d:%d:%s:%.15g:%d",
+				entry.rank,
+				entry.userId,
+				entry.username,
+				entry.value,
+				entry.sortValue
+			)
 		else
 			parts[rank] = string.format("%d:0:No Data:0", rank)
 		end
@@ -427,35 +489,14 @@ local function renderLeaderboard(config: LeaderboardConfig, entries: { Leaderboa
 	end
 end
 
-local function fetchEntries(
-	config: LeaderboardConfig
-): { { rank: number, userId: number, username: string, value: number } }
-	if LeaderboardService.DEBUG_USE_FAKE_DATA then
-		local fakeEntries = {}
-		local topValue = 3.17e15
-		local decayFactor = 0.82
-
-		for rank = 1, config.MaxEntries do
-			local value = math.max(0, math.floor(topValue * (decayFactor ^ (rank - 1))))
-
-			table.insert(fakeEntries, {
-				rank = rank,
-				userId = 0,
-				username = "FakePlayer" .. tostring(rank),
-				value = value,
-			})
-		end
-
-		return fakeEntries
-	end
-
+local function fetchOrderedPage(config: LeaderboardConfig, storeName: string): (OrderedStorePage?, any?)
 	local lastError: any = nil
 	for attempt = 1, 3 do
 		local success, pages = DataStoreRequestGate.Run(
 			"OrderedList",
-			"LeaderboardGetSortedAsync",
+			"LeaderboardGetSortedAsync_" .. storeName,
 			function()
-				return getOrderedStore(config.OrderedStoreName):GetSortedAsync(false, config.MaxEntries)
+				return getOrderedStore(storeName):GetSortedAsync(false, math.min(config.MaxEntries, 100))
 			end,
 			{
 				maxWaitSeconds = DATASTORE_BUDGET_WAIT_SECONDS,
@@ -467,51 +508,7 @@ local function fetchEntries(
 				return pages:GetCurrentPage()
 			end)
 			if pageSuccess and typeof(currentPage) == "table" then
-				local entries: { LeaderboardEntryData } = {}
-				for index, item in ipairs(currentPage) do
-					local userId = tonumber(item.key)
-					local value = tonumber(item.value) or 0
-					if not userId or not isRealLeaderboardUserId(userId) then
-						continue
-					end
-
-					local username = tostring(userId)
-					local nameSuccess, resolvedName = pcall(function()
-						return Players:GetNameFromUserIdAsync(userId)
-					end)
-					if nameSuccess and resolvedName then
-						username = resolvedName
-					end
-
-					table.insert(entries, {
-						rank = index,
-						userId = userId,
-						username = username,
-						value = value,
-					})
-				end
-
-				if LeaderboardService.DEBUG_APPEND_FAKE_DATA then
-					local realEntryCount = #entries
-					local lowestRealValue = entries[#entries] and entries[#entries].value or 100
-					local fakeStartValue = math.max(0, math.floor(lowestRealValue - 1))
-					local rank = realEntryCount + 1
-
-					while rank <= config.MaxEntries do
-						local offset = rank - realEntryCount
-						local fakeValue = math.max(0, fakeStartValue - offset + 1)
-						table.insert(entries, {
-							rank = rank,
-							userId = 0,
-							username = "FakePlayer" .. tostring(offset),
-							value = fakeValue,
-						})
-						rank += 1
-					end
-				end
-
-				lastSuccessfulEntries[config.Name] = table.clone(entries)
-				return entries
+				return currentPage :: OrderedStorePage, nil
 			end
 			lastError = currentPage
 		else
@@ -523,15 +520,229 @@ local function fetchEntries(
 		end
 	end
 
-	DebugModule.debugWarn(
-		"Failed to fetch ordered data for " .. config.Name .. "; using last successful snapshot | err=" .. tostring(lastError),
-		"LeaderboardService"
-	)
-	local cachedEntries = lastSuccessfulEntries[config.Name]
-	if cachedEntries then
-		return table.clone(cachedEntries)
+	return nil, lastError
+end
+
+local function fetchOrderedValues(
+	config: LeaderboardConfig,
+	keys: { string }
+): ({ [string]: any }?, any?)
+	if #keys == 0 then
+		return {}, nil
 	end
-	return {}
+
+	local valuesByKey: { [string]: any } = {}
+	local batchSize = 25
+	for firstIndex = 1, #keys, batchSize do
+		local batchKeys = table.create(math.min(batchSize, #keys - firstIndex + 1))
+		local lastIndex = math.min(#keys, firstIndex + batchSize - 1)
+		for index = firstIndex, lastIndex do
+			table.insert(batchKeys, keys[index])
+		end
+
+		local lastError: any = nil
+		local batchValues: { [string]: any }? = nil
+		for attempt = 1, 3 do
+			local success, result = DataStoreRequestGate.Run(
+				"OrderedRead",
+				"LeaderboardBatchGetAsync",
+				function()
+					return getOrderedStore(config.OrderedStoreName):BatchGetAsync(batchKeys)
+				end,
+				{
+					maxWaitSeconds = DATASTORE_BUDGET_WAIT_SECONDS,
+					budgetCost = #batchKeys,
+					queueKey = LEADERBOARD_REQUEST_QUEUE,
+				}
+			)
+			if success and typeof(result) == "table" then
+				batchValues = result
+				break
+			end
+			lastError = result
+			if attempt < 3 then
+				task.wait(math.min(8, 2 ^ (attempt - 1)))
+			end
+		end
+
+		if batchValues == nil then
+			return valuesByKey, lastError
+		end
+		for key, value in pairs(batchValues) do
+			valuesByKey[key] = value
+		end
+	end
+
+	return valuesByKey, nil
+end
+
+local function makeLeaderboardEntry(userId: number, encodedValue: number): LeaderboardEntryData?
+	local value = decodeLeaderboardValue(encodedValue)
+	if value == nil then
+		return nil
+	end
+
+	return {
+		rank = 0,
+		userId = userId,
+		username = tostring(userId),
+		value = value,
+		sortValue = encodedValue,
+	}
+end
+
+local function fetchEntries(
+	config: LeaderboardConfig
+): { LeaderboardEntryData }
+	if LeaderboardService.DEBUG_USE_FAKE_DATA then
+		local fakeEntries: { LeaderboardEntryData } = {}
+		local topValue = 3.17e15
+		local decayFactor = 0.82
+
+		for rank = 1, config.MaxEntries do
+			local value = math.max(0, topValue * (decayFactor ^ (rank - 1)))
+			local sortValue = encodeLeaderboardValue(value) or 0
+
+			table.insert(fakeEntries, {
+				rank = rank,
+				userId = 0,
+				username = "FakePlayer" .. tostring(rank),
+				value = decodeLeaderboardValue(sortValue) or 0,
+				sortValue = sortValue,
+			})
+		end
+
+		return fakeEntries
+	end
+
+	local currentPage, currentPageError = fetchOrderedPage(config, config.OrderedStoreName)
+	local legacyPage: OrderedStorePage? = nil
+	local legacyPageError: any = nil
+	if config.LegacyOrderedStoreName then
+		legacyPage, legacyPageError = fetchOrderedPage(config, config.LegacyOrderedStoreName)
+	end
+
+	if currentPage == nil and legacyPage == nil then
+		local lastError = currentPageError or legacyPageError
+		DebugModule.debugWarn(
+			"Failed to fetch ordered data for " .. config.Name .. "; using last successful snapshot | err=" .. tostring(lastError),
+			"LeaderboardService"
+		)
+		local cachedEntries = lastSuccessfulEntries[config.Name]
+		return if cachedEntries then table.clone(cachedEntries) else {}
+	end
+
+	local legacyCandidates: { { userId: number, value: number } } = {}
+	local legacyKeys: { string } = {}
+	if legacyPage then
+		for _, item in ipairs(legacyPage) do
+			local userId = tonumber(item.key)
+			local value = tonumber(item.value)
+			if userId and isRealLeaderboardUserId(userId) and value then
+				table.insert(legacyCandidates, {
+					userId = userId,
+					value = value,
+				})
+				table.insert(legacyKeys, tostring(userId))
+			end
+		end
+	end
+
+	local currentValues, currentValuesError = fetchOrderedValues(config, legacyKeys)
+	local entriesByUserId: { [number]: LeaderboardEntryData } = {}
+	if currentPage then
+		for _, item in ipairs(currentPage) do
+			local userId = tonumber(item.key)
+			local encodedValue = tonumber(item.value)
+			if userId and encodedValue and isRealLeaderboardUserId(userId) then
+				local entry = makeLeaderboardEntry(userId, encodedValue)
+				if entry then
+					entriesByUserId[userId] = entry
+				end
+			end
+		end
+	end
+
+	for _, candidate in ipairs(legacyCandidates) do
+		if entriesByUserId[candidate.userId] then
+			continue
+		end
+
+		local latestEntry = currentValues and currentValues[tostring(candidate.userId)]
+		local encodedValue = if typeof(latestEntry) == "table" then tonumber(latestEntry.value) else nil
+		if encodedValue == nil then
+			encodedValue = encodeLeaderboardValue(candidate.value)
+		end
+		if encodedValue then
+			local entry = makeLeaderboardEntry(candidate.userId, encodedValue)
+			if entry then
+				entriesByUserId[candidate.userId] = entry
+			end
+		end
+	end
+
+	if currentPageError or legacyPageError or currentValuesError then
+		DebugModule.debugWarn(
+			"Partial leaderboard migration read for "
+				.. config.Name
+				.. " | current="
+				.. tostring(currentPageError)
+				.. " | legacy="
+				.. tostring(legacyPageError)
+				.. " | batch="
+				.. tostring(currentValuesError),
+			"LeaderboardService"
+		)
+	end
+
+	local entries: { LeaderboardEntryData } = {}
+	for _, entry in pairs(entriesByUserId) do
+		table.insert(entries, entry)
+	end
+	table.sort(entries, function(a: LeaderboardEntryData, b: LeaderboardEntryData): boolean
+		if a.sortValue == b.sortValue then
+			return a.userId < b.userId
+		end
+		return a.sortValue > b.sortValue
+	end)
+
+	while #entries > config.MaxEntries do
+		table.remove(entries)
+	end
+
+	for rank, entry in ipairs(entries) do
+		entry.rank = rank
+		local nameSuccess, resolvedName = pcall(function()
+			return Players:GetNameFromUserIdAsync(entry.userId)
+		end)
+		if nameSuccess and resolvedName then
+			entry.username = resolvedName
+		end
+	end
+
+	if LeaderboardService.DEBUG_APPEND_FAKE_DATA then
+		local realEntryCount = #entries
+		local lowestRealValue = entries[#entries] and entries[#entries].value or 100
+		local fakeStartValue = math.max(0, lowestRealValue - 1)
+		local rank = realEntryCount + 1
+
+		while rank <= config.MaxEntries do
+			local offset = rank - realEntryCount
+			local fakeValue = math.max(0, fakeStartValue - offset + 1)
+			local sortValue = encodeLeaderboardValue(fakeValue) or 0
+			table.insert(entries, {
+				rank = rank,
+				userId = 0,
+				username = "FakePlayer" .. tostring(offset),
+				value = decodeLeaderboardValue(sortValue) or 0,
+				sortValue = sortValue,
+			})
+			rank += 1
+		end
+	end
+
+	lastSuccessfulEntries[config.Name] = table.clone(entries)
+	return entries
 end
 
 local function waitForForcedWrite(configName: string, userId: number, expectedValue: number, playerName: string): boolean
@@ -567,8 +778,8 @@ local function writeLeaderboardValue(configName: string, player: Player, forceWr
 		return
 	end
 
-	local normalizedValue = normalizeOrderedDataStoreValue(value)
-	if normalizedValue == nil then
+	local encodedValue = encodeLeaderboardValue(value)
+	if encodedValue == nil then
 		DebugModule.debugWarn(
 			string.format(
 				"Skipping leaderboard write for %s (%s): invalid numeric value %s",
@@ -595,11 +806,11 @@ local function writeLeaderboardValue(configName: string, player: Player, forceWr
 	lastWriteFailureLogs[configName] = lastWriteFailureLogs[configName] or {}
 
 	local pendingValues = pendingWriteValues[configName]
-	if lastPublishedValues[configName][userId] == normalizedValue and pendingValues[userId] == nil then
+	if lastPublishedValues[configName][userId] == encodedValue and pendingValues[userId] == nil then
 		return
 	end
 
-	pendingValues[userId] = normalizedValue
+	pendingValues[userId] = encodedValue
 	failedWriteValues[configName][userId] = nil
 	if forceWrite then
 		forceWriteRequests[configName][userId] = true
@@ -689,7 +900,7 @@ local function writeLeaderboardValue(configName: string, player: Player, forceWr
 	end
 
 	if forceWrite then
-		waitForForcedWrite(configName, userId, normalizedValue, player.Name)
+		waitForForcedWrite(configName, userId, encodedValue, player.Name)
 	end
 end
 

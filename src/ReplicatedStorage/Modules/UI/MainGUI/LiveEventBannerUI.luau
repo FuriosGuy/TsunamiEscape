@@ -1,3 +1,4 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
@@ -20,6 +21,7 @@ type EventDisplayData = {
 		xpMultiplier: number,
 		winButtonMultiplier: number,
 		walkSpeedMultiplier: number,
+		luckMultiplier: number,
 	},
 	endsAtUnix: number,
 	startsAtUnix: number,
@@ -27,6 +29,7 @@ type EventDisplayData = {
 
 local LiveEventBannerUI = {}
 LiveEventBannerUI.__index = LiveEventBannerUI
+local localPlayer = Players.LocalPlayer
 
 type LiveEventBannerUIObject = {
 	container: GuiObject?,
@@ -60,6 +63,10 @@ local function formatMultiplier(multiplier: number): string
 end
 
 local function getEventTooltipDescription(eventData: EventDisplayData): string
+	if eventData.id == "HalloweenSeason" then
+		return "Halloween is live! Collect candies, open Halloween Lucky Blocks, and visit the Candy Shop."
+	end
+
 	local bonusDescriptions: { string } = {}
 	local effects = eventData.effects
 	if math.abs(effects.xpMultiplier - 1) > 0.001 then
@@ -67,6 +74,9 @@ local function getEventTooltipDescription(eventData: EventDisplayData): string
 	end
 	if math.abs(effects.winButtonMultiplier - 1) > 0.001 then
 		table.insert(bonusDescriptions, formatMultiplier(effects.winButtonMultiplier) .. " Wins")
+	end
+	if math.abs(effects.luckMultiplier - 1) > 0.001 then
+		table.insert(bonusDescriptions, formatMultiplier(effects.luckMultiplier) .. " Lucky Block Luck")
 	end
 
 	local description = ""
@@ -229,6 +239,9 @@ local function decodeEventData(value: any): { EventDisplayData }
 					walkSpeedMultiplier = if typeof(rawEffects.walkSpeedMultiplier) == "number"
 						then rawEffects.walkSpeedMultiplier
 						else 1,
+					luckMultiplier = if typeof(rawEffects.luckMultiplier) == "number"
+						then rawEffects.luckMultiplier
+						else 1,
 				},
 				endsAtUnix = if typeof(entry.endsAtUnix) == "number" then entry.endsAtUnix else 0,
 				startsAtUnix = if typeof(entry.startsAtUnix) == "number" then entry.startsAtUnix else 0,
@@ -361,9 +374,32 @@ function LiveEventBannerUI:rebuild()
 
 	local activeEventData = decodeEventData(self.stateFolder:GetAttribute("ActiveEvents"))
 	local upcomingEventData = decodeEventData(self.stateFolder:GetAttribute("UpcomingEvents"))
+	if self.stateFolder:GetAttribute("EnvironmentName") == "Halloween" then
+		table.insert(activeEventData, {
+			id = "HalloweenSeason",
+			displayText = "HALLOWEEN!",
+			displayColor = "#FF7A00",
+			startText = "",
+			startSound = "",
+			showCountdown = false,
+			environmentName = "",
+			effects = {
+				xpMultiplier = 1,
+				winButtonMultiplier = 1,
+				walkSpeedMultiplier = 1,
+				luckMultiplier = 1,
+			},
+			endsAtUnix = 0,
+			startsAtUnix = 0,
+		})
+	end
 	local transitionComplete = self.stateFolder:GetAttribute("EnvironmentTransitionComplete") == true
 	local startSoundEvent = getStartSoundEvent(activeEventData)
+	local isEventEnvironmentEnabled = localPlayer == nil
+		or localPlayer:GetAttribute("EventEnvironmentEnabled") ~= false
 	if not startSoundEvent then
+		self.eventStartSoundArmed = false
+	elseif not isEventEnvironmentEnabled then
 		self.eventStartSoundArmed = false
 	elseif transitionComplete and self.eventStartSoundArmed then
 		self.eventStartSoundArmed = false
@@ -421,7 +457,13 @@ function LiveEventBannerUI:rebuild()
 		local countdownLabel1 = card:FindFirstChild("CountdownLabel1")
 		local isStarting = eventEntry.environmentName ~= "" and not transitionComplete
 		card:SetAttribute("EventId", eventEntry.id)
-		card:SetAttribute("EventTooltipDescription", getEventTooltipDescription(eventEntry))
+		local halloweenPartTwoActive = self.stateFolder:GetAttribute("HalloweenPartTwoActive") == true
+		card:SetAttribute(
+			"EventTooltipDescription",
+			if eventEntry.id == "HalloweenSeason" and not halloweenPartTwoActive
+				then nil
+				else getEventTooltipDescription(eventEntry)
+		)
 		if isStarting then
 			if eventLabel and eventLabel:IsA("TextLabel") then
 				setEventLabelInteraction(eventLabel, false)
@@ -440,7 +482,10 @@ function LiveEventBannerUI:rebuild()
 			self.cardModes[key] = "starting"
 		else
 			if eventLabel and eventLabel:IsA("TextLabel") then
-				setEventLabelInteraction(eventLabel, true)
+				setEventLabelInteraction(
+					eventLabel,
+					eventEntry.id ~= "HalloweenSeason" or halloweenPartTwoActive
+				)
 				eventLabel.Visible = true
 				eventLabel.RichText = true
 				eventLabel.Text = getLiveEventLabelText(eventEntry, eventEntry.endsAtUnix)
@@ -553,7 +598,7 @@ function LiveEventBannerUI:rebuild()
 		end
 	end
 
-	self.container.Visible = totalEventCount > 0
+	self.container.Visible = totalEventCount > 0 and isEventEnvironmentEnabled
 	self.template.Visible = false
 	local templateEventLabel = self.template:FindFirstChild("EventLabel")
 	if templateEventLabel and templateEventLabel:IsA("TextLabel") then
@@ -587,6 +632,22 @@ function LiveEventBannerUI:Init()
 		return
 	end
 	self.initialized = true
+	if localPlayer then
+		self.maid.EventEnvironmentEnabled = localPlayer:GetAttributeChangedSignal("EventEnvironmentEnabled"):Connect(function()
+			if localPlayer:GetAttribute("EventEnvironmentEnabled") == false then
+				local activeEvents = decodeEventData(
+					if self.stateFolder then self.stateFolder:GetAttribute("ActiveEvents") else nil
+				)
+				for _, eventData in ipairs(activeEvents) do
+					if eventData.startSound ~= "" then
+						SoundService.StopGuiSound(eventData.startSound)
+					end
+				end
+				self.eventStartSoundArmed = false
+			end
+			self:refresh()
+		end)
+	end
 
 	if not self.container or not self.template then
 		DebugModule.debugWarn("EventFrameList or EventFrameTemplate is missing", MODULE_NAME)
@@ -621,6 +682,12 @@ function LiveEventBannerUI:Init()
 				self.maid.UpcomingEvents = child:GetAttributeChangedSignal("UpcomingEvents"):Connect(function()
 					self:refresh()
 				end)
+				self.maid.EnvironmentName = child:GetAttributeChangedSignal("EnvironmentName"):Connect(function()
+					self:refresh()
+				end)
+				self.maid.HalloweenPartTwo = child:GetAttributeChangedSignal("HalloweenPartTwoActive"):Connect(function()
+					self:refresh()
+				end)
 				self.maid.EnvironmentTransition = child
 					:GetAttributeChangedSignal("EnvironmentTransitionComplete")
 					:Connect(function()
@@ -640,6 +707,12 @@ function LiveEventBannerUI:Init()
 		self:refresh()
 	end)
 	self.maid.UpcomingEvents = stateFolder:GetAttributeChangedSignal("UpcomingEvents"):Connect(function()
+		self:refresh()
+	end)
+	self.maid.EnvironmentName = stateFolder:GetAttributeChangedSignal("EnvironmentName"):Connect(function()
+		self:refresh()
+	end)
+	self.maid.HalloweenPartTwo = stateFolder:GetAttributeChangedSignal("HalloweenPartTwoActive"):Connect(function()
 		self:refresh()
 	end)
 	self.maid.EnvironmentTransition = stateFolder

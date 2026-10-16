@@ -1,0 +1,18 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Candle_01_Halloween_Pack_E_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [-41.3668, 9.3187, 50.2575, 0.8446, 0, -0.5355, 0, 1, 0, 0.5355, 0, 0.8446],
+    "InitialSize": [0.2409, 0.3124, 0.1928],
+    "MeshContent": "rbxassetid://108230416973849",
+    "PivotOffset": [11.7831, -0.741, 28.8858, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [0.7018, 0.9101, 0.5616],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

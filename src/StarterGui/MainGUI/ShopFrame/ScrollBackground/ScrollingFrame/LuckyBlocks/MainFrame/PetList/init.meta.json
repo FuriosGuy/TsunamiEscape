@@ -3,7 +3,7 @@
   "properties": {
     "AnchorPoint": [0.5, 0.5],
     "BackgroundColor3": [0, 0, 0],
-    "BackgroundTransparency": 0.9,
+    "BackgroundTransparency": 0.5,
     "BorderColor3": [0, 0, 0],
     "BorderSizePixel": 0,
     "ClipsDescendants": true,

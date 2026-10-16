@@ -13,6 +13,14 @@ local NotificationLayoutController = require(ReplicatedStorage.Modules.UI.MainGU
 
 local VisualFunctions = {}
 
+type NotificationRequest = {
+	message: string,
+	textColor: Color3?,
+	gradientBottomColor: Color3?,
+	notificationKey: string?,
+	style: "Standard" | "QuickFade",
+}
+
 -- Table to store references to specific UI frames
 VisualFunctions.ActiveFrameGroup = {
 	RebirthFrame = nil :: GuiObject?,
@@ -209,8 +217,16 @@ local ClickPulseActions: { [GuiObject]: () -> () } = setmetatable({}, { __mode =
 local ClickPulseThreads: { [GuiObject]: thread } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: thread }
 local AnimationMaids: { [Instance]: Maid } = setmetatable({}, { __mode = "k" }) :: { [Instance]: Maid }
 local FrameShadowColorMaids: { [CanvasGroup]: Maid } = setmetatable({}, { __mode = "k" }) :: { [CanvasGroup]: Maid }
+local FrameShadowColorUpdates: { [CanvasGroup]: () -> () } = setmetatable({}, { __mode = "k" }) :: {
+	[CanvasGroup]: () -> (),
+}
 local InteractionMaids: { [GuiObject]: Maid } = setmetatable({}, { __mode = "k" }) :: { [GuiObject]: Maid }
 local activeNotificationKey: string? = nil
+local currentNotificationRequest: NotificationRequest? = nil
+local notificationSuppressionRoot: Instance? = nil
+local notificationSuppressionConnection: RBXScriptConnection? = nil
+local notificationSuppressed = false
+local LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE = "LuckyBlockCutsceneActive"
 local RAINBOW_GRADIENT_UPDATE_INTERVAL = 1 / 30
 local rainbowGradientUpdaterBound = false
 local rainbowGradientUpdateAccumulator = 0
@@ -559,7 +575,15 @@ local function setTransparencyRecursive(root: Instance, alpha: number)
 end
 
 function VisualFunctions.BindFrameShadowColorSync(canvasGroup: CanvasGroup, sessionMaid: any): ()
-	if canvasGroup:GetAttribute("CreateFrameShadow") ~= true or FrameShadowColorMaids[canvasGroup] then
+	if canvasGroup:GetAttribute("CreateFrameShadow") ~= true then
+		return
+	end
+	local existingMaid = FrameShadowColorMaids[canvasGroup]
+	if existingMaid then
+		local updateShadowColor = FrameShadowColorUpdates[canvasGroup]
+		if updateShadowColor then
+			updateShadowColor()
+		end
 		return
 	end
 
@@ -586,6 +610,7 @@ function VisualFunctions.BindFrameShadowColorSync(canvasGroup: CanvasGroup, sess
 	syncMaid:GiveTask(function()
 		if FrameShadowColorMaids[canvasGroup] == syncMaid then
 			FrameShadowColorMaids[canvasGroup] = nil
+			FrameShadowColorUpdates[canvasGroup] = nil
 		end
 	end)
 
@@ -605,6 +630,7 @@ function VisualFunctions.BindFrameShadowColorSync(canvasGroup: CanvasGroup, sess
 		end
 	end
 
+	FrameShadowColorUpdates[canvasGroup] = updateShadowColor
 	syncMaid:GiveTask(main:GetPropertyChangedSignal("BackgroundColor3"):Connect(updateShadowColor))
 	updateShadowColor()
 end
@@ -1304,6 +1330,102 @@ function VisualFunctions.SetupPulsate(guiObject: GuiObject, scale: number?)
 	tween:Play()
 end
 
+function VisualFunctions.SetupLuckyBlockBackgroundMotion(
+	image: ImageLabel | ImageButton,
+	maid: any,
+	isAlive: () -> boolean
+): ()
+	local originalRotation = image.Rotation
+	local scale = image:FindFirstChild("LuckyBlockBackgroundMotionScale")
+	local createdScale = scale == nil
+	if not scale then
+		scale = Instance.new("UIScale")
+		scale.Name = "LuckyBlockBackgroundMotionScale"
+		scale.Parent = image
+	end
+	if not scale:IsA("UIScale") then
+		return
+	end
+	local originalScale = scale.Scale
+	local activeTween: Tween? = nil
+	local rotations = { -9, 9, -6, 6, 0 }
+
+	maid:GiveTask(function()
+		if activeTween then
+			activeTween:Cancel()
+			activeTween:Destroy()
+			activeTween = nil
+		end
+		if image.Parent then
+			image.Rotation = originalRotation
+		end
+		if scale.Parent then
+			if createdScale then
+				scale:Destroy()
+			else
+				scale.Scale = originalScale
+			end
+		end
+	end)
+
+	maid:GiveSpawnTask(task.spawn(function()
+		local function isVisible(): boolean
+			local current: Instance? = image
+			while current do
+				if current:IsA("GuiObject") and not current.Visible then
+					return false
+				elseif current:IsA("ScreenGui") and not current.Enabled then
+					return false
+				end
+				current = current.Parent
+			end
+			return true
+		end
+
+		local function tweenTo(instance: Instance, tweenInfo: TweenInfo, goal: { [string]: any }): boolean
+			local tween = TweenService:Create(instance, tweenInfo, goal)
+			activeTween = tween
+			tween:Play()
+			local playbackState = tween.Completed:Wait()
+			tween:Destroy()
+			if activeTween == tween then
+				activeTween = nil
+			end
+			return playbackState == Enum.PlaybackState.Completed
+		end
+
+		while isAlive() and image.Parent do
+			if not isVisible() then
+				task.wait(0.1)
+				continue
+			end
+
+			for _, rotationOffset in ipairs(rotations) do
+				if not isAlive() or not image.Parent or not isVisible() then
+					break
+				end
+				if not tweenTo(
+					image,
+					TweenInfo.new(0.065, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ Rotation = originalRotation + rotationOffset }
+				) then
+					break
+				end
+			end
+
+			if isAlive() and image.Parent and isVisible() then
+				tweenTo(scale, TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+					Scale = originalScale * 1.04,
+				})
+				tweenTo(scale, TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+					Scale = originalScale,
+				})
+			end
+			task.wait(2.6)
+		end
+	end))
+end
+
 function VisualFunctions.SetupRainbowGradient(gradient: UIGradient)
 	local existingMaid = RainbowGradientMaids[gradient]
 	if existingMaid then
@@ -1859,6 +1981,7 @@ end
 local function hideNotificationFrame(frame: GuiObject, label: TextLabel?)
 	clearAnimationMaid(frame)
 	activeNotificationKey = nil
+	currentNotificationRequest = nil
 	frame.Visible = false
 	if label then
 		label.Text = ""
@@ -1869,6 +1992,96 @@ end
 
 local function hasNotificationText(message: string): boolean
 	return typeof(message) == "string" and string.match(message, "%S") ~= nil
+end
+
+local function findNotificationRoot(frame: GuiObject): Instance?
+	local current: Instance? = frame
+	while current do
+		if current.Name == "MainGUI" then
+			return current
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+local function getVisibleNotificationRequest(frame: GuiObject, label: TextLabel?): NotificationRequest?
+	if not frame.Visible or not label or not hasNotificationText(label.Text) then
+		return nil
+	end
+
+	local gradientBottomColor: Color3? = nil
+	local gradient = frame:FindFirstChildOfClass("UIGradient") or label:FindFirstChildOfClass("UIGradient")
+	if gradient then
+		local keypoints = gradient.Color.Keypoints
+		if #keypoints > 0 then
+			gradientBottomColor = keypoints[#keypoints].Value
+		end
+	end
+
+	return {
+		message = label.Text,
+		textColor = label.TextColor3,
+		gradientBottomColor = gradientBottomColor,
+		notificationKey = activeNotificationKey,
+		style = "Standard",
+	}
+end
+
+local function setNotificationSuppressed(isSuppressed: boolean, frame: GuiObject?): ()
+	if notificationSuppressed == isSuppressed then
+		return
+	end
+
+	notificationSuppressed = isSuppressed
+	local notificationFrame = frame or VisualFunctions.HUD.NotificationFrame
+	local label = VisualFunctions.Labels.NotificationTextLabel
+	if isSuppressed then
+		if notificationFrame and not currentNotificationRequest then
+			currentNotificationRequest = getVisibleNotificationRequest(notificationFrame, label)
+		end
+		if not currentNotificationRequest then
+			activeNotificationKey = nil
+		end
+		if notificationFrame then
+			clearAnimationMaid(notificationFrame)
+			notificationFrame.Visible = false
+			if label then
+				label.Text = ""
+			end
+			setTransparencyRecursive(notificationFrame, 0)
+			clearTutorialOnlyNotificationControls(notificationFrame)
+		end
+		return
+	end
+
+	local request = currentNotificationRequest
+	currentNotificationRequest = nil
+	if not request then
+		activeNotificationKey = nil
+		if notificationFrame then
+			hideNotificationFrame(notificationFrame, label)
+		end
+		return
+	end
+
+	if request.style == "QuickFade" then
+		VisualFunctions.ShowQuickFadeNotification(request.message, request.textColor, request.gradientBottomColor)
+	else
+		VisualFunctions.ShowNotification(
+			request.message,
+			request.textColor,
+			request.gradientBottomColor,
+			request.notificationKey
+		)
+	end
+end
+
+local function syncNotificationSuppression(frame: GuiObject?): ()
+	local root = if frame then findNotificationRoot(frame) else notificationSuppressionRoot
+	if root then
+		setNotificationSuppressed(root:GetAttribute(LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE) == true, frame)
+	end
 end
 
 local function playNotificationCloseAnimation(
@@ -1912,6 +2125,21 @@ local function playNotificationCloseAnimation(
 end
 
 function VisualFunctions.BindNotificationVisibilityGuard(frame: GuiObject, cleanupMaid: any)
+	local root = findNotificationRoot(frame)
+	if root and notificationSuppressionRoot ~= root then
+		if notificationSuppressionConnection then
+			notificationSuppressionConnection:Disconnect()
+		end
+		notificationSuppressionRoot = root
+		notificationSuppressionConnection = root:GetAttributeChangedSignal(
+			LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE
+		):Connect(function()
+			syncNotificationSuppression(frame)
+		end)
+		cleanupMaid:GiveTask(notificationSuppressionConnection)
+	end
+	syncNotificationSuppression(frame)
+
 	local function validateVisibleNotification()
 		if not frame.Visible then
 			return
@@ -1930,6 +2158,10 @@ function VisualFunctions.BindNotificationVisibilityGuard(frame: GuiObject, clean
 	validateVisibleNotification()
 end
 
+function VisualFunctions.SetNotificationSuppressed(isSuppressed: boolean): ()
+	setNotificationSuppressed(isSuppressed, VisualFunctions.HUD.NotificationFrame)
+end
+
 function VisualFunctions.ShowNotification(
 	message: string,
 	textColor: Color3?,
@@ -1938,6 +2170,7 @@ function VisualFunctions.ShowNotification(
 )
 	local frame = VisualFunctions.HUD.NotificationFrame
 	local label = VisualFunctions.Labels.NotificationTextLabel
+	syncNotificationSuppression(frame)
 	if not hasNotificationText(message) then
 		if activeNotificationKey ~= nil then
 			return
@@ -1959,6 +2192,18 @@ function VisualFunctions.ShowNotification(
 		return
 	end
 	activeNotificationKey = notificationKey
+	local request: NotificationRequest = {
+		message = message,
+		textColor = textColor,
+		gradientBottomColor = gradientBottomColor,
+		notificationKey = notificationKey,
+		style = "Standard",
+	}
+	currentNotificationRequest = request
+	if notificationSuppressed then
+		return
+	end
+
 	local animationMaid = replaceAnimationMaid(frame)
 	clearTutorialOnlyNotificationControls(frame)
 
@@ -2020,17 +2265,32 @@ function VisualFunctions.ShowNotification(
 
 	if notificationKey == nil then
 		animationMaid:GiveTask(task.delay(2.5, function()
+			if currentNotificationRequest ~= request then
+				return
+			end
+			currentNotificationRequest = nil
 			playNotificationCloseAnimation(frame, animationMaid, startPos, nil)
 		end))
 	end
 end
 
 function VisualFunctions.UpdateNotification(message: string, notificationKey: string): boolean
+	local frame = VisualFunctions.HUD.NotificationFrame
+	syncNotificationSuppression(frame)
 	if activeNotificationKey ~= notificationKey then
 		return false
 	end
+	local request = currentNotificationRequest
+	if request and request.notificationKey == notificationKey then
+		request.message = message
+	end
+	if notificationSuppressed then
+		if request and request.notificationKey == notificationKey then
+			return true
+		end
+		return false
+	end
 
-	local frame = VisualFunctions.HUD.NotificationFrame
 	local label = VisualFunctions.Labels.NotificationTextLabel
 	if not frame or not label or not frame.Visible or frame.Parent == nil or label.Parent == nil then
 		return false
@@ -2041,14 +2301,22 @@ function VisualFunctions.UpdateNotification(message: string, notificationKey: st
 end
 
 function VisualFunctions.HideNotification(notificationKey: string): boolean
+	local frame = VisualFunctions.HUD.NotificationFrame
+	syncNotificationSuppression(frame)
 	if activeNotificationKey ~= notificationKey then
 		return false
 	end
 
-	local frame = VisualFunctions.HUD.NotificationFrame
 	local label = VisualFunctions.Labels.NotificationTextLabel
+	currentNotificationRequest = nil
+	activeNotificationKey = nil
+	if notificationSuppressed then
+		if frame then
+			hideNotificationFrame(frame, label)
+		end
+		return true
+	end
 	if not frame then
-		activeNotificationKey = nil
 		return false
 	end
 
@@ -2058,7 +2326,6 @@ function VisualFunctions.HideNotification(notificationKey: string): boolean
 		return true
 	end
 
-	activeNotificationKey = nil
 	playNotificationCloseAnimation(
 		frame,
 		animationMaid,
@@ -2071,6 +2338,7 @@ end
 function VisualFunctions.ShowQuickFadeNotification(message: string, textColor: Color3?, gradientBottomColor: Color3?)
 	local frame = VisualFunctions.HUD.NotificationFrame
 	local label = VisualFunctions.Labels.NotificationTextLabel
+	syncNotificationSuppression(frame)
 	if not hasNotificationText(message) then
 		if activeNotificationKey ~= nil then
 			return
@@ -2092,6 +2360,18 @@ function VisualFunctions.ShowQuickFadeNotification(message: string, textColor: C
 		return
 	end
 	activeNotificationKey = nil
+	local request: NotificationRequest = {
+		message = message,
+		textColor = textColor,
+		gradientBottomColor = gradientBottomColor,
+		notificationKey = nil,
+		style = "QuickFade",
+	}
+	currentNotificationRequest = request
+	if notificationSuppressed then
+		return
+	end
+
 	local animationMaid = replaceAnimationMaid(frame)
 	clearTutorialOnlyNotificationControls(frame)
 	label.Text = toNotificationDisplayText(message)
@@ -2161,6 +2441,9 @@ function VisualFunctions.ShowQuickFadeNotification(message: string, textColor: C
 				if AnimationMaids[frame] == animationMaid then
 					frame.Visible = false
 					setTransparencyRecursive(frame, 0)
+					if currentNotificationRequest == request then
+						currentNotificationRequest = nil
+					end
 				end
 			end
 		end)
@@ -2176,6 +2459,13 @@ function VisualFunctions.ResetRuntimeState()
 	end
 	stopRainbowGradientUpdater()
 	activeNotificationKey = nil
+	currentNotificationRequest = nil
+	notificationSuppressed = false
+	notificationSuppressionRoot = nil
+	if notificationSuppressionConnection then
+		notificationSuppressionConnection:Disconnect()
+		notificationSuppressionConnection = nil
+	end
 
 	for instance, animationMaid in pairs(AnimationMaids) do
 		AnimationMaids[instance] = nil

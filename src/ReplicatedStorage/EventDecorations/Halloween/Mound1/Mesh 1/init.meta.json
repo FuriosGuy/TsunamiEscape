@@ -1,0 +1,17 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Pile_01_Halloween_Pack_M_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [-73.7991, 8.4095, 30.827, 0.0872, 0, -0.9962, 0, 1, 0, 0.9962, 0, 0.0872],
+    "InitialSize": [2.8076, 0.69, 4.7447],
+    "MeshContent": "rbxassetid://75266675222820",
+    "Size": [7.4021, 1.8191, 12.5091],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

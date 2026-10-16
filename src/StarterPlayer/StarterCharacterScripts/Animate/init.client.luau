@@ -9,6 +9,8 @@ local Player = Players.LocalPlayer
 local DEFAULT_SIT_ANIMATION_ID = "rbxassetid://109644062453391"
 local KART_SIT_ANIMATION_IDS: { [string]: string } = {
 	["2_Snowmobile"] = "rbxassetid://93995264730867",
+	["3_WitchBroom"] = "rbxassetid://105583475067532",
+	["2_CoffinKart"] = "rbxassetid://70973292040782",
 }
 
 local currentTrack: AnimationTrack? = nil
@@ -42,7 +44,8 @@ local function stopCurrentTrack()
 end
 
 local function getSitAnimationId(): string
-	local equippedKart = Player:GetAttribute("Kart_Equipped")
+	local equippedKart = Player:GetAttribute("Kart_RuntimeModelName")
+		or Player:GetAttribute("Kart_Equipped")
 	if typeof(equippedKart) == "string" then
 		return KART_SIT_ANIMATION_IDS[equippedKart] or DEFAULT_SIT_ANIMATION_ID
 	end
@@ -116,6 +119,7 @@ local function cleanup()
 end
 
 table.insert(connections, Player:GetAttributeChangedSignal("Kart_Equipped"):Connect(updateAnimation))
+table.insert(connections, Player:GetAttributeChangedSignal("Kart_RuntimeModelName"):Connect(updateAnimation))
 table.insert(connections, Humanoid.Died:Connect(stopCurrentTrack))
 table.insert(connections, Humanoid:GetPropertyChangedSignal("Sit"):Connect(updateAnimation))
 table.insert(connections, Humanoid.StateChanged:Connect(function()

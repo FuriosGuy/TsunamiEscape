@@ -22,15 +22,15 @@
         "time": 0.0,
         "value": 0.0
       }, {
-        "envelope": 0.7717,
+        "envelope": 0.7716,
         "time": 0.3,
-        "value": 0.7717
+        "value": 0.7716
       }, {
-        "envelope": 0.7717,
+        "envelope": 0.7716,
         "time": 1.0,
-        "value": 0.7717
+        "value": 0.7716
       }],
-    "Speed": [6.4306, 19.2917],
+    "Speed": [6.43, 19.29],
     "SpreadAngle": [360, 360],
     "Squash": [{
         "envelope": 0.0,

@@ -23,7 +23,6 @@ type FriendMultiplierUIObject = {
 	maid: any,
 	frame: GuiObject?,
 	promptButton: GuiButton?,
-	inviteFriendButton: GuiButton?,
 	topbarIcon: any?,
 	multiplierLabel: TextLabel?,
 	plusLabel: TextLabel?,
@@ -62,7 +61,6 @@ function FriendMultiplierUI.new(screenGui: ScreenGui): FriendMultiplierUIObject
 		maid = Maid.new(),
 		frame = nil,
 		promptButton = nil,
-		inviteFriendButton = nil,
 		topbarIcon = nil,
 		multiplierLabel = nil,
 		plusLabel = nil,
@@ -125,10 +123,6 @@ function FriendMultiplierUI:Init()
 	local promptButton = frame and frame:FindFirstChild("PromptButton", true)
 	local multiplierLabel = frame and frame:FindFirstChild("Multiplier", true)
 	local plusLabel = frame and frame:FindFirstChild("TextLabel", true)
-	local leftSideButtonsFrame = self.screenGui:FindFirstChild("LeftSideButtonsFrame", true)
-	local gridFrame = leftSideButtonsFrame and leftSideButtonsFrame:FindFirstChild("GridFrame")
-	local inviteFriendFrame = gridFrame and gridFrame:FindFirstChild("InviteFriendButtonFrame")
-	local inviteFriendButton = inviteFriendFrame and inviteFriendFrame:FindFirstChild("TextButton", true)
 
 	if not frame or not frame:IsA("GuiObject") then
 		DebugModule.debugWarn("FriendMultiplier frame was not found", MODULE_NAME)
@@ -149,9 +143,6 @@ function FriendMultiplierUI:Init()
 
 	self.frame = frame
 	self.promptButton = promptButton
-	self.inviteFriendButton = if inviteFriendButton and inviteFriendButton:IsA("GuiButton")
-		then inviteFriendButton
-		else nil
 	self.multiplierLabel = multiplierLabel
 	self.plusLabel = plusLabel
 	frame.Active = true
@@ -165,15 +156,6 @@ function FriendMultiplierUI:Init()
 	self.maid:GiveTask(promptButton.Activated:Connect(function()
 		self:promptInvite("FriendMultiplier")
 	end))
-	if self.inviteFriendButton then
-		self.inviteFriendButton.Active = true
-		self.maid:GiveTask(self.inviteFriendButton.Activated:Connect(function()
-			self:promptInvite("InviteFriendButtonFrame")
-		end))
-	else
-		DebugModule.debugWarn("InviteFriendButtonFrame TextButton was not found", MODULE_NAME)
-	end
-
 	local existingIcon = TopbarIcon.getIcon("InviteFriendsTopbar")
 	if existingIcon then
 		existingIcon:destroy()
@@ -203,7 +185,6 @@ function FriendMultiplierUI:Destroy()
 	end
 	self.frame = nil
 	self.promptButton = nil
-	self.inviteFriendButton = nil
 	self.multiplierLabel = nil
 	self.plusLabel = nil
 end

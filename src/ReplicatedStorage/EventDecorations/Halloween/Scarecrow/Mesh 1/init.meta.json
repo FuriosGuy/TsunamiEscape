@@ -1,0 +1,18 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Scarecrow_03_Halloween_Pack_M_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [16.3051, 13.7831, -57.7, 0, 0, 1.0, 0, 1, 0, -1.0, 0, 0],
+    "InitialSize": [2.67, 3.0975, 0.5601],
+    "MeshContent": "rbxassetid://106761108712110",
+    "PivotOffset": [42.2729, -6.2832, -2.4495, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [10.8322, 12.5665, 2.2725],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

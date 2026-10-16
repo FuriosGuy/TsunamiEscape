@@ -124,6 +124,11 @@ local KART_HEALTH_RESYNC_COOLDOWN = 10
 local KART_VISUAL_RESYNC_REQUEST_COOLDOWN = 5
 local WIN_BUTTON_TELEPORT_VERIFY_DISTANCE = 16
 
+local function getRuntimeKartModelName(player: Player): string?
+	local equippedName = player:GetAttribute("Kart_Equipped")
+	return if typeof(equippedName) == "string" then equippedName else nil
+end
+
 local playerDebounce = {}
 local touchInteractionDebounce: { [Player]: { [string]: number } } = {}
 local treadmillPromptDebounce: { [Player]: { [string]: number } } = {}
@@ -250,7 +255,11 @@ local function getActiveEventWithStageAwards(): { [string]: any }?
 		if typeof(eventEntry) == "table" and typeof(eventEntry.id) == "string" then
 			local eventDefinition = getLiveEventDefinition(eventEntry.id)
 			if eventDefinition and typeof(eventDefinition.stageWinAwards) == "table" then
-				return eventDefinition
+				local activeDefinition = table.clone(eventDefinition)
+				if typeof(eventEntry.displayText) == "string" then
+					activeDefinition.displayText = eventEntry.displayText
+				end
+				return activeDefinition
 			end
 		end
 	end
@@ -622,6 +631,10 @@ local KART_SEAT_FORWARD_OFFSET = -0.15
 local KART_SEAT_GROUND_CLEARANCE = 0.01
 local KART_SEAT_MIN_Y_OFFSET = 0.1
 local KART_SEAT_MAX_Y_OFFSET = 6
+local KART_SEAT_OFFSET_ADJUSTMENTS = if worldManagerConfig
+		and typeof(worldManagerConfig.kartSeatOffsetAdjustments) == "table"
+	then worldManagerConfig.kartSeatOffsetAdjustments
+	else {}
 local KART_SEAT_GROUND_RAYCAST_DISTANCE = 24
 local KART_GROUND_SAMPLE_RADIUS_SCALE = 0.95
 local KART_GROUND_MIN_NORMAL_Y = 0.6
@@ -1342,10 +1355,16 @@ local function attachKartToPlayer(player: Player, kartTemplate: Model): (boolean
 		return false, "MissingSeatBase"
 	end
 
-	local rootToGroundDistance = KartGrounding.GetOctagonGroundDistance(character, rootPart, kartClone, wheelsToMotorize)
+	local rootToGroundDistance = if kartTemplate.Name == "3_WitchBroom"
+		then 0
+		else KartGrounding.GetOctagonGroundDistance(character, rootPart, kartClone, wheelsToMotorize)
 	local lowestSeatBaseLocalY = KartGrounding.GetLowestRelativeY(kartClone, seatBase.CFrame)
+	local seatOffsetAdjustment = KART_SEAT_OFFSET_ADJUSTMENTS[kartTemplate.Name]
 	local seatYOffset = math.clamp(
-		rootToGroundDistance + lowestSeatBaseLocalY - KART_SEAT_GROUND_CLEARANCE,
+		rootToGroundDistance
+			+ lowestSeatBaseLocalY
+			+ (if typeof(seatOffsetAdjustment) == "number" then seatOffsetAdjustment else 0)
+			- KART_SEAT_GROUND_CLEARANCE,
 		KART_SEAT_MIN_Y_OFFSET,
 		KART_SEAT_MAX_Y_OFFSET
 	)
@@ -1394,13 +1413,21 @@ local function attachKartToPlayer(player: Player, kartTemplate: Model): (boolean
 		table.insert(createdMotors, wheelMotor)
 	end
 
+	local shouldDisableEngineSound = kartTemplate.Name == "3_WitchBroom"
+	if shouldDisableEngineSound then
+		kartClone:SetAttribute("DisableEngineSound", true)
+		kartClone:SetAttribute("EngineSoundId", nil)
+	end
+
 	if not DEBUG_DISABLE_KART_SOUNDS then
 		kartClone:SetAttribute("IsPoliceKart", kartTemplate.Name == "5_Police")
 		kartClone:SetAttribute(
 			"VisualOffset",
 			if typeof(preservedVisualOffset) == "number" then preservedVisualOffset else math.random()
 		)
-		kartClone:SetAttribute("EngineSoundId", tostring(getKartEngineSoundId(kartTemplate.Name) or 9112787430))
+		if not shouldDisableEngineSound then
+			kartClone:SetAttribute("EngineSoundId", tostring(getKartEngineSoundId(kartTemplate.Name) or 9112787430))
+		end
 		kartClone:SetAttribute("OwnerUserId", player.UserId)
 	end
 
@@ -1547,7 +1574,7 @@ local function syncEquippedKart(player: Player): (boolean, string)
 	end
 
 	local currentWorld = player:GetAttribute("Current_World")
-	local equippedName = player:GetAttribute("Kart_Equipped")
+	local equippedName = getRuntimeKartModelName(player)
 	if typeof(currentWorld) ~= "string" or typeof(equippedName) ~= "string" then
 		cleanupEquippedKart(player)
 		setKartMovementGain(player, nil)
@@ -1639,7 +1666,7 @@ local function reconcileEquippedKartHealth(player: Player)
 	end
 
 	local currentWorld = player:GetAttribute("Current_World")
-	local equippedName = player:GetAttribute("Kart_Equipped")
+	local equippedName = getRuntimeKartModelName(player)
 	if typeof(currentWorld) ~= "string" or typeof(equippedName) ~= "string" then
 		return
 	end
@@ -3216,6 +3243,7 @@ end)
 
 local function bindKartPlayer(player: Player)
 	local playerMaid = getPlayerBindingMaid(player)
+	player:SetAttribute("Kart_RuntimeModelName", getRuntimeKartModelName(player))
 
 	if player.Character then
 		advanceKartCharacterGeneration(player)
@@ -3231,6 +3259,7 @@ local function bindKartPlayer(player: Player)
 	end)
 
 	playerMaid["KartEquippedChanged"] = player:GetAttributeChangedSignal("Kart_Equipped"):Connect(function()
+		player:SetAttribute("Kart_RuntimeModelName", getRuntimeKartModelName(player))
 		queueKartResync(player)
 	end)
 	playerMaid["KartDataLoaded"] = player:GetAttributeChangedSignal("Data_Loaded"):Connect(function()

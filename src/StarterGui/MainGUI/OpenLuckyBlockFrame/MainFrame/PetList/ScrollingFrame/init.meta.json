@@ -12,6 +12,7 @@
     "Position": [[0.5, 0.0], [0.5, 0.0]],
     "ScrollBarImageColor3": [0, 0, 0],
     "ScrollingDirection": "Y",
-    "Size": [[0.95, 0.0], [0.95, 0.0]]
+    "Size": [[0.95, 0.0], [0.95, 0.0]],
+    "ZIndex": 3
   }
 }

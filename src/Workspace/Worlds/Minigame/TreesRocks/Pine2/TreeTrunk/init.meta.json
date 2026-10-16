@@ -5,12 +5,12 @@
     "CanQuery": false,
     "CanTouch": false,
     "CastShadow": false,
-    "CFrame": [-3991.3999, 54.8485, -5047.8369, 0.3724, 0, -0.9281, 0, 1, 0, 0.9281, 0, 0.3724],
+    "CFrame": [-3972.5325, 55.2626, -4561.7993, -0.895, 0, -0.446, 0, 1, 0, 0.446, 0, -0.895],
     "Color": [86, 66, 54],
     "InitialSize": [33.6863, 50, 37.1814],
     "Locked": true,
     "Material": "SmoothPlastic",
     "MeshContent": "rbxassetid://8973536208",
-    "Size": [5.0133, 5.2365, 5.3792]
+    "Size": [3.1046, 3.2428, 3.3312]
   }
 }

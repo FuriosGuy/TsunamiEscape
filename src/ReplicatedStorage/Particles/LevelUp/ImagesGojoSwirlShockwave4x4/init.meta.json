@@ -1,0 +1,56 @@
+{
+  "className": "ParticleEmitter",
+  "originalName": "Images/GojoSwirlShockwave4x4",
+  "properties": {
+    "Attributes": {
+      "EmitCount": 1
+    },
+    "Color": [{
+        "color": [1.0, 0.9608, 0.5098],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.9176, 0.0],
+        "time": 1.0
+      }],
+    "Drag": 8,
+    "Enabled": false,
+    "FlipbookLayout": "Grid4x4",
+    "FlipbookMode": "OneShot",
+    "Lifetime": [0.5, 0.5],
+    "LightEmission": 1,
+    "LightInfluence": 1,
+    "Rate": 0.5,
+    "RotSpeed": [360, 360],
+    "Shape": "Disc",
+    "ShapeStyle": "Surface",
+    "Size": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 1.0
+      }, {
+        "envelope": 0.0,
+        "time": 0.4973,
+        "value": 4.4375
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 1.0625
+      }],
+    "Speed": [1, 1],
+    "SpreadAngle": [360, 360],
+    "Texture": "rbxassetid://17000892071",
+    "Transparency": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 0.15
+      }, {
+        "envelope": 0.0,
+        "time": 0.8,
+        "value": 0.35
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 1.0
+      }]
+  }
+}

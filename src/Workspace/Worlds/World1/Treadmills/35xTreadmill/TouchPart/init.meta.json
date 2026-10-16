@@ -6,6 +6,7 @@
     "CanCollide": false,
     "CFrame": [60.5865, 13.5724, -76.4785, 0.0, 0, 1.0, 0, 1, 0, -1.0, 0, 0.0],
     "Color": [239, 184, 56],
+    "Locked": true,
     "MaterialVariant": "Weld",
     "Size": [16.7326, 9.551, 10.1592],
     "TopSurface": "Smooth",

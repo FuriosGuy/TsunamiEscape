@@ -66,11 +66,13 @@ local MAX_DESCRIPTION_LENGTH =
 local FRIEND_MULTIPLIER_TOOLTIP: TooltipDefinition = {
 	description = "Invite a friend! When they join through your invite, you both get a permanent +0.10x Friends Multiplier!",
 }
+local CANDY_COUNT_TOOLTIP: TooltipDefinition = {
+	description = "Collect candies on the road, then spend them on Halloween Lucky Block rolls, karts, and trails.",
+}
 
 local TOOLTIP_DEFINITIONS: { [string]: TooltipDefinition } = table.freeze({
 	FriendMultiplier = FRIEND_MULTIPLIER_TOOLTIP,
 	FriendMultiplierFrame = FRIEND_MULTIPLIER_TOOLTIP,
-	InviteFriendButtonFrame = FRIEND_MULTIPLIER_TOOLTIP,
 	SoundButtonFrame = {
 		description = "Toggle music on or off.",
 	},
@@ -706,6 +708,9 @@ end
 
 function MouseTooltipController._bindMainGuiTarget(self: MouseTooltipControllerObject, target: GuiObject)
 	local definition = TOOLTIP_DEFINITIONS[target.Name]
+	if target.Name == "RotateImage" and target:FindFirstAncestor("CandyCountFrame") then
+		definition = CANDY_COUNT_TOOLTIP
+	end
 	if definition then
 		self:_bindTarget(target, definition)
 	end

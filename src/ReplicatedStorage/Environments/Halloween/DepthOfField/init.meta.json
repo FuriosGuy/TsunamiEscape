@@ -1,0 +1,8 @@
+{
+  "className": "DepthOfFieldEffect",
+  "properties": {
+    "Enabled": false,
+    "FarIntensity": 0.1,
+    "InFocusRadius": 30
+  }
+}

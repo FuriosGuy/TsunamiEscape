@@ -1,0 +1,17 @@
+{
+  "className": "WedgePart",
+  "properties": {
+    "Anchored": true,
+    "BackSurface": "SmoothNoOutlines",
+    "BottomSurface": "SmoothNoOutlines",
+    "CanCollide": false,
+    "CFrame": [-26.7868, 11.2456, 18.5239, -0.2849, -0.6172, 0.7334, -0.1421, 0.7839, 0.6045, -0.948, 0.068, -0.311],
+    "Color": [213, 115, 61],
+    "FrontSurface": "SmoothNoOutlines",
+    "LeftSurface": "SmoothNoOutlines",
+    "Material": "Neon",
+    "RightSurface": "SmoothNoOutlines",
+    "Size": [0.2146, 1.0991, 0.9904],
+    "TopSurface": "SmoothNoOutlines"
+  }
+}

@@ -18,11 +18,11 @@
     "Size": [{
         "envelope": 0.2572,
         "time": 0.0,
-        "value": 1.0289
+        "value": 1.0288
       }, {
         "envelope": 0.2572,
         "time": 1.0,
-        "value": 1.6076
+        "value": 1.6075
       }],
     "Speed": [0.0013, 0.0013],
     "Texture": "rbxassetid://83784868925844",

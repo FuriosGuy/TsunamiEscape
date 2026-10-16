@@ -1,6 +1,7 @@
 --!strict
 
 local GuiService = game:GetService("GuiService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,9 +13,10 @@ local PetRarityConfig = require(ReplicatedStorage.Modules.Config.PetRarityConfig
 local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
 local PetViewportRenderer = require(ReplicatedStorage.Modules.UI.PetViewportRenderer)
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
+local ProductCatalog = require(ReplicatedStorage.Modules.Shared.ProductCatalog)
 
 type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | PetConfig.EventId
-type PurchaseKind = "Wins" | "Robux"
+type PurchaseKind = "Wins" | "Candy" | "Robux"
 type RollCallback = (rollCount: number, purchaseKind: PurchaseKind) -> ()
 
 type RollButtonState = {
@@ -30,7 +32,24 @@ type TopFrameState = {
 	gradientRotation: number?,
 	labelText: string?,
 }
-
+type PetListStyleState = {
+	instance: GuiObject,
+	originalBackgroundColor: Color3,
+	gradient: UIGradient,
+	originalGradientColor: ColorSequence,
+	originalGradientRotation: number,
+	createdGradient: boolean,
+}
+type BodyFrameStyleState = {
+	instance: GuiObject,
+	container: GuiObject,
+	originalBackgroundColor: Color3,
+	originalContainerBackgroundColor: Color3,
+	gradient: UIGradient,
+	originalGradientColor: ColorSequence?,
+	originalGradientRotation: number?,
+	createdGradient: boolean,
+}
 type Controller = {
 	root: Instance,
 	previewGroup: LuckyBlockGroup,
@@ -51,9 +70,19 @@ type Controller = {
 	templateWasVisible: boolean?,
 	topFrame: GuiObject?,
 	topFrameState: TopFrameState?,
+	topFrameLabel: TextLabel?,
+	petListStyleState: PetListStyleState?,
+	bodyFrameStyleState: BodyFrameStyleState?,
+	backgroundLuckyblockOriginalImages: { [Instance]: string },
+	backgroundImageRequest: thread?,
+	backgroundImageRequestVersion: number,
 	previousGamepadSelection: GuiObject?,
 	_registerButton: (self: Controller, instance: Instance) -> (),
 	_bindButtons: (self: Controller) -> (),
+	_updateLuckyBlockBackground: (self: Controller) -> (),
+	_updatePetListStyle: (self: Controller, petList: GuiObject) -> (),
+	_updateBodyFrameStyle: (self: Controller) -> (),
+	_updateTopFrameStyle: (self: Controller) -> (),
 	_renderShowcase: (self: Controller) -> (),
 	Init: (self: Controller) -> (),
 	SetPreviewGroup: (self: Controller, group: LuckyBlockGroup) -> (),
@@ -68,8 +97,36 @@ PetLuckyBlockUIController.__index = PetLuckyBlockUIController
 
 local MODULE_NAME = "PetLuckyBlockUIController"
 local PREVIEW_ATTRIBUTE = "TemporaryPetShowcasePreview"
+local LUCKY_BLOCK_IMAGE_CACHE: { [string]: string } = {}
+local BODY_FRAME_DARKEN_FACTOR = 0.75
+local BLACK_COLOR_CHANNEL_THRESHOLD = 0.02
+
+local function restoreBodyFrameStyle(state: BodyFrameStyleState): ()
+	if state.instance.Parent then
+		state.instance.BackgroundColor3 = state.originalBackgroundColor
+	end
+	if state.container ~= state.instance and state.container.Parent then
+		state.container.BackgroundColor3 = state.originalContainerBackgroundColor
+	end
+	if state.createdGradient then
+		state.gradient:Destroy()
+	elseif state.gradient.Parent then
+		if state.originalGradientColor then
+			state.gradient.Color = state.originalGradientColor
+		end
+		if state.originalGradientRotation then
+			state.gradient.Rotation = state.originalGradientRotation
+		end
+	end
+end
 
 local function getRollButtonInfo(name: string): (number?, PurchaseKind?)
+	local candyCount = string.match(name, "^CandyRoll_([135])x$")
+		or string.match(name, "^CandyButton_([135])x$")
+	if candyCount then
+		return tonumber(candyCount), "Candy"
+	end
+
 	local winsCount = string.match(name, "^BuyButton_([135])x$")
 	if winsCount then
 		return tonumber(winsCount), "Wins"
@@ -245,8 +302,219 @@ function PetLuckyBlockUIController.new(
 		templateWasVisible = nil,
 		topFrame = nil,
 		topFrameState = nil,
+		topFrameLabel = nil,
+		petListStyleState = nil,
+		bodyFrameStyleState = nil,
+		backgroundLuckyblockOriginalImages = setmetatable({}, { __mode = "k" }) :: { [Instance]: string },
+		backgroundImageRequest = nil,
+		backgroundImageRequestVersion = 0,
 		previousGamepadSelection = nil,
 	}, PetLuckyBlockUIController) :: Controller
+end
+
+function PetLuckyBlockUIController._updateLuckyBlockBackground(self: Controller): ()
+	local backgrounds: { ImageLabel | ImageButton } = {}
+	for _, instance in ipairs(self.root:GetDescendants()) do
+		if string.match(instance.Name, "^BackgroundLuckyblock") then
+			if instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+				if self.backgroundLuckyblockOriginalImages[instance] == nil then
+					self.backgroundLuckyblockOriginalImages[instance] = instance.Image
+				end
+				table.insert(backgrounds, instance)
+			else
+				DebugModule.debugWarn(instance:GetFullName() .. " must be an ImageLabel or ImageButton", MODULE_NAME)
+			end
+		end
+	end
+	if #backgrounds == 0 then
+		return
+	end
+
+	self.backgroundImageRequestVersion += 1
+	local requestVersion = self.backgroundImageRequestVersion
+	if self.backgroundImageRequest then
+		task.cancel(self.backgroundImageRequest)
+		self.backgroundImageRequest = nil
+	end
+	local image = LUCKY_BLOCK_IMAGE_CACHE[self.previewGroup]
+	if image then
+		for _, background in ipairs(backgrounds) do
+			background.Image = image
+		end
+		return
+	end
+
+	local productKey = "Pet" .. self.previewGroup .. "LuckyBlockRoll1"
+	local productId = ProductCatalog.DevProducts[productKey]
+	if typeof(productId) ~= "number" or productId <= 0 then
+		DebugModule.debugWarn("Lucky Block image product ID missing | group=" .. self.previewGroup, MODULE_NAME)
+		return
+	end
+
+	self.backgroundImageRequest = task.spawn(function()
+		local ok, productInfo = pcall(function()
+			return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
+		end)
+		if not self.alive or requestVersion ~= self.backgroundImageRequestVersion then
+			return
+		end
+		self.backgroundImageRequest = nil
+
+		local iconId = if ok and typeof(productInfo) == "table" then tonumber(productInfo.IconImageAssetId) else nil
+		if not iconId or iconId <= 0 then
+			DebugModule.debugWarn("Lucky Block image lookup failed | group=" .. self.previewGroup, MODULE_NAME)
+			return
+		end
+
+		local iconImage = "rbxassetid://" .. tostring(iconId)
+		LUCKY_BLOCK_IMAGE_CACHE[self.previewGroup] = iconImage
+		for _, background in ipairs(backgrounds) do
+			if background.Parent then
+				background.Image = iconImage
+			end
+		end
+	end)
+end
+
+function PetLuckyBlockUIController._updatePetListStyle(self: Controller, petList: GuiObject): ()
+	local state = self.petListStyleState
+	if state and state.instance ~= petList then
+		if state.instance.Parent then
+			state.instance.BackgroundColor3 = state.originalBackgroundColor
+		end
+		if state.createdGradient then
+			state.gradient:Destroy()
+		elseif state.gradient.Parent then
+			state.gradient.Color = state.originalGradientColor
+			state.gradient.Rotation = state.originalGradientRotation
+		end
+		state = nil
+		self.petListStyleState = nil
+	end
+
+	if not state then
+		local gradient = petList:FindFirstChildOfClass("UIGradient")
+		local createdGradient = gradient == nil
+		if not gradient then
+			gradient = Instance.new("UIGradient")
+			gradient.Color = ColorSequence.new(Color3.new(1, 1, 1))
+			gradient.Rotation = 90
+			gradient.Parent = petList
+		end
+		state = {
+			instance = petList,
+			originalBackgroundColor = petList.BackgroundColor3,
+			gradient = gradient,
+			originalGradientColor = gradient.Color,
+			originalGradientRotation = gradient.Rotation,
+			createdGradient = createdGradient,
+		}
+		self.petListStyleState = state
+	end
+
+	local style = ColorConfig.LuckyBlocks.TopFrameStyles[self.previewGroup]
+	petList.BackgroundColor3 = style.BackgroundColor
+	state.gradient.Color = style.Gradient
+	state.gradient.Rotation = 90
+end
+
+function PetLuckyBlockUIController._updateBodyFrameStyle(self: Controller): ()
+	local bodyFrame = self.root:FindFirstChild("BodyFrame", true)
+	if not bodyFrame or not bodyFrame:IsA("GuiObject") then
+		return
+	end
+	local main = bodyFrame:FindFirstChild("Main")
+	local styleTarget = if main and main:IsA("GuiObject") then main else bodyFrame
+
+	local state = self.bodyFrameStyleState
+	if state and state.instance ~= styleTarget then
+		restoreBodyFrameStyle(state)
+		state = nil
+		self.bodyFrameStyleState = nil
+	end
+
+	if not state then
+		local gradient = styleTarget:FindFirstChildOfClass("UIGradient")
+		local createdGradient = gradient == nil
+		local originalGradientColor = if gradient then gradient.Color else nil
+		local originalGradientRotation = if gradient then gradient.Rotation else nil
+		if not gradient then
+			gradient = Instance.new("UIGradient")
+			gradient.Name = "UIGradient"
+			gradient.Rotation = 90
+		end
+		state = {
+			instance = styleTarget,
+			container = bodyFrame,
+			originalBackgroundColor = styleTarget.BackgroundColor3,
+			originalContainerBackgroundColor = bodyFrame.BackgroundColor3,
+			gradient = gradient,
+			originalGradientColor = originalGradientColor,
+			originalGradientRotation = originalGradientRotation,
+			createdGradient = createdGradient,
+		}
+		self.bodyFrameStyleState = state
+	end
+
+	local style = ColorConfig.LuckyBlocks.TopFrameStyles[self.previewGroup]
+	local keypoints = style.Gradient.Keypoints
+	local sourceColor = keypoints[#keypoints].Value
+	if
+		sourceColor.R <= BLACK_COLOR_CHANNEL_THRESHOLD
+		and sourceColor.G <= BLACK_COLOR_CHANNEL_THRESHOLD
+		and sourceColor.B <= BLACK_COLOR_CHANNEL_THRESHOLD
+	then
+		sourceColor = keypoints[1].Value
+	end
+	local gradientEndColor = sourceColor:Lerp(Color3.new(0, 0, 0), BODY_FRAME_DARKEN_FACTOR)
+	state.container.BackgroundColor3 = Color3.new(1, 1, 1)
+	state.instance.BackgroundColor3 = Color3.new(1, 1, 1)
+	state.gradient.Color = ColorSequence.new(Color3.new(0, 0, 0), gradientEndColor)
+	if state.createdGradient and state.gradient.Parent == nil then
+		state.gradient.Parent = state.instance
+	end
+end
+
+function PetLuckyBlockUIController._updateTopFrameStyle(self: Controller): ()
+	local topFrameInstance = self.root:FindFirstChild("TopFrame", true)
+	if not topFrameInstance or not topFrameInstance:IsA("GuiObject") then
+		return
+	end
+
+	local style = ColorConfig.LuckyBlocks.TopFrameStyles[self.previewGroup]
+	local styleTarget = topFrameInstance
+	if topFrameInstance:IsA("CanvasGroup") then
+		local main = topFrameInstance:FindFirstChild("Main")
+		if main and main:IsA("GuiObject") then
+			styleTarget = main
+		end
+	end
+
+	local gradient = styleTarget:FindFirstChildOfClass("UIGradient")
+	local labelInstance = topFrameInstance:FindFirstChild("LuckyBlockTier", true)
+	local label = if labelInstance and labelInstance:IsA("TextLabel") then labelInstance else nil
+	self.topFrame = styleTarget
+	self.topFrameLabel = label
+	if not self.topFrameState then
+		self.topFrameState = {
+			backgroundColor = styleTarget.BackgroundColor3,
+			gradientColor = if gradient then gradient.Color else nil,
+			gradientRotation = if gradient then gradient.Rotation else nil,
+			labelText = if label then label.Text else nil,
+		}
+	end
+
+	styleTarget.BackgroundColor3 = style.BackgroundColor
+	if gradient then
+		gradient.Color = style.Gradient
+		gradient.Rotation = 90
+	end
+	if label then
+		label.Text = style.Label
+	end
+	if topFrameInstance:IsA("CanvasGroup") then
+		VisualFunctions.BindFrameShadowColorSync(topFrameInstance, self.maid)
+	end
 end
 
 function PetLuckyBlockUIController.FocusForGamepad(self: Controller): ()
@@ -310,7 +578,8 @@ function PetLuckyBlockUIController._registerButton(self: Controller, instance: I
 	instance.Active = true
 	button.Active = true
 	button.Selectable = true
-	button.SelectionOrder = rollCount * 2 + (if purchaseKind == "Robux" then 1 else 0)
+	button.SelectionOrder = rollCount * 3
+		+ (if purchaseKind == "Robux" then 1 elseif purchaseKind == "Candy" then 2 else 0)
 	VisualFunctions.SetupFrameHover(instance, 1.05, 12, 1.15)
 	VisualFunctions.SetupFrameClick(instance, 0.94, -8, 0.8)
 
@@ -378,9 +647,15 @@ end
 
 function PetLuckyBlockUIController._renderShowcase(self: Controller): ()
 	local petList = self.root:FindFirstChild("PetList", true)
+	self:_updateLuckyBlockBackground()
+	self:_updateBodyFrameStyle()
+	self:_updateTopFrameStyle()
+	if petList and petList:IsA("GuiObject") then
+		self:_updatePetListStyle(petList)
+	end
 	local scrollingFrame = petList and petList:FindFirstChildWhichIsA("ScrollingFrame", true)
 	local templateInstance = scrollingFrame and scrollingFrame:FindFirstChild("PetShowcaseTemplate")
-	local topFrameInstance = self.root:FindFirstChild("TopFrame", true)
+
 	if not scrollingFrame
 		or not templateInstance
 		or not templateInstance:IsA("Frame")
@@ -390,7 +665,6 @@ function PetLuckyBlockUIController._renderShowcase(self: Controller): ()
 		return
 	end
 	local template = templateInstance
-	local topFrame = if topFrameInstance and topFrameInstance:IsA("GuiObject") then topFrameInstance else nil
 	self.previewContainer = scrollingFrame
 	if self.previewContainerWasVisible == nil then
 		self.previewContainerWasVisible = scrollingFrame.Visible
@@ -414,41 +688,18 @@ function PetLuckyBlockUIController._renderShowcase(self: Controller): ()
 		return
 	end
 
-	if topFrame then
-		local style = ColorConfig.LuckyBlocks.TopFrameStyles[self.previewGroup]
-		local styleTarget = topFrame
-		if topFrame:IsA("CanvasGroup") then
-			local main = topFrame:FindFirstChild("Main")
-			if main and main:IsA("GuiObject") then
-				styleTarget = main
-			end
-		end
-		local gradient = styleTarget:FindFirstChildOfClass("UIGradient")
-		local label = styleTarget:FindFirstChild("LuckyBlockTier")
-		self.topFrame = styleTarget
-		if not self.topFrameState then
-			self.topFrameState = {
-				backgroundColor = styleTarget.BackgroundColor3,
-				gradientColor = if gradient then gradient.Color else nil,
-				gradientRotation = if gradient then gradient.Rotation else nil,
-				labelText = if label and label:IsA("TextLabel") then label.Text else nil,
-			}
-		end
-		styleTarget.BackgroundColor3 = style.BackgroundColor
-		if gradient then
-			gradient.Color = style.Gradient
-			gradient.Rotation = 90
-		end
-		if label and label:IsA("TextLabel") then
-			label.Text = style.Label
-		end
-	end
-
 	local player = Players.LocalPlayer
-	local luckMultiplier = if player then player:GetAttribute("Pet_LuckMultiplier") else nil
+	local petLuckMultiplier = if player then player:GetAttribute("Pet_LuckMultiplier") else nil
+	local eventLuckMultiplier = if player then player:GetAttribute("LiveEvent_LuckMultiplier") else nil
+	local luckMultiplier = PetConfig.GetEffectiveLuckMultiplier(
+		if typeof(petLuckMultiplier) == "number"
+			then petLuckMultiplier
+			else PetConfig.Upgrades.luckMultiplier.startingMultiplier,
+		if typeof(eventLuckMultiplier) == "number" then eventLuckMultiplier else 1
+	)
 	local oddsByPetId = PetConfig.GetLuckyBlockOdds(
 		self.previewGroup,
-		if typeof(luckMultiplier) == "number" then luckMultiplier else PetConfig.Upgrades.luckMultiplier.startingMultiplier
+		luckMultiplier
 	)
 	if not oddsByPetId then
 		self.rendered = false
@@ -499,6 +750,8 @@ function PetLuckyBlockUIController.SetPreviewGroup(self: Controller, group: Luck
 	end
 	local groupChanged = self.previewGroup ~= group
 	self.previewGroup = group
+	self:_updateBodyFrameStyle()
+	self:_updateTopFrameStyle()
 	if not groupChanged and self.rendered then
 		return
 	end
@@ -506,6 +759,10 @@ function PetLuckyBlockUIController.SetPreviewGroup(self: Controller, group: Luck
 end
 
 function PetLuckyBlockUIController.SetPreviewVisible(self: Controller, isVisible: boolean): ()
+	if isVisible then
+		self:_updateBodyFrameStyle()
+		self:_updateTopFrameStyle()
+	end
 	local scrollingFrame = self.previewContainer
 	if scrollingFrame and scrollingFrame.Parent then
 		if isVisible then
@@ -531,9 +788,38 @@ function PetLuckyBlockUIController.Init(self: Controller): ()
 	self.maid:GiveTask(self.root.Destroying:Connect(function()
 		self:Destroy()
 	end))
+	local animatedBackgrounds: { [Instance]: boolean } = setmetatable({}, { __mode = "k" }) :: { [Instance]: boolean }
+	local function animateBackground(instance: Instance, updateImage: boolean?): ()
+		if animatedBackgrounds[instance] or not string.match(instance.Name, "^BackgroundLuckyblock") then
+			return
+		end
+		if instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+			animatedBackgrounds[instance] = true
+			VisualFunctions.SetupLuckyBlockBackgroundMotion(instance, self.maid, function(): boolean
+				return self.alive
+			end)
+			if updateImage then
+				self:_updateLuckyBlockBackground()
+			end
+		end
+	end
+
+	for _, instance in ipairs(self.root:GetDescendants()) do
+		animateBackground(instance)
+	end
+	self:_updateLuckyBlockBackground()
+	self.maid:GiveTask(self.root.DescendantAdded:Connect(function(instance: Instance)
+		animateBackground(instance, true)
+	end))
 	local player = Players.LocalPlayer
 	if player then
 		self.maid:GiveTask(player:GetAttributeChangedSignal("Pet_LuckMultiplier"):Connect(function()
+			if self.alive then
+				self.rendered = false
+				self:_renderShowcase()
+			end
+		end))
+		self.maid:GiveTask(player:GetAttributeChangedSignal("LiveEvent_LuckMultiplier"):Connect(function()
 			if self.alive then
 				self.rendered = false
 				self:_renderShowcase()
@@ -574,11 +860,40 @@ function PetLuckyBlockUIController.Destroy(self: Controller): ()
 			gradient.Color = state.gradientColor
 			gradient.Rotation = state.gradientRotation
 		end
-		local label = topFrame:FindFirstChild("LuckyBlockTier")
-		if label and label:IsA("TextLabel") and state.labelText then
+		local label = self.topFrameLabel
+		if label and label.Parent and state.labelText then
 			label.Text = state.labelText
 		end
 	end
+	local petListState = self.petListStyleState
+	if petListState then
+		if petListState.instance.Parent then
+			petListState.instance.BackgroundColor3 = petListState.originalBackgroundColor
+		end
+		if petListState.createdGradient then
+			petListState.gradient:Destroy()
+		elseif petListState.gradient.Parent then
+			petListState.gradient.Color = petListState.originalGradientColor
+			petListState.gradient.Rotation = petListState.originalGradientRotation
+		end
+		self.petListStyleState = nil
+	end
+	local bodyFrameState = self.bodyFrameStyleState
+	if bodyFrameState then
+		restoreBodyFrameStyle(bodyFrameState)
+		self.bodyFrameStyleState = nil
+	end
+	self.backgroundImageRequestVersion += 1
+	if self.backgroundImageRequest then
+		task.cancel(self.backgroundImageRequest)
+		self.backgroundImageRequest = nil
+	end
+	for background, originalImage in pairs(self.backgroundLuckyblockOriginalImages) do
+		if background.Parent and (background:IsA("ImageLabel") or background:IsA("ImageButton")) then
+			background.Image = originalImage
+		end
+	end
+	table.clear(self.backgroundLuckyblockOriginalImages)
 	table.clear(self.buttonStates)
 	table.clear(self.boundButtons)
 end

@@ -8,6 +8,7 @@
     "Color": [213, 115, 61],
     "FrontSurface": "SmoothNoOutlines",
     "LeftSurface": "SmoothNoOutlines",
+    "Locked": true,
     "Material": "Neon",
     "RightSurface": "SmoothNoOutlines",
     "Size": [8, 0.25, 8],

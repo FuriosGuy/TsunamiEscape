@@ -7,7 +7,7 @@
     "Color": [151, 0, 0],
     "Locked": true,
     "MaterialVariant": "Studs",
-    "Size": [12.0, 8, 1.0],
+    "Size": [12, 8, 1],
     "TopSurface": "Smooth"
   }
 }

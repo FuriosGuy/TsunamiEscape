@@ -786,14 +786,18 @@ function PlayerHandler.ResetBloodmoonWinsForCycle(player: Player, cycleStartUnix
 	return PlayerHandler.ResetEventWinsForCycle(player, "Bloodmoon", cycleStartUnix)
 end
 
--- Live-event bonuses intentionally apply only to normal treadmill XP and WinButton awards.
--- Products, daily/playtime rewards, races, and wheel rewards use dedicated award APIs.
+-- XP/Wins event bonuses apply only to normal treadmill XP and WinButton awards.
+-- Lucky Block luck is consumed by PetLuckyBlockPurchaseService; other rewards use dedicated award APIs.
 function PlayerHandler.GetLiveEventXPMultiplier(player: Player): number
 	return getNumericAttribute(player, "LiveEvent_XPMultiplier", 1)
 end
 
 function PlayerHandler.GetLiveEventWinButtonMultiplier(player: Player): number
 	return getNumericAttribute(player, "LiveEvent_WinButtonMultiplier", 1)
+end
+
+function PlayerHandler.GetLiveEventLuckMultiplier(player: Player): number
+	return getNumericAttribute(player, "LiveEvent_LuckMultiplier", 1)
 end
 
 function PlayerHandler.GetPlaytimeWinsMultiplier(player: Player): number

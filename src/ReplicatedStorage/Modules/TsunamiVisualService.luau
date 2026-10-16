@@ -1,3 +1,4 @@
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local SoundService = require(game:GetService("ReplicatedStorage").Modules.SoundService)
 local Workspace = game:GetService("Workspace")
@@ -60,6 +61,7 @@ type ServiceState = {
 }
 
 local TsunamiVisualService = {}
+local localPlayer = Players.LocalPlayer
 local serviceState: ServiceState? = nil
 local tsunamiTemplatesFolder = ReplicatedStorage:WaitForChild("Tsunamis")
 
@@ -113,6 +115,10 @@ local function getConfig(): VisualConfig
 end
 
 local function isBloodmoonActive(): boolean
+	if localPlayer and localPlayer:GetAttribute("EventEnvironmentEnabled") == false then
+		return false
+	end
+
 	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
 	if not liveEventState or not liveEventState:IsA("Folder") then
 		return false
@@ -692,6 +698,11 @@ local function bindLiveEventState(state: ServiceState, liveEventState: Instance)
 			"TsunamiVisualService"
 		)
 	end))
+	if localPlayer then
+		liveEventStateMaid:GiveTask(
+			localPlayer:GetAttributeChangedSignal("EventEnvironmentEnabled"):Connect(refreshAllVisualColors)
+		)
+	end
 
 	refreshAllVisualColors()
 end

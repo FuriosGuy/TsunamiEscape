@@ -1,0 +1,15 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "CanCollide": false,
+    "CFrame": [3.378, 11.2588, -70.974, 0.856, 0.0, 0.5169, -0.0, 1, -0.0001, -0.5169, 0.0, 0.856],
+    "InitialSize": [88.6772, 46.4528, 88.6772],
+    "Material": "SmoothPlastic",
+    "MeshContent": "rbxassetid://88374001594001",
+    "PivotOffset": [0, 0.1344, 0.0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Size": [2, 1, 2],
+    "Tags": ["_BrushtoolBrushed"],
+    "TextureContent": "rbxassetid://120377910592945"
+  }
+}

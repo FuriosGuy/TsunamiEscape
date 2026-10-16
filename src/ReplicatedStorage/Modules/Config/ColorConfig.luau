@@ -147,6 +147,10 @@ local Colors: { [string]: ColorStyle } = table.freeze({
 		Color = Color3.fromRGB(204, 238, 255),
 		Gradient = ColorSequence.new(Color3.fromRGB(204, 238, 255), Color3.fromRGB(115, 173, 255)),
 	}),
+	LuckyBlockHalloween = table.freeze({
+		Color = Color3.fromRGB(255, 128, 0),
+		Gradient = ColorSequence.new(Color3.fromRGB(255, 128, 0), Color3.fromRGB(128, 40, 0)),
+	}),
 })
 
 local function getGradientBottom(style: ColorStyle): Color3
@@ -260,6 +264,11 @@ local topFrameStyles: { [string]: LuckyBlockTopFrameStyle } = table.freeze({
 		Gradient = Colors.LuckyBlockFrostbiteRally.Gradient,
 		Label = "Frostbite Rally Lucky Block",
 	}),
+	Halloween = table.freeze({
+		BackgroundColor = Colors.LuckyBlockHalloween.Color,
+		Gradient = Colors.LuckyBlockHalloween.Gradient,
+		Label = "Halloween Lucky Block",
+	}),
 })
 
 local kartFrameStyles: { [string]: KartFrameStyle } = table.freeze({
@@ -269,6 +278,7 @@ local kartFrameStyles: { [string]: KartFrameStyle } = table.freeze({
 	BloodMoon = createGradientStyle(Colors.BloodMoonKart),
 	NeonRush = createGradientStyle(Colors.Blue),
 	FrostbiteRally = createGradientStyle(Colors.Frostbite),
+	Halloween = createGradientStyle(Colors.LuckyBlockHalloween),
 })
 
 local buttonStyles = table.freeze({
@@ -277,7 +287,6 @@ local buttonStyles = table.freeze({
 })
 
 local hudButtonStyles: { [string]: GradientStyle } = table.freeze({
-	InviteFriendButtonFrame = createGradientStyle(Colors.InviteFriend),
 	PetsButtonFrame = createGradientStyle(Colors.PetsButton),
 	LuckMultiplier = createGradientStyle(Colors.PetLuck),
 })
@@ -293,7 +302,7 @@ local UI = table.freeze({
 	HudButtonStyles = hudButtonStyles,
 	StageProgressWorlds = stageProgressWorlds,
 	SpinWheel = table.freeze({
-		LabelTextColor = Colors.White.Color,
+		LabelTextColor = Colors.Gold.Color,
 		LabelGradientBottomColor = Colors.Gold.Gradient.Keypoints[2].Value,
 		LabelShineColor = Colors.White.Color,
 		RewardConfettiColors = table.freeze({

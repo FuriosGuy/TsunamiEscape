@@ -22,9 +22,9 @@
         "time": 0.0,
         "value": 0.2411
       }, {
-        "envelope": 0.6431,
+        "envelope": 0.643,
         "time": 1.0,
-        "value": 0.6431
+        "value": 0.643
       }],
     "Speed": [0.1286, 0.3858],
     "SpreadAngle": [180, 180],

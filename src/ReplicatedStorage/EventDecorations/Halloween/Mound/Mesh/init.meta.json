@@ -1,0 +1,18 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Tombstone_03_Halloween_Pack_M_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [-82.3736, 9.7165, 44.6894, -0.1736, 0, 0.9848, 0, 1, 0, -0.9848, 0, -0.1736],
+    "Color": [99, 95, 98],
+    "InitialSize": [0.8451, 1.1219, 0.384],
+    "Material": "Slate",
+    "MeshContent": "rbxassetid://129538033408933",
+    "Size": [3.7346, 4.9578, 1.6972]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "CanCollide": false,
+    "CFrame": [2.2544, 11.0088, -73.4668, -0.5064, 0.0001, -0.8623, 0.0, 1, 0.0001, 0.8623, 0, -0.5064],
+    "InitialSize": [1.8857, 0.596, 1.8857],
+    "MeshContent": "rbxassetid://119797896997531",
+    "Size": [2, 0.5, 2],
+    "Tags": ["_BrushtoolBrushed"],
+    "TextureContent": "rbxassetid://101507995310955"
+  }
+}

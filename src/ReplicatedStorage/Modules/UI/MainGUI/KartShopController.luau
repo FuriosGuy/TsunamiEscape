@@ -203,6 +203,56 @@ local KART_FRAME_CONFIGS: { KartConfig } = {
 		imageAssetId = "rbxassetid://82634533787672",
 		style = ColorConfig.Karts.FrameStyles.FrostbiteRally,
 	},
+	{
+		kartName = "1_PumpkinKart",
+		displayName = "Pumpkin Kart",
+		sourceFolder = "Specials",
+		sourceSubfolder = "Halloween",
+		eventId = "Halloween",
+		productKey = "PumpkinKart",
+		showOnlyWhenOwned = true,
+		style = ColorConfig.Karts.FrameStyles.Halloween,
+	},
+	{
+		kartName = "2_CoffinKart",
+		displayName = "Coffin Kart",
+		sourceFolder = "Specials",
+		sourceSubfolder = "Halloween",
+		eventId = "Halloween",
+		productKey = "CoffinKart",
+		showOnlyWhenOwned = true,
+		style = ColorConfig.Karts.FrameStyles.Halloween,
+	},
+	{
+		kartName = "3_WitchBroom",
+		displayName = "Witch Broom",
+		sourceFolder = "Specials",
+		sourceSubfolder = "Halloween",
+		eventId = "Halloween",
+		productKey = "WitchBroom",
+		showOnlyWhenOwned = true,
+		style = ColorConfig.Karts.FrameStyles.Halloween,
+	},
+	{
+		kartName = "4_HearseKart",
+		displayName = "Hearse Kart",
+		sourceFolder = "Specials",
+		sourceSubfolder = "Halloween",
+		eventId = "Halloween",
+		productKey = "HearseKart",
+		showOnlyWhenOwned = true,
+		style = ColorConfig.Karts.FrameStyles.Halloween,
+	},
+	{
+		kartName = "5_HorsemanKart",
+		displayName = "Horseman Kart",
+		sourceFolder = "Specials",
+		sourceSubfolder = "Halloween",
+		eventId = "Halloween",
+		productKey = "HorsemanKart",
+		showOnlyWhenOwned = true,
+		style = ColorConfig.Karts.FrameStyles.Halloween,
+	},
 }
 
 local function getKartEventId(config: KartConfig): string?
@@ -378,11 +428,17 @@ function KartShopController.new(options: Options): Controller
 		local sortedKartConfigs: { KartConfig } = {}
 		for _, config in ipairs(KART_FRAME_CONFIGS) do
 			local isOwned = PlayerHandler.OwnsKart(player, config.kartName)
-			if
-				config.showOnlyWhenOwned ~= true
-				or isOwned
-				or (isEventKartConfig(config) and typeof(config.productKey) == "string" and options.isLiveEventActive(getKartEventId(config)))
-			then
+			local isHalloweenKart = getKartEventId(config) == "Halloween"
+			local shouldShow = if isHalloweenKart
+				then isOwned
+				else config.showOnlyWhenOwned ~= true
+					or isOwned
+					or (
+						isEventKartConfig(config)
+							and typeof(config.productKey) == "string"
+							and options.isLiveEventActive(getKartEventId(config))
+					)
+			if shouldShow then
 				table.insert(sortedKartConfigs, config)
 			end
 		end

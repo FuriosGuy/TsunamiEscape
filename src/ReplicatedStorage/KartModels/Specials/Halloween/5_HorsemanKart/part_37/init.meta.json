@@ -1,0 +1,12 @@
+{
+  "className": "Part",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [-27.7453, 8.7664, -7.5986, 1, 0, 0, 0, 0.9848, -0.1736, 0, 0.1736, 0.9848],
+    "Color": [218, 133, 65],
+    "Massless": true,
+    "Material": "CrackedLava",
+    "MaterialVariant": "2022 Stud",
+    "Size": [1.5982, 0.2664, 1.0655]
+  }
+}

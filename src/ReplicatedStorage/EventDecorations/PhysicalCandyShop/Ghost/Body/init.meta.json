@@ -1,0 +1,11 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "CFrame": [8.3485, 12.8951, -71.256, 0, 0, 1, 0, 1, 0, -1, 0, 0],
+    "InitialSize": [1.813, 2.2903, 1.5596],
+    "MeshContent": "rbxassetid://15144988925",
+    "Size": [4.1879, 5.2903, 3.6026],
+    "Transparency": 0.25
+  }
+}

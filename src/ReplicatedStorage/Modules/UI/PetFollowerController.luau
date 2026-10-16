@@ -76,6 +76,7 @@ local PET_GROUPS: { PetConfig.LuckyBlockGroup } = {
 	"BloodMoon",
 	"NeonRush",
 	"FrostbiteRally",
+	"Halloween",
 }
 
 local playerStates: { [Player]: PlayerState } = {}

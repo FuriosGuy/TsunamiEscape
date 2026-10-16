@@ -47,7 +47,13 @@ type LayoutControllerObject = {
 	maid: any,
 	referenceMaid: any,
 	initialized: boolean,
+	refreshThread: thread?,
+	referenceRefreshThread: thread?,
+	pendingSkipTweenFrames: { [GuiObject]: boolean },
+	pendingPreserveFrames: { [GuiObject]: boolean },
 	postLayoutRefreshQueued: boolean,
+	postLayoutRefreshThread: thread?,
+	postLayoutRefreshConnection: RBXScriptConnection?,
 	lastReferenceSignature: string?,
 	lastTargetSignature: string?,
 }
@@ -55,6 +61,12 @@ type LayoutControllerObject = {
 type LayoutControllerType = LayoutControllerObject
 
 local activeController: LayoutControllerType? = nil
+
+local function cancelDeferredThread(thread: thread?): ()
+	if thread and coroutine.status(thread) ~= "dead" then
+		pcall(task.cancel, thread)
+	end
+end
 
 local function collectGuiObjects(screenGui: ScreenGui, name: string): { GuiObject }
 	local matches: { GuiObject } = {}
@@ -234,29 +246,6 @@ local function getReservedBottomScale(
 	return getVisibleBottomScale(frame, screenGui, viewportHeight)
 end
 
-local function getVisibleHeightScale(frame: GuiObject, screenGui: ScreenGui, viewportHeight: number): number
-	local topScale, bottomScale = getVisibleBounds(frame, screenGui, viewportHeight)
-	if bottomScale <= topScale then
-		return getHeightScale(frame, viewportHeight)
-	end
-
-	return bottomScale - topScale
-end
-
-local function getTopProtrusionScale(
-	frame: GuiObject,
-	screenGui: ScreenGui,
-	viewportHeight: number
-): number
-	local contentTopScale, contentBottomScale = getVisibleBounds(frame, screenGui, viewportHeight)
-	if contentBottomScale <= contentTopScale then
-		return 0
-	end
-
-	local rootTopScale = math.clamp(frame.AbsolutePosition.Y, 0, viewportHeight) / viewportHeight
-	return math.max(0, rootTopScale - contentTopScale)
-end
-
 local function getRootTopScaleForPosition(
 	frame: GuiObject,
 	position: UDim2,
@@ -376,7 +365,13 @@ function NotificationLayoutController.new(screenGui: ScreenGui): LayoutControlle
 		maid = Maid.new(),
 		referenceMaid = Maid.new(),
 		initialized = false,
+		refreshThread = nil,
+		referenceRefreshThread = nil,
+		pendingSkipTweenFrames = {},
+		pendingPreserveFrames = {},
 		postLayoutRefreshQueued = false,
+		postLayoutRefreshThread = nil,
+		postLayoutRefreshConnection = nil,
 		lastReferenceSignature = nil,
 		lastTargetSignature = nil,
 	}, NotificationLayoutController)
@@ -405,6 +400,34 @@ local function calculateTargets(
 ): { [GuiObject]: UDim2 }
 	local viewportHeight = getViewportHeight()
 	local topAnchorBottomScale = 0
+	local visibleBoundsCache: { [GuiObject]: { top: number, bottom: number } } = {}
+
+	local function getCachedVisibleBounds(frame: GuiObject): (number, number)
+		local cachedBounds = visibleBoundsCache[frame]
+		if not cachedBounds then
+			local top, bottom = getVisibleBounds(frame, screenGui, viewportHeight)
+			cachedBounds = { top = top, bottom = bottom }
+			visibleBoundsCache[frame] = cachedBounds
+		end
+		return cachedBounds.top, cachedBounds.bottom
+	end
+
+	local function getCachedTopProtrusion(frame: GuiObject): number
+		local contentTopScale, contentBottomScale = getCachedVisibleBounds(frame)
+		if contentBottomScale <= contentTopScale then
+			return 0
+		end
+		local rootTopScale = math.clamp(frame.AbsolutePosition.Y, 0, viewportHeight) / viewportHeight
+		return math.max(0, rootTopScale - contentTopScale)
+	end
+
+	local function getCachedVisibleHeight(frame: GuiObject): number
+		local topScale, bottomScale = getCachedVisibleBounds(frame)
+		if bottomScale <= topScale then
+			return getHeightScale(frame, viewportHeight)
+		end
+		return bottomScale - topScale
+	end
 
 	for _, reservedName in ipairs(TOP_ANCHOR_FRAME_NAMES) do
 		local reservedFrame = resolveReservedFrame(screenGui, reservedFrames, reservedName)
@@ -431,7 +454,7 @@ local function calculateTargets(
 	local targets: { [GuiObject]: UDim2 } = {}
 	local eventFrame = resolveReservedFrame(screenGui, reservedFrames, "EventFrameList")
 	if eventFrame and eventFrame.Parent and isEffectivelyVisible(eventFrame, screenGui) then
-		local topProtrusionScale = getTopProtrusionScale(eventFrame, screenGui, viewportHeight)
+		local topProtrusionScale = getCachedTopProtrusion(eventFrame)
 		local eventRootTopScale: number
 		local eventContentTopScale: number
 		if topAnchorBottomScale > 0 then
@@ -444,7 +467,7 @@ local function calculateTargets(
 		end
 
 		targets[eventFrame] = getPositionForTop(eventFrame, eventRootTopScale, viewportHeight)
-		local eventTopScale, eventBottomScale = getVisibleBounds(eventFrame, screenGui, viewportHeight)
+		local eventTopScale, eventBottomScale = getCachedVisibleBounds(eventFrame)
 		local eventHeightScale = eventBottomScale - eventTopScale
 		if eventHeightScale <= 0 then
 			eventHeightScale = getHeightScale(eventFrame, viewportHeight)
@@ -461,7 +484,7 @@ local function calculateTargets(
 			and frame.Parent
 			and (isEffectivelyVisible(frame, screenGui) or frame == includedFrame)
 		then
-			local frameTopProtrusionScale = getTopProtrusionScale(frame, screenGui, viewportHeight)
+			local frameTopProtrusionScale = getCachedTopProtrusion(frame)
 			local frameContentTopScale = nextTopScale
 			targets[frame] = getPositionForTop(
 				frame,
@@ -469,7 +492,7 @@ local function calculateTargets(
 				viewportHeight
 			)
 			nextTopScale = frameContentTopScale
-				+ getVisibleHeightScale(frame, screenGui, viewportHeight)
+				+ getCachedVisibleHeight(frame)
 				+ LAYOUT_GAP_PIXELS / viewportHeight
 		end
 	end
@@ -485,12 +508,17 @@ function NotificationLayoutController._calculateTargets(
 end
 
 function NotificationLayoutController._queuePostLayoutRefresh(self: LayoutControllerType)
-	if self.postLayoutRefreshQueued then
+	if not self.initialized or self.postLayoutRefreshQueued then
 		return
 	end
 
 	self.postLayoutRefreshQueued = true
-	task.defer(function()
+	local refreshThread: thread? = nil
+	refreshThread = task.defer(function()
+		if self.postLayoutRefreshThread ~= refreshThread then
+			return
+		end
+		self.postLayoutRefreshThread = nil
 		if not self.initialized then
 			self.postLayoutRefreshQueued = false
 			return
@@ -507,33 +535,74 @@ function NotificationLayoutController._queuePostLayoutRefresh(self: LayoutContro
 				connection:Disconnect()
 				connection = nil
 			end
+			self.postLayoutRefreshConnection = nil
 			self.postLayoutRefreshQueued = false
 			if self.initialized then
 				self:_applyTargets(nil)
 			end
 		end)
-		self.maid:GiveTask(connection)
+		self.postLayoutRefreshConnection = connection
 	end)
+	self.postLayoutRefreshThread = refreshThread
+end
+
+function NotificationLayoutController._queueTargetRefresh(
+	self: LayoutControllerType,
+	skipTweenFrame: GuiObject?,
+	preserveFrame: GuiObject?
+)
+	if not self.initialized then
+		return
+	end
+	if skipTweenFrame then
+		self.pendingSkipTweenFrames[skipTweenFrame] = true
+	end
+	if preserveFrame then
+		self.pendingPreserveFrames[preserveFrame] = true
+	end
+	if self.refreshThread then
+		return
+	end
+
+	local refreshThread: thread? = nil
+	refreshThread = task.defer(function()
+		if self.refreshThread ~= refreshThread then
+			return
+		end
+		self.refreshThread = nil
+		if not self.initialized then
+			return
+		end
+
+		local skipFrames = table.clone(self.pendingSkipTweenFrames)
+		local preserveFrames = table.clone(self.pendingPreserveFrames)
+		table.clear(self.pendingSkipTweenFrames)
+		table.clear(self.pendingPreserveFrames)
+		self:_applyTargets(nil, nil, skipFrames, preserveFrames)
+		self:_queuePostLayoutRefresh()
+	end)
+	self.refreshThread = refreshThread
 end
 
 function NotificationLayoutController.refresh(self: LayoutControllerType)
-	self:_applyTargets(nil)
-	self:_queuePostLayoutRefresh()
+	self:_queueTargetRefresh(nil, nil)
 end
 
 function NotificationLayoutController._stopPositionTween(self: LayoutControllerType, frame: GuiObject)
 	local tween = self.positionTweens[frame]
 	if tween then
+		self.positionTweens[frame] = nil
 		tween:Cancel()
 		tween:Destroy()
-		self.positionTweens[frame] = nil
 	end
 end
 
 function NotificationLayoutController._applyTargets(
 	self: LayoutControllerType,
 	skipTweenFrame: GuiObject?,
-	preserveFrame: GuiObject?
+	preserveFrame: GuiObject?,
+	skipTweenFrames: { [GuiObject]: boolean }?,
+	preserveFrames: { [GuiObject]: boolean }?
 )
 	if not self.initialized then
 		return
@@ -542,13 +611,23 @@ function NotificationLayoutController._applyTargets(
 	local targets = self:_calculateTargets(nil)
 	local targetParts: { string } = {}
 	local reservedParts: { string } = {}
-	local viewportHeight = getViewportHeight()
 	for _, reservedName in ipairs(RESERVED_FRAME_NAMES) do
 		local reservedFrame = self.reservedFrames[reservedName]
-		local bottomScale = if reservedFrame
-			then getReservedBottomScale(reservedName, reservedFrame, self.screenGui, viewportHeight)
-			else 0
-		table.insert(reservedParts, string.format("%s=%.3f", reservedName, bottomScale))
+		if reservedFrame then
+			local position = reservedFrame.Position
+			table.insert(
+				reservedParts,
+				string.format(
+					"%s=%s@%.3f+%d",
+					reservedName,
+					tostring(isEffectivelyVisible(reservedFrame, self.screenGui)),
+					position.Y.Scale,
+					position.Y.Offset
+				)
+			)
+		else
+			table.insert(reservedParts, reservedName .. "=missing")
+		end
 	end
 	table.insert(targetParts, "reserved=" .. table.concat(reservedParts, ","))
 	local eventFrame = self.reservedFrames.EventFrameList
@@ -592,9 +671,9 @@ function NotificationLayoutController._applyTargets(
 	end
 
 	for frame, targetPosition in pairs(targets) do
-		if frame == preserveFrame then
+		if frame == preserveFrame or (preserveFrames and preserveFrames[frame]) then
 			self:_stopPositionTween(frame)
-		elseif frame == skipTweenFrame then
+		elseif frame == skipTweenFrame or (skipTweenFrames and skipTweenFrames[frame]) then
 			self:_stopPositionTween(frame)
 			frame.Position = targetPosition
 		elseif frame.Position ~= targetPosition then
@@ -604,14 +683,33 @@ function NotificationLayoutController._applyTargets(
 			})
 			self.positionTweens[frame] = tween
 			tween.Completed:Once(function()
-				if self.positionTweens[frame] == tween then
-					self.positionTweens[frame] = nil
+				if self.positionTweens[frame] ~= tween then
+					return
 				end
+				self.positionTweens[frame] = nil
 				tween:Destroy()
 			end)
 			tween:Play()
 		end
 	end
+end
+
+function NotificationLayoutController._queueReferenceRefresh(self: LayoutControllerType)
+	if not self.initialized or self.referenceRefreshThread then
+		return
+	end
+
+	local refreshThread: thread? = nil
+	refreshThread = task.defer(function()
+		if self.referenceRefreshThread ~= refreshThread then
+			return
+		end
+		self.referenceRefreshThread = nil
+		if self.initialized then
+			self:_refreshReferences()
+		end
+	end)
+	self.referenceRefreshThread = refreshThread
 end
 
 function NotificationLayoutController._refreshReferences(self: LayoutControllerType)
@@ -631,7 +729,7 @@ function NotificationLayoutController._refreshReferences(self: LayoutControllerT
 				self.pendingAnimationFrames[frame] = nil
 				local isVisible = isEffectivelyVisible(frame, self.screenGui)
 				self.visibilityStates[frame] = isVisible
-				self:_applyTargets(
+				self:_queueTargetRefresh(
 					if isVisible and not wasVisible and not preserveFrame then frame else nil,
 					if preserveFrame then frame else nil
 				)
@@ -662,7 +760,7 @@ function NotificationLayoutController._refreshReferences(self: LayoutControllerT
 				function()
 					-- A hidden template can become the live copy after initialization.
 					-- Re-select the visible copy before measuring its bounds.
-					self:_refreshReferences()
+					self:_queueReferenceRefresh()
 				end,
 				self.referenceMaid
 			)
@@ -676,10 +774,10 @@ function NotificationLayoutController._refreshReferences(self: LayoutControllerT
 			)
 			self.referenceMaid:GiveTask(candidate.DescendantAdded:Connect(function()
 				-- Dynamic cards and progress markers must be included in bounds tracking.
-				self:_refreshReferences()
+				self:_queueReferenceRefresh()
 			end))
 			self.referenceMaid:GiveTask(candidate.DescendantRemoving:Connect(function()
-				self:refresh()
+				self:_queueReferenceRefresh()
 			end))
 		end
 	end
@@ -733,12 +831,12 @@ function NotificationLayoutController:Init()
 
 	self.maid:GiveTask(self.screenGui.DescendantAdded:Connect(function(descendant: Instance)
 		if isTrackedFrameName(descendant.Name) or isReservedFrameName(descendant.Name) then
-			self:_refreshReferences()
+			self:_queueReferenceRefresh()
 		end
 	end))
 	self.maid:GiveTask(self.screenGui.DescendantRemoving:Connect(function(descendant: Instance)
 		if isTrackedFrameName(descendant.Name) or isReservedFrameName(descendant.Name) then
-			self:_refreshReferences()
+			self:_queueReferenceRefresh()
 		end
 	end))
 
@@ -747,12 +845,12 @@ function NotificationLayoutController:Init()
 	if playerGui then
 		self.maid:GiveTask(playerGui.DescendantAdded:Connect(function(descendant: Instance)
 			if isReservedFrameName(descendant.Name) then
-				self:_refreshReferences()
+				self:_queueReferenceRefresh()
 			end
 		end))
 		self.maid:GiveTask(playerGui.DescendantRemoving:Connect(function(descendant: Instance)
 			if isReservedFrameName(descendant.Name) then
-				self:_refreshReferences()
+				self:_queueReferenceRefresh()
 			end
 		end))
 	end
@@ -781,6 +879,16 @@ function NotificationLayoutController:Destroy()
 	end
 
 	self.initialized = false
+	cancelDeferredThread(self.refreshThread)
+	cancelDeferredThread(self.referenceRefreshThread)
+	cancelDeferredThread(self.postLayoutRefreshThread)
+	self.refreshThread = nil
+	self.referenceRefreshThread = nil
+	self.postLayoutRefreshThread = nil
+	if self.postLayoutRefreshConnection then
+		self.postLayoutRefreshConnection:Disconnect()
+		self.postLayoutRefreshConnection = nil
+	end
 	self.referenceMaid:DoCleaning()
 	self.maid:DoCleaning()
 	for frame, _ in pairs(self.positionTweens) do
@@ -795,6 +903,8 @@ function NotificationLayoutController:Destroy()
 	self.positionTweens = {}
 	self.visibilityStates = {}
 	self.pendingAnimationFrames = {}
+	table.clear(self.pendingSkipTweenFrames)
+	table.clear(self.pendingPreserveFrames)
 	self.postLayoutRefreshQueued = false
 	self.lastReferenceSignature = nil
 	self.lastTargetSignature = nil

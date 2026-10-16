@@ -4,6 +4,7 @@
     "Anchored": true,
     "BottomSurface": "Smooth",
     "CFrame": [-175, 14, 12.4999, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "Color": [162, 162, 165],
     "Locked": true,
     "MaterialVariant": "Studs",
     "Shape": "Wedge",

@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
+local HalloweenEventConfig = require(ReplicatedStorage.Modules.Config.HalloweenEventConfig)
 local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
 local ProductService = require(ServerScriptService.Modules.Shared.ProductService_Server)
 local PlayerHandler = require(ServerScriptService.Modules.Shared.PlayerHandler_Server)
@@ -15,6 +16,7 @@ local ProductServerService = require(ServerScriptService.Modules.ProductServerSe
 local PetLuckyBlockBillboardService = require(ServerScriptService.Modules.PetLuckyBlockBillboardService)
 local PetInventoryService = require(ServerScriptService.Modules.PetInventoryService)
 local PetPaidRandomItemPolicyService = require(ServerScriptService.Modules.PetPaidRandomItemPolicyService)
+local HalloweenCandyService = require(ServerScriptService.Modules.HalloweenCandyService)
 local LiveEventService = require(ServerScriptService.Modules.LiveEventService)
 local ValidationService = require(ServerScriptService.Modules:WaitForChild("ValidationService"))
 
@@ -52,15 +54,18 @@ local BLOCK_GROUPS: { LuckyBlockGroup } = {
 	"BloodMoon",
 	"NeonRush",
 	"FrostbiteRally",
+	"Halloween",
 }
 local EVENT_GROUPS: { [string]: boolean } = {
 	BloodMoon = true,
 	NeonRush = true,
 	FrostbiteRally = true,
+	Halloween = true,
 }
 local ROLL_EVENT_GATED_GROUPS: { [string]: boolean } = {
 	NeonRush = true,
 	FrostbiteRally = true,
+	Halloween = true,
 }
 local ACTIVE_EVENT_IDS: { [string]: string } = {
 	BloodMoon = "Bloodmoon",
@@ -70,6 +75,7 @@ local ACTIVE_EVENT_IDS: { [string]: string } = {
 local PROMPT_LOCKED_EVENT_GROUPS: { [string]: boolean } = {
 	NeonRush = true,
 	FrostbiteRally = true,
+	Halloween = true,
 }
 local BLOCK_DISPLAY_NAMES: { [string]: string } = {
 	Tier1 = "Tier 1 Lucky Block",
@@ -79,12 +85,14 @@ local BLOCK_DISPLAY_NAMES: { [string]: string } = {
 	BloodMoon = "Blood Moon Lucky Block",
 	NeonRush = "Neon Rush Lucky Block",
 	FrostbiteRally = "Frostbite Rally Lucky Block",
+	Halloween = "Halloween Lucky Block",
 }
 local MODEL_GROUP_ALIASES: { [string]: LuckyBlockGroup } = {
 	bloodmoonluckyblock = "BloodMoon",
 	robuxluckyblock = "Premium",
 	neonluckyblock = "NeonRush",
 	frostbiteluckyblock = "FrostbiteRally",
+	halloweenluckyblock = "Halloween",
 }
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local function getOrCreateRemote(name: string): RemoteEvent?
@@ -170,9 +178,9 @@ end
 local function readLuckMultiplier(player: Player): number
 	local value = player:GetAttribute("Pet_LuckMultiplier")
 	if typeof(value) ~= "number" or value ~= value or value < 1 or value == math.huge then
-		return PetConfig.Upgrades.luckMultiplier.startingMultiplier
+		value = PetConfig.Upgrades.luckMultiplier.startingMultiplier
 	end
-	return math.min(value, 10)
+	return PetConfig.GetEffectiveLuckMultiplier(value, PlayerHandler.GetLiveEventLuckMultiplier(player))
 end
 
 local function rollPetIds(player: Player, group: LuckyBlockGroup, rollCount: RollCount): { string }?
@@ -250,6 +258,9 @@ local function getGroupFromModel(model: Model): LuckyBlockGroup?
 end
 
 local function isLiveEventActive(eventId: string): boolean
+	if eventId == "Halloween" then
+		return liveEventStateFolder ~= nil and liveEventStateFolder:GetAttribute("HalloweenPartTwoActive") == true
+	end
 	local liveEventId = ACTIVE_EVENT_IDS[eventId] or eventId
 	return LiveEventService.IsEventActive(liveEventId)
 end
@@ -462,9 +473,6 @@ local function addOpenPrompt(model: Model, modelMaid: any, group: LuckyBlockGrou
 			)
 			return
 		end
-		if not PetPaidRandomItemPolicyService.CanUsePaidRandomItems(player) then
-			return
-		end
 		if not canInteractWithLuckyBlock(player, group) then
 			return
 		end
@@ -531,11 +539,23 @@ local function bindLiveEventState(candidate: Instance): ()
 	liveEventStateFolder = candidate
 	SERVICE_MAID.LuckyBlockActiveEventIdsChanged =
 		candidate:GetAttributeChangedSignal("ActiveEventIds"):Connect(refreshEventBlockPresentations)
+	SERVICE_MAID.LuckyBlockEnvironmentNameChanged =
+		candidate:GetAttributeChangedSignal("EnvironmentName"):Connect(function()
+			refreshEventBlockPresentations()
+		end)
+	local nextUnlockTimestamp = HalloweenEventConfig.GetNextUnlockUnixTimestamp(os.time())
+	if nextUnlockTimestamp then
+		SERVICE_MAID.LuckyBlockHalloweenGateThread = task.delay(
+			math.max(nextUnlockTimestamp - os.time(), 0),
+			refreshEventBlockPresentations
+		)
+	end
 	SERVICE_MAID.LuckyBlockEventStateAncestryChanged = candidate.AncestryChanged:Connect(
 		function(_: Instance, parent: Instance?)
 			if parent == nil and liveEventStateFolder == candidate then
 				liveEventStateFolder = nil
 				SERVICE_MAID.LuckyBlockActiveEventIdsChanged = nil
+				SERVICE_MAID.LuckyBlockEnvironmentNameChanged = nil
 				SERVICE_MAID.LuckyBlockEventStateAncestryChanged = nil
 				refreshEventBlockPresentations()
 			end
@@ -610,7 +630,7 @@ local function processRequest(
 		sendResult(player, "InvalidRequest")
 		return
 	end
-	if rawPurchaseKind ~= "Wins" and rawPurchaseKind ~= "Robux" then
+	if rawPurchaseKind ~= "Wins" and rawPurchaseKind ~= "Candy" and rawPurchaseKind ~= "Robux" then
 		sendResult(player, "InvalidRequest")
 		return
 	end
@@ -620,19 +640,21 @@ local function processRequest(
 	end
 	local group = rawGroup :: LuckyBlockGroup
 	local rollCount = rawRollCount :: RollCount
-	local purchaseKind = rawPurchaseKind :: "Wins" | "Robux"
+	local purchaseKind = rawPurchaseKind :: "Wins" | "Candy" | "Robux"
 	local source = rawSource :: "World" | "Shop"
 	if player:GetAttribute("Data_Loaded") ~= true then
 		sendResult(player, "DataNotLoaded")
 		return
 	end
-	if player:GetAttribute("Pet_RandomItemPolicyLoaded") ~= true then
-		sendResult(player, "PolicyLoading")
-		return
-	end
-	if not PetPaidRandomItemPolicyService.CanUsePaidRandomItems(player) then
-		sendResult(player, "PaidRandomItemsRestricted")
-		return
+	if purchaseKind == "Robux" then
+		if player:GetAttribute("Pet_RandomItemPolicyLoaded") ~= true then
+			sendResult(player, "PolicyLoading")
+			return
+		end
+		if not PetPaidRandomItemPolicyService.CanUsePaidRandomItems(player) then
+			sendResult(player, "PaidRandomItemsRestricted")
+			return
+		end
 	end
 	local canUseLuckyBlock = if source == "World"
 		then canInteractWithLuckyBlock(player, group)
@@ -652,13 +674,23 @@ local function processRequest(
 		return
 	end
 
-	if purchaseKind == "Wins" then
-		if group ~= "Tier1" and group ~= "Tier2" and group ~= "Tier3" then
+	if purchaseKind == "Wins" or purchaseKind == "Candy" then
+		if purchaseKind == "Wins" and group ~= "Tier1" and group ~= "Tier2" and group ~= "Tier3" then
+			sendResult(player, "InvalidRequest")
+			return
+		end
+		if purchaseKind == "Candy" and group ~= "Halloween" then
 			sendResult(player, "InvalidRequest")
 			return
 		end
 		local definition = PetConfig.LuckyBlocks[group]
-		local costPerRoll = definition.winCostPerRoll
+		local candyPrices = PetConfig.LuckyBlocks.Event.eventCandyPricePerRoll
+		local costPerRoll: number? = nil
+		if purchaseKind == "Candy" then
+			costPerRoll = candyPrices and candyPrices[group]
+		elseif definition then
+			costPerRoll = definition.winCostPerRoll
+		end
 		if typeof(costPerRoll) ~= "number" or costPerRoll <= 0 then
 			sendResult(player, "ProductUnavailable")
 			return
@@ -673,30 +705,42 @@ local function processRequest(
 			return
 		end
 		local totalCost = costPerRoll * rollCount
-		local previousWins = player:GetAttribute("WinCount")
-		if
-			typeof(previousWins) ~= "number"
-			or previousWins ~= previousWins
-			or previousWins == math.huge
-			or previousWins < totalCost
-		then
-			sendResult(player, "NotEnoughWins")
-			return
-		end
-		if not PlayerHandler.SpendWins(player, totalCost) then
-			sendResult(player, "NotEnoughWins")
+		local previousWins: number? = nil
+		if purchaseKind == "Wins" then
+			local winCount = player:GetAttribute("WinCount")
+			if
+				typeof(winCount) ~= "number"
+				or winCount ~= winCount
+				or winCount == math.huge
+				or winCount < totalCost
+			then
+				sendResult(player, "NotEnoughWins")
+				return
+			end
+			previousWins = winCount
+			if not PlayerHandler.SpendWins(player, totalCost) then
+				sendResult(player, "NotEnoughWins")
+				return
+			end
+		elseif not HalloweenCandyService.TrySpendCandy(player, totalCost) then
+			sendResult(player, "NotEnoughCandy")
 			return
 		end
 		local granted = PetInventoryService.GrantLuckyBlockPets(player, group, petIds)
 		if not granted then
-			player:SetAttribute("WinCount", previousWins)
+			if purchaseKind == "Wins" and previousWins then
+				player:SetAttribute("WinCount", previousWins)
+			elseif purchaseKind == "Candy" and not HalloweenCandyService.RefundCandy(player, totalCost) then
+				DebugModule.debugWarn("Candy refund failed after Lucky Block grant failure | player=" .. player.Name, MODULE_NAME)
+			end
 			sendResult(player, "GrantFailed")
 			return
 		end
 		sendResult(player, "RollResolved", createRollResult(player, petIds))
 		DebugModule.debugInfo(
 			string.format(
-				"Lucky Block Win roll granted | player=%s | group=%s | count=%d | cost=%d",
+				"Lucky Block %s roll granted | player=%s | group=%s | count=%d | cost=%d",
+				purchaseKind,
 				player.Name,
 				group,
 				rollCount,

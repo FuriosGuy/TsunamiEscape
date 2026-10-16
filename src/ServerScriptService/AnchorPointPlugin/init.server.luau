@@ -3,7 +3,6 @@
 local Selection = game:GetService("Selection")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GuiService = game:GetService("GuiService")
 local Workspace = game:GetService("Workspace")
 
@@ -19,9 +18,12 @@ local POSITION_MODE_SETTING_KEY = "PositionMode"
 local GAP_SETTING_KEY = "GapToEdge"
 local CHECK_OTHER_FRAMES_SETTING_KEY = "CheckOtherFrames"
 local SELECTED_ANCHOR_SETTING_KEY = "SelectedAnchor"
-local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
 
 type PositionMode = "ChangePos" | "ChangePos1" | "StayInPos"
+
+local function createHoverTweenInfo(): TweenInfo
+	return TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+end
 
 local ANCHOR_POINTS: { [string]: Vector2 } = table.freeze({
 	TopLeft = Vector2.new(0, 0),
@@ -506,7 +508,7 @@ local function tweenAnchorCell(anchorName: string)
 		activeTween:Cancel()
 	end
 
-	local tween = TweenService:Create(cellState.cell, TweenConfig.Hover, {
+	local tween = TweenService:Create(cellState.cell, createHoverTweenInfo(), {
 		BackgroundColor3 = targetColor,
 	})
 	activeTweens[cellState.cell] = tween

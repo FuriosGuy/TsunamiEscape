@@ -1,7 +1,7 @@
 {
   "className": "ParticleEmitter",
   "properties": {
-    "Acceleration": [0, 9.0028, 0],
+    "Acceleration": [0, 9.002, 0],
     "Brightness": 15,
     "Color": [{
         "color": [0.6667, 0.0, 0.0],
@@ -28,7 +28,7 @@
         "time": 1.0,
         "value": 0.0
       }],
-    "Speed": [19.2917, 32.1529],
+    "Speed": [19.29, 32.15],
     "SpreadAngle": [90, 90],
     "Texture": "rbxassetid://16878181512"
   }

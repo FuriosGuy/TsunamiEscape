@@ -2,9 +2,10 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 
-type RequestKind = "StandardUpdate" | "OrderedWrite" | "OrderedList"
+type RequestKind = "StandardUpdate" | "OrderedRead" | "OrderedWrite" | "OrderedList"
 type RunOptions = {
 	maxWaitSeconds: number?,
+	budgetCost: number?,
 	shouldContinue: (() -> boolean)?,
 	queueKey: string?,
 }
@@ -53,6 +54,7 @@ end
 
 local requestTypes: { [RequestKind]: { any } } = {
 	StandardUpdate = {},
+	OrderedRead = {},
 	OrderedWrite = {},
 	OrderedList = {},
 }
@@ -71,9 +73,9 @@ if orderedWrite ~= nil then
 	requestTypes.OrderedWrite = { orderedWrite }
 end
 
-local orderedList = resolveRequestType({ "OrderedList", "GetSortedAsync" })
-if orderedList ~= nil then
-	requestTypes.OrderedList = { orderedList }
+local orderedRead = resolveRequestType({ "OrderedRead", "GetAsync" })
+if orderedRead ~= nil then
+	requestTypes.OrderedRead = { orderedRead }
 end
 
 local function advanceServingTicket(state: QueueState)
@@ -135,11 +137,11 @@ local function releaseRequestSlot(state: QueueState, ticket: number)
 	advanceServingTicket(state)
 end
 
-local function hasAvailableBudget(kind: RequestKind): boolean
+local function hasAvailableBudget(kind: RequestKind, budgetCost: number): boolean
 	local types = requestTypes[kind]
 	if #types == 0 then
-		-- Older engine versions may not expose the newer budget enums. In that
-		-- case, retain pcall protection and let Roblox handle the request.
+		-- OrderedList currently reports a zero budget even when sorted reads work.
+		-- Keep queue serialization and pcall protection; let Roblox throttle it.
 		return true
 	end
 
@@ -150,7 +152,7 @@ local function hasAvailableBudget(kind: RequestKind): boolean
 		if not ok or typeof(budget) ~= "number" then
 			return true
 		end
-		if budget < 1 then
+		if budget < budgetCost then
 			return false
 		end
 	end
@@ -166,6 +168,7 @@ function DataStoreRequestGate.Run(
 ): (boolean, any, any, any)
 	local resolvedOptions = options or {}
 	local maxWaitSeconds = math.max(0, resolvedOptions.maxWaitSeconds or DEFAULT_MAX_WAIT_SECONDS)
+	local budgetCost = math.max(1, math.floor(resolvedOptions.budgetCost or 1))
 	local shouldContinue = resolvedOptions.shouldContinue
 	local queueKey = resolvedOptions.queueKey or "Default"
 	local acquired, ticket, queueState = acquireRequestSlot(queueKey, maxWaitSeconds, shouldContinue)
@@ -174,7 +177,7 @@ function DataStoreRequestGate.Run(
 	end
 
 	local deadline = os.clock() + maxWaitSeconds
-	while not hasAvailableBudget(kind) do
+	while not hasAvailableBudget(kind, budgetCost) do
 		if shouldContinue ~= nil and not shouldContinue() then
 			releaseRequestSlot(queueState, ticket)
 			return false, "Request gate wait cancelled: " .. operationName, nil, nil

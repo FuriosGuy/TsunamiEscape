@@ -5,11 +5,11 @@
     "CanCollide": false,
     "CanQuery": false,
     "CanTouch": false,
-    "CFrame": [-0.0006, 1.2861, -0.0003, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "CFrame": [-0.0006, 1.286, -0.0003, -1, 0, 0, 0, 1, 0, 0, 0, -1],
     "Color": [0, 0, 0],
     "InitialSize": [300, 299.9999, 300.0],
     "Massless": true,
     "MeshContent": "rbxassetid://124373248931889",
-    "Size": [3.8583, 3.8583, 3.8583]
+    "Size": [3.858, 3.858, 3.858]
   }
 }

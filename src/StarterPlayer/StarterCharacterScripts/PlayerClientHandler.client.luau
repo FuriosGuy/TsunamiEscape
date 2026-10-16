@@ -1200,6 +1200,14 @@ local function registerEquippedKart(model: Model)
 	local engineParent = getEngineParent(model)
 	local engineSoundId = model:GetAttribute("EngineSoundId")
 	local engineSoundParent = if owner == player then rootPart else engineParent
+	if owner == player and model:GetAttribute("DisableEngineSound") == true then
+		if localKartEngineSound then
+			localKartEngineSound:Stop()
+			localKartEngineSound:Destroy()
+			localKartEngineSound = nil
+		end
+		localKartEngineSoundLastSeenAt = nil
+	end
 	if
 		owner == player
 		and localKartEngineSound
@@ -2276,12 +2284,15 @@ local function updateWorldMusic()
 
 	local musicType = getCurrentMusicType(currentWorld)
 	local selectedPlaylist = SoundService.GetWorldMusicPlaylist(currentWorld, musicType)
+	local playlistTrackIds = table.create(#selectedPlaylist)
+	for index, soundId in ipairs(selectedPlaylist) do
+		playlistTrackIds[index] = tostring(soundId)
+	end
 	local worldConfig = SoundService.WorldMusicPlaylists[currentWorld]
-	local playlistKey = if worldConfig
-			and worldConfig[musicType]
-			and #worldConfig[musicType] > 0
-		then currentWorld .. ":" .. musicType
-		else "Fallback:" .. musicType
+	local playlistSource = if worldConfig and worldConfig[musicType] and #worldConfig[musicType] > 0
+		then currentWorld
+		else "Fallback"
+	local playlistKey = playlistSource .. ":" .. musicType .. ":" .. table.concat(playlistTrackIds, ",")
 
 	if playlistKey == currentMusicPlaylistKey and lobbyMusicSound and lobbyMusicSound.IsPlaying then
 		return
@@ -2634,9 +2645,40 @@ topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Treadmill_Active"):Conne
 end))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("Current_World"):Connect(updateWorldMusic))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("MusicEnabled"):Connect(updateWorldMusic))
+topLevelMaid:GiveTask(player:GetAttributeChangedSignal("EventEnvironmentEnabled"):Connect(updateWorldMusic))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("CurrentStage"):Connect(updateWorldMusic))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("MinigameParticipant"):Connect(updateWorldMusic))
 topLevelMaid:GiveTask(player:GetAttributeChangedSignal("MinigameState"):Connect(updateWorldMusic))
+
+local liveEventMusicMaid = Maid.new()
+topLevelMaid:GiveTask(liveEventMusicMaid)
+local function bindLiveEventMusicState(folder: Instance)
+	if not folder:IsA("Folder") then
+		return
+	end
+
+	liveEventMusicMaid.EnvironmentName = folder:GetAttributeChangedSignal("EnvironmentName"):Connect(updateWorldMusic)
+	liveEventMusicMaid.TestCountdownEnded = folder:GetAttributeChangedSignal("StudioSeasonalEnvironmentTestEnded"):Connect(updateWorldMusic)
+	updateWorldMusic()
+end
+
+local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
+if liveEventState then
+	bindLiveEventMusicState(liveEventState)
+end
+topLevelMaid:GiveTask(ReplicatedStorage.ChildAdded:Connect(function(child)
+	if child.Name == "LiveEventState" then
+		bindLiveEventMusicState(child)
+	end
+end))
+topLevelMaid:GiveTask(ReplicatedStorage.ChildRemoved:Connect(function(child)
+	if child.Name == "LiveEventState" then
+		liveEventMusicMaid.EnvironmentName = nil
+		liveEventMusicMaid.TestCountdownEnded = nil
+		updateWorldMusic()
+	end
+end))
+
 
 topLevelMaid:GiveTask(Players.PlayerAdded:Connect(function(addedPlayer)
 	bindObservedTrailPlayer(addedPlayer)

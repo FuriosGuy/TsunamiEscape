@@ -1,12 +1,12 @@
 {
   "className": "ParticleEmitter",
   "properties": {
-    "Brightness": 5,
+    "Brightness": 2,
     "Color": [{
-        "color": [1.0, 0.0, 0.0],
+        "color": [0.0, 0.0, 0.0],
         "time": 0.0
       }, {
-        "color": [1.0, 0.0, 0.0],
+        "color": [0.0, 0.0, 0.0],
         "time": 1.0
       }],
     "FlipbookLayout": "Grid4x4",

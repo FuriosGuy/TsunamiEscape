@@ -1,6 +1,13 @@
 {
   "className": "UIGradient",
   "properties": {
+    "Color": [{
+        "color": [0.0, 0.0, 0.0],
+        "time": 0.0
+      }, {
+        "color": [0.025, 0.1397, 0.0382],
+        "time": 1.0
+      }],
     "Rotation": 90,
     "Transparency": [{
         "envelope": 0.0,
@@ -9,7 +16,7 @@
       }, {
         "envelope": 0.0,
         "time": 1.0,
-        "value": 0.1
+        "value": 0.0
       }]
   }
 }

@@ -58,6 +58,8 @@ local PetUpgradeService = require(ServerModules:WaitForChild("PetUpgradeService"
 local PetInventoryService = require(ServerModules:WaitForChild("PetInventoryService"))
 local PetLuckyBlockPurchaseService = require(ServerModules:WaitForChild("PetLuckyBlockPurchaseService"))
 local PetPaidRandomItemPolicyService = require(ServerModules:WaitForChild("PetPaidRandomItemPolicyService"))
+local HalloweenCandyService = require(ServerModules:WaitForChild("HalloweenCandyService"))
+local HalloweenCandyShopService = require(ServerModules:WaitForChild("HalloweenCandyShopService"))
 
 local MODULE_NAME = "PlayerAttributeManager"
 local DEFAULT_PLAYER_SPEED = if typeof(PlayerHandler.DEFAULT_ATTRIBUTES.Player_Speed) == "number"
@@ -111,6 +113,19 @@ local function getEventBadgeId(eventKey: string, winsRequired: number): number
 	return 0
 end
 
+local function getCandyCollectorBadgeId(candyTotal: number): number
+	local candyBadges = badgeConfig.halloweenCandy
+	if typeof(candyBadges) ~= "table" then
+		return 0
+	end
+
+	local badgeId = candyBadges[candyTotal]
+	if typeof(badgeId) == "number" and badgeId > 0 then
+		return math.floor(badgeId)
+	end
+	return 0
+end
+
 local WELCOME_BADGE_ID = getBadgeId("welcome")
 local REBIRTH_ONCE_BADGE_ID = getBadgeId("rebirthOnce")
 local RACE_CHAMPION_BADGE_ID = getBadgeId("raceChampion")
@@ -146,6 +161,20 @@ local NEON_RUSH_BADGES: { ThresholdBadge } = {
 local FROSTBITE_RALLY_BADGES: { ThresholdBadge } = {
 	{ seconds = 10, badgeId = getEventBadgeId("frostbiteRally", 10), label = "FrostbiteRally10Wins" },
 	{ seconds = 40, badgeId = getEventBadgeId("frostbiteRally", 40), label = "FrostbiteRally40Wins" },
+}
+
+type CandyCollectorBadge = {
+	candyTotal: number,
+	badgeId: number,
+	label: string,
+}
+
+local CANDY_COLLECTOR_BADGES: { CandyCollectorBadge } = {
+	{ candyTotal = 10, badgeId = getCandyCollectorBadgeId(10), label = "CandyCollector10" },
+	{ candyTotal = 100, badgeId = getCandyCollectorBadgeId(100), label = "CandyCollector100" },
+	{ candyTotal = 250, badgeId = getCandyCollectorBadgeId(250), label = "CandyCollector250" },
+	{ candyTotal = 500, badgeId = getCandyCollectorBadgeId(500), label = "CandyCollector500" },
+	{ candyTotal = 1000, badgeId = getCandyCollectorBadgeId(1000), label = "CandyCollector1000" },
 }
 
 type EventBadgeSet = {
@@ -552,6 +581,15 @@ local function getEligibleBadgeRequests(player: Player): { BadgeRequest }
 		end
 	end
 
+	local candyCollected = player:GetAttribute("HalloweenCandyCollected")
+	if typeof(candyCollected) == "number" then
+		for _, badge in ipairs(CANDY_COLLECTOR_BADGES) do
+			if candyCollected >= badge.candyTotal then
+				addBadge(badge.badgeId, badge.label)
+			end
+		end
+	end
+
 	return requests
 end
 
@@ -704,6 +742,9 @@ local function completePlayerInitialization(player: Player, loadStatus: string):
 			syncPlayerBadges(player)
 		end)
 	end
+	playerMaid.HalloweenCandyBadgeSync = player:GetAttributeChangedSignal("HalloweenCandyCollected"):Connect(function()
+		syncPlayerBadges(player)
+	end)
 
 	-- Rule #3.10: Bound GamePass periodic sync
 	playerMaid.GPSyncThread = task.spawn(function()
@@ -1050,7 +1091,15 @@ local function registerCallbacks()
 	end
 
 	-- Trail DevProducts
-	local trailProducts = { "GalaxyTrail", "DemonTrail", "GoldTrail", "PurpleTrail", "BlueTrail", "GreenTrail" }
+	local trailProducts = {
+		"GalaxyTrail",
+		"DemonTrail",
+		"GoldTrail",
+		"PurpleTrail",
+		"BlueTrail",
+		"GreenTrail",
+		"HalloweenTrail",
+	}
 	for _, trailName in ipairs(trailProducts) do
 		local id = ProductService.DevProducts[trailName]
 		if id then
@@ -1105,6 +1154,12 @@ end
 
 -- INITIALIZATION
 ProductServerService.Init()
+HalloweenCandyService.Init()
+HalloweenCandyShopService.Init()
+activeMaid.HalloweenCandyServiceCleanup = script.Destroying:Connect(function()
+	HalloweenCandyService.Destroy()
+	HalloweenCandyShopService.Destroy()
+end)
 PetPaidRandomItemPolicyService.Init()
 activeMaid.PetPaidRandomItemPolicyServiceCleanup = script.Destroying:Connect(function()
 	PetPaidRandomItemPolicyService.Destroy()

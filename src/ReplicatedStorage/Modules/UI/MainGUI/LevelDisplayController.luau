@@ -1,6 +1,11 @@
 local LevelDisplayController = {}
 LevelDisplayController.__index = LevelDisplayController
 
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LEVEL_UP_PARTICLES = ReplicatedStorage:WaitForChild("Particles"):WaitForChild("LevelUp")
+local LEVEL_UP_PARTICLE_SIZE_SCALE = 2
+
 type ControllerOptions = {
 	player: Player,
 	visualFunctions: any,
@@ -28,6 +33,63 @@ type Controller = {
 local function getNumberAttribute(player: Player, attributeName: string, fallback: number): number
 	local value = player:GetAttribute(attributeName)
 	return if typeof(value) == "number" then value else fallback
+end
+
+local function emitLevelUpParticles(character: Model?): ()
+	if not character then
+		return
+	end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "LevelUpParticles"
+	attachment.Position = Vector3.zero
+	local emittersToFire: { { emitter: ParticleEmitter, count: number } } = {}
+	local maximumLifetime = 0
+
+	for _, descendant in LEVEL_UP_PARTICLES:GetDescendants() do
+		if descendant:IsA("ParticleEmitter") then
+			local emitter = descendant:Clone()
+			local emitCount = emitter:GetAttribute("EmitCount")
+			emitter.Enabled = false
+			local sizeKeypoints = table.create(#emitter.Size.Keypoints)
+			for _, keypoint in emitter.Size.Keypoints do
+				table.insert(
+					sizeKeypoints,
+					NumberSequenceKeypoint.new(
+						keypoint.Time,
+						keypoint.Value * LEVEL_UP_PARTICLE_SIZE_SCALE,
+						keypoint.Envelope * LEVEL_UP_PARTICLE_SIZE_SCALE
+					)
+				)
+			end
+			emitter.Size = NumberSequence.new(sizeKeypoints)
+			emitter.Parent = attachment
+
+			if typeof(emitCount) == "number" and emitCount >= 1 then
+				table.insert(emittersToFire, {
+					emitter = emitter,
+					count = math.floor(emitCount),
+				})
+				maximumLifetime = math.max(maximumLifetime, emitter.Lifetime.Max)
+			end
+		end
+	end
+
+	if #emittersToFire == 0 then
+		attachment:Destroy()
+		return
+	end
+
+	attachment.Parent = rootPart
+	for _, entry in emittersToFire do
+		entry.emitter:Emit(entry.count)
+	end
+	Debris:AddItem(attachment, math.max(maximumLifetime + 0.5, 0.5))
 end
 
 function LevelDisplayController.new(options: ControllerOptions): Controller
@@ -76,6 +138,7 @@ function LevelDisplayController:UpdateLevelDisplay()
 	elseif level > self.lastLevel then
 		self.soundService.PlayGuiSound("LevelUp")
 		self.visualFunctions.ShowLevelUpNotification(self.lastLevel, level, self.lastMaxSpeed, maxSpeed)
+		emitLevelUpParticles(self.player.Character)
 	end
 
 	self.lastLevel = level

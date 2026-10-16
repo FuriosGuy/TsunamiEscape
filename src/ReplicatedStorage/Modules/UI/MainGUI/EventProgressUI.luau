@@ -518,6 +518,10 @@ function EventProgressUI:positionMarkers()
 end
 
 function EventProgressUI:setEventTheme(theme: EventProgressTheme?)
+	if Players.LocalPlayer:GetAttribute("EventEnvironmentEnabled") == false then
+		theme = nil
+	end
+
 	self.themeMaid:DoCleaning()
 	self.themeMaid = Maid.new() :: MaidLike
 	self.activeWinsAttribute = if theme then theme.winsAttribute else "BloodmoonWins"
@@ -614,6 +618,11 @@ function EventProgressUI:Init()
 	end
 
 	self.root.Visible = false
+	self.maid:GiveTask(Players.LocalPlayer:GetAttributeChangedSignal("EventEnvironmentEnabled"):Connect(function()
+		if self.stateFolder then
+			self:setEventTheme(getActiveEventTheme(self.stateFolder))
+		end
+	end))
 	self:buildMarkers()
 	self.maid:GiveTask(self.trackFrame:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
 		self:positionMarkers()

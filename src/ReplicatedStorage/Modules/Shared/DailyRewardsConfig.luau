@@ -32,7 +32,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 	{
 		day = 1,
 		kind = "XPSpeed",
-		amount = 5000,
+		amount = 1000,
 		levelRequirementPercent = 0.05,
 		topColor = ColorConfig.Colors.Red.Color,
 		bottomColor = ColorConfig.Colors.Red.Gradient.Keypoints[2].Value,
@@ -50,7 +50,7 @@ local REWARDS: { DailyRewardDefinition } = table.freeze({
 	{
 		day = 3,
 		kind = "XPSpeed",
-		amount = 10000,
+		amount = 3000,
 		levelRequirementPercent = 0.15,
 		topColor = ColorConfig.Colors.Red.Color,
 		bottomColor = ColorConfig.Colors.Red.Gradient.Keypoints[2].Value,

@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
 local ProductService = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("ProductService_Server"))
 local CoreConfig = require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("CoreConfig_Server"))
+local HalloweenCandyShopConfig = require(ReplicatedStorage.Modules.Shared.HalloweenCandyShopConfig)
 local ProductServerService = require(script.Parent.ProductServerService)
 
 local TemporaryBoostService = {}
@@ -15,6 +16,7 @@ local REWARDED_AD_DURATION_SECONDS =
 	math.max(1, math.floor(tonumber(temporaryBoostConfig.rewardedAdDurationSeconds) or (5 * 60)))
 local SPEED_END_ATTRIBUTE = "TemporarySpeedBoostEndUnix"
 local WIN_END_ATTRIBUTE = "TemporaryWinBoostEndUnix"
+local CANDY_BOOST = HalloweenCandyShopConfig.CandyBoost
 
 local initialized = false
 
@@ -47,6 +49,10 @@ function TemporaryBoostService.GrantWinBoost(player: Player, durationSeconds: nu
 	return grantBoost(player, WIN_END_ATTRIBUTE, math.max(1, math.floor(durationSeconds)))
 end
 
+function TemporaryBoostService.GrantCandyBoost(player: Player): number
+	return grantBoost(player, CANDY_BOOST.endAttributeName, CANDY_BOOST.durationSeconds)
+end
+
 function TemporaryBoostService.Init()
 	if initialized then
 		return
@@ -72,6 +78,15 @@ function TemporaryBoostService.Init()
 			grantBoost(player, WIN_END_ATTRIBUTE, durationSeconds)
 		end
 	)
+
+	local candyBoostProductId = ProductService.DevProducts[CANDY_BOOST.productKey]
+	if typeof(candyBoostProductId) == "number" and candyBoostProductId > 0 then
+		ProductServerService.SetProductCallback(candyBoostProductId, function(player: Player)
+			TemporaryBoostService.GrantCandyBoost(player)
+		end)
+	else
+		DebugModule.debugWarn("Halloween candy boost developer product ID is missing", MODULE_NAME)
+	end
 
 	DebugModule.debugInfo("Temporary boost products registered", MODULE_NAME)
 end

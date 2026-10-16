@@ -7,7 +7,7 @@ export type Rarity = PetRarityConfig.Rarity
 export type LuckyBlockId = "Tier1" | "Tier2" | "Tier3" | "Premium" | "Event"
 export type LuckyBlockKind = "Wins" | "Premium" | "Event"
 export type RollCurrency = "Wins" | "Robux"
-export type EventId = "BloodMoon" | "NeonRush" | "FrostbiteRally"
+export type EventId = "BloodMoon" | "NeonRush" | "FrostbiteRally" | "Halloween"
 export type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | EventId
 
 export type PetDefinition = {
@@ -195,6 +195,10 @@ local LuckyBlocks: { [LuckyBlockId]: LuckyBlockDefinition } = table.freeze({
 			BloodMoon = 129,
 			NeonRush = 99,
 			FrostbiteRally = 99,
+			Halloween = 99,
+		}),
+		eventCandyPricePerRoll = table.freeze({
+			Halloween = 150,
 		}),
 		eventPools = table.freeze({
 			BloodMoon = table.freeze({
@@ -296,6 +300,39 @@ local LuckyBlocks: { [LuckyBlockId]: LuckyBlockDefinition } = table.freeze({
 					),
 				}),
 			}),
+			Halloween = table.freeze({
+				pets = table.freeze({
+					createPet("Halloween_LavaMeowl", "Lava Meowl", "Halloween/01_LavaMeowl", "Rare", 2.5),
+					createPet(
+						"Halloween_GoldBonecaAmbalabu",
+						"Gold Boneca Ambalabu",
+						"Halloween/02_GoldBonecaAmbalabu",
+						"Rare",
+						2.5
+					),
+					createPet(
+						"Halloween_GalaxyDragonCannelloni",
+						"Galaxy Dragon Cannelloni",
+						"Halloween/03_GalaxyDragonCannelloni",
+						"Epic",
+						4.5
+					),
+					createPet(
+						"Halloween_DiamondBrrBrrPatapim",
+						"Diamond Brr Brr Patapim",
+						"Halloween/04_DiamondBrrBrrPatapim",
+						"Legendary",
+						5.5
+					),
+					createPet(
+						"Halloween_LavaStrawberryElephant",
+						"Lava Strawberry Elephant",
+						"Halloween/05_LavaStrawberryElephant",
+						"Mythic",
+						13.5
+					),
+				}),
+			}),
 		}),
 	}),
 })
@@ -324,6 +361,17 @@ local LuckRarityWeightBonus: { [Rarity]: number } = table.freeze({
 	Legendary = 0.7,
 	Mythic = 3,
 })
+local MAX_EFFECTIVE_LUCK_MULTIPLIER = 40
+
+local function GetEffectiveLuckMultiplier(petLuckMultiplier: number, eventLuckMultiplier: number): number
+	local petLuck = if petLuckMultiplier == petLuckMultiplier and petLuckMultiplier >= 1
+		then math.min(petLuckMultiplier, 10)
+		else 1
+	local eventLuck = if eventLuckMultiplier == eventLuckMultiplier and eventLuckMultiplier >= 1
+		then math.min(eventLuckMultiplier, 4)
+		else 1
+	return math.min(petLuck * eventLuck, MAX_EFFECTIVE_LUCK_MULTIPLIER)
+end
 
 local function GetPetsForLuckyBlock(group: LuckyBlockGroup): { PetDefinition }?
 	if group == "Tier1" or group == "Tier2" or group == "Tier3" or group == "Premium" then
@@ -350,7 +398,7 @@ local function GetLuckAdjustedWeight(pet: PetDefinition, luckMultiplier: number)
 	if luck ~= luck or luck == math.huge or luck < 1 then
 		luck = 1
 	end
-	luck = math.min(luck, 10)
+	luck = math.min(luck, MAX_EFFECTIVE_LUCK_MULTIPLIER)
 
 	local luckProgress = math.log(luck) / math.log(10)
 	local rarityBonus = LuckRarityWeightBonus[pet.rarity] or 0
@@ -475,7 +523,9 @@ return table.freeze({
 			}),
 		}),
 	}),
+	MaxEffectiveLuckMultiplier = MAX_EFFECTIVE_LUCK_MULTIPLIER,
 	StarUpgrades = StarUpgradeRules,
+	GetEffectiveLuckMultiplier = GetEffectiveLuckMultiplier,
 	GetPetMultiplier = GetPetMultiplier,
 	GetLuckAdjustedWeight = GetLuckAdjustedWeight,
 	GetLuckyBlockOdds = GetLuckyBlockOdds,

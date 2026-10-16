@@ -11,6 +11,7 @@ local SoundService = require(ReplicatedStorage.Modules.SoundService)
 local ClientCullingService = require(ReplicatedStorage.Modules.ClientCullingService)
 local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
 local PetLuckyBlockRevealController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockRevealController)
+local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 
 type LuckyBlockGroup = PetConfig.LuckyBlockGroup
 
@@ -131,6 +132,7 @@ local function getFadeTransparency(fadeFrame: GuiObject): number
 end
 
 local MODULE_NAME = "PetLuckyBlockCutsceneController"
+local LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE = "LuckyBlockCutsceneActive"
 local MODEL_FOLDER_NAME = "Luckyblock_Models"
 local DROPOFF_NAME = "DropoffCrater"
 local LANDING_PART_NAME = "Cylinder"
@@ -190,6 +192,7 @@ local MODEL_NAME_BY_GROUP: { [string]: string } = {
 	BloodMoon = "Bloodmoon_LuckyBlock",
 	NeonRush = "Neon_LuckyBlock",
 	FrostbiteRally = "Frostbite_LuckyBlock",
+	Halloween = "Halloween_LuckyBlock",
 }
 
 local function getExtentAlong(frame: CFrame, size: Vector3, axis: Vector3): number
@@ -689,7 +692,7 @@ local function captureGui(self: CutsceneController): GuiSnapshot
 	end
 	self.mainGui.DisplayOrder = maxDisplayOrder + 1
 	for _, child in ipairs(self.mainGui:GetChildren()) do
-		if child:IsA("GuiObject") then
+		if child:IsA("GuiObject") and child.Name ~= "NotificationFrame" then
 			snapshot.mainGuiChildren[child] = child.Visible
 		end
 	end
@@ -750,6 +753,8 @@ local function destroyRun(self: CutsceneController, restoreOriginalCamera: boole
 		restoreGui(self, false)
 		self.guiSnapshot = nil
 	end
+	self.mainGui:SetAttribute(LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE, false)
+	VisualFunctions.SetNotificationSuppressed(false)
 	if invokeCallback and onFinished then
 		if typeof(onFinished) == "function" then
 			onFinished()
@@ -1291,6 +1296,8 @@ function PetLuckyBlockCutsceneController.Play(
 	self.generation += 1
 	local generation = self.generation
 	self.isPlaying = true
+	self.mainGui:SetAttribute(LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE, true)
+	VisualFunctions.SetNotificationSuppressed(true)
 	self.model = block
 	self.cameraSnapshot = {
 		camera = camera,

@@ -1,0 +1,19 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_CoffinW_Halloween_Pack_M_0"
+    },
+    "CanCollide": false,
+    "CanQuery": false,
+    "CanTouch": false,
+    "CFrame": [-112.9453, 12.2011, 25.9828, 0, 0.9659, -0.2588, 0, 0.2588, 0.9659, 1, 0, 0],
+    "Color": [105, 64, 40],
+    "InitialSize": [1.1081, 0.5403, 2.6827],
+    "Material": "Wood",
+    "MeshContent": "rbxassetid://102419314567796",
+    "PivotOffset": [8.7689, -0.9439, 23.0596, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [3.8715, 1.8878, 9.3727]
+  }
+}

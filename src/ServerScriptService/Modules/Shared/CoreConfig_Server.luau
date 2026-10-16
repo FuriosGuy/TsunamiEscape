@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CoreConfig = table.clone(require(ReplicatedStorage.Modules.Shared:WaitForChild("CoreConfig_Shared")))
 
+
 -- Funnel analytics configuration (server-side Roblox AnalyticsService events)
 CoreConfig.analytics = {
 	enabled = true, -- Master toggle for funnel analytics helpers.
@@ -53,6 +54,13 @@ CoreConfig.badges = {
 	frostbiteRally = {
 		[10] = 1950296135504240,
 		[40] = 1966822009022446,
+	},
+	halloweenCandy = {
+		[10] = 1352755888106575,
+		[100] = 2095447770236893,
+		[250] = 3590603505057797,
+		[500] = 330910764884357,
+		[1000] = 2110030669403670,
 	},
 }
 
@@ -157,10 +165,16 @@ CoreConfig.systemChat = {
 		"🏆 Blood Moon Wins reset when the next event begins, but unlocked rewards stay yours permanently!",
 	},
 	weekend2xPromotionalTemplates = {
-		"2X WEEKEND is live! Earn 2x XP Speed and 2x Wins!",
+		"{EVENT} is live! Earn 2x XP Speed and 2x Wins!",
 	},
 	weekend2xTipMessages = {
-		"Race through 2X WEEKEND to level up and earn Wins twice as fast!",
+		"Race through {EVENT} to level up and earn Wins twice as fast!",
+	},
+	weekendMultiplierPromotionalTemplates = {
+		"{EVENT} is live! Earn boosted XP Speed, Wins, and Lucky Block luck!",
+	},
+	weekendMultiplierTipMessages = {
+		"Use {EVENT} to earn more XP and Wins, and improve your Lucky Block pet odds!",
 	},
 	millionSpecialPromotionalTemplates = {
 		"1 MILLION SPECIAL is live! Enjoy 2x XP Speed and 2x Wins while it lasts!",
@@ -246,10 +260,38 @@ CoreConfig.liveEvents = {
 			},
 			showCountdown = false, -- Keep the weekend card compact instead of showing a long multi-hour timer.
 			preEventCountdownSeconds = 12 * 60 * 60, -- Show CountdownLabel1 during twelve hours before weekend starts.
-			schedule = { kind = "WeekendTokyoToPacific" }, -- Saturday 00:00 JST through Sunday end in Pacific Time.
+			schedule = {
+				kind = "AbsoluteWindow",
+				startUnix = 1791558000, -- Preserve current 2X WEEKEND event through its Roblox event window.
+				endUnix = 1791788400, -- 2026-10-12 07:00 UTC; do not alter current event before it ends.
+			},
 			effects = {
 				xpMultiplier = 2, -- Applies only to normal treadmill/movement XP.
 				winButtonMultiplier = 2, -- Applies only to normal WinButton rewards.
+			},
+		},
+		{
+			id = "WeekendMultiplier",
+			enabled = true,
+			priority = 110,
+			displayText = "{MULTIPLIER}X WEEKEND!",
+			displayColor = Color3.fromRGB(255, 199, 41),
+			multiplierChoices = { 2, 3, 4 },
+			multiplierRandomSeed = 749,
+			systemChat = {
+				promotionalTemplates = CoreConfig.systemChat.weekendMultiplierPromotionalTemplates,
+				tipMessages = CoreConfig.systemChat.weekendMultiplierTipMessages,
+			},
+			showCountdown = false,
+			preEventCountdownSeconds = 12 * 60 * 60,
+			schedule = {
+				kind = "WeekendTokyoToPacific",
+				activationAfterUnix = 1791788400, -- Begin at first scheduled weekend after current Roblox event ends.
+			},
+			effects = {
+				xpMultiplier = 1,
+				winButtonMultiplier = 1,
+				luckMultiplier = 1,
 			},
 		},
 		{
@@ -500,10 +542,10 @@ CoreConfig.server = {
 	},
 	tsunamiManager = {
 		debugStudioDisableWaves = false, -- Temporarily suppresses all tsunami spawning in Studio; published servers are unchanged.
-		startupSpawnCount = 15, -- Startup burst wave count before normal spawn loop.
+		startupSpawnCount = 25, -- Startup burst wave count before normal spawn loop.
 		startupSpawnInterval = 0, -- Delay between startup burst spawns (seconds).
-		minSpawnDelay = 10, -- Minimum random delay for normal spawn loop (seconds).
-		maxSpawnDelay = 20, -- Maximum random delay for normal spawn loop (seconds).
+		minSpawnDelay = 8, -- Minimum random delay for normal spawn loop (seconds).
+		maxSpawnDelay = 15, -- Maximum random delay for normal spawn loop (seconds).
 	},
 	worldManager = {
 		debounceTime = 1.0, -- Touch/button debounce window (seconds).
@@ -511,6 +553,9 @@ CoreConfig.server = {
 		activeTreadmillUpdateInterval = 0.1, -- Tick rate for active treadmill reward updates (seconds).
 		treadmillScanInterval = 0.1, -- Tick rate for treadmill touch scanning (seconds).
 		kartHolderName = "EquippedKarts", -- Workspace folder used to hold kart runtime models.
+		kartSeatOffsetAdjustments = {
+			["2_CoffinKart"] = 0.3, -- Lower kart seat anchor slightly so rider sits higher relative to coffin.
+		},
 		debugDisableKartEquipping = false, -- Disable kart attach flow for debugging.
 		debugDisableKartSounds = false, -- Disable kart engine sound setup for debugging.
 		debugDisableKartMotors = false, -- Disable kart motor creation for debugging.

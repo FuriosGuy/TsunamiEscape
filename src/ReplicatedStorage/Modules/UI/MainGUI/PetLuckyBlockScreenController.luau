@@ -12,7 +12,9 @@ local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local Maid = require(ReplicatedStorage.Modules.Maid)
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
 local NumberFormatting = require(ReplicatedStorage.Modules.Shared.NumberFormatting)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Shared)
 local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
+local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
 local ProductService = require(ReplicatedStorage.Modules.Shared.ProductService_Client)
 local PetLuckyBlockUIController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockUIController)
 local PetLuckyBlockPurchaseController = require(ReplicatedStorage.Modules.UI.MainGUI.PetLuckyBlockPurchaseController)
@@ -21,7 +23,7 @@ local ModalGuiVisibilityController = require(ReplicatedStorage.Modules.UI.MainGU
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 
 type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | PetConfig.EventId
-type PurchaseKind = "Wins" | "Robux"
+type PurchaseKind = "Wins" | "Candy" | "Robux"
 type RollSource = "Modal" | "Shop"
 type HumanoidStateSnapshot = {
 	walkSpeed: number,
@@ -32,6 +34,18 @@ type HumanoidStateSnapshot = {
 }
 type PriceRequestState = {
 	threads: { thread },
+}
+type PurchaseButtonStyleState = {
+	backgroundColor: Color3,
+	gradient: UIGradient?,
+	gradientColor: ColorSequence?,
+	gradientRotation: number?,
+	image: (ImageLabel | ImageButton)?,
+	imageAsset: string?,
+	imageColor: Color3?,
+	imageGradient: UIGradient?,
+	imageGradientColor: ColorSequence?,
+	imageGradientRotation: number?,
 }
 type Controller = {
 	player: Player,
@@ -58,6 +72,8 @@ type Controller = {
 	blurEffect: BlurEffect?,
 	blurTween: Tween?,
 	priceRequestStates: { [Frame]: PriceRequestState },
+	purchaseButtonStyleStates: { [GuiObject]: PurchaseButtonStyleState },
+	createdCandyRollButtons: { [GuiObject]: boolean },
 	_stopBlurTween: (self: Controller) -> (),
 	_playBlurTween: (self: Controller, targetSize: number, destroyOnComplete: boolean) -> (),
 	_beginBlur: (self: Controller) -> (),
@@ -95,6 +111,11 @@ local MODAL_OWNER = "LuckyBlock"
 local BLUR_SIZE = 18
 local POLICY_DISABLED_COLOR_MULTIPLIER = 0.75
 local ROLL_COUNTS = { 1, 3, 5 }
+local CANDY_CONFIG = CoreConfig.halloweenCandies
+local CANDY_ICON_ASSET_ID = if typeof(CANDY_CONFIG) == "table"
+	and typeof(CANDY_CONFIG.iconAssetId) == "string"
+	then CANDY_CONFIG.iconAssetId
+	else ""
 local GROUP_NAMES: { [string]: string } = {
 	Tier1 = "Tier 1 Lucky Block",
 	Tier2 = "Tier 2 Lucky Block",
@@ -103,6 +124,7 @@ local GROUP_NAMES: { [string]: string } = {
 	BloodMoon = "Blood Moon Lucky Block",
 	NeonRush = "Neon Rush Lucky Block",
 	FrostbiteRally = "Frostbite Rally Lucky Block",
+	Halloween = "Halloween Lucky Block",
 }
 
 local function isLuckyBlockGroup(value: unknown): boolean
@@ -120,6 +142,43 @@ end
 
 local function getRollPricePrefix(rollCount: number): string
 	return if rollCount == 1 then "OPEN" else "OPEN " .. tostring(rollCount) .. "X"
+end
+
+local function ensureCandyRollButton(
+	createdButtons: { [GuiObject]: boolean },
+	priceFrame: GuiObject,
+	winsFrame: GuiObject?,
+	rollCount: number
+): GuiObject?
+	local buttonName = "CandyRoll_" .. tostring(rollCount) .. "x"
+	local existing = priceFrame:FindFirstChild(buttonName, true)
+	if existing and existing:IsA("GuiObject") then
+		return existing
+	end
+	local configuredButton = priceFrame:FindFirstChild("CandyButton_" .. tostring(rollCount) .. "x", true)
+	if configuredButton and configuredButton:IsA("GuiObject") then
+		return configuredButton
+	end
+	if not winsFrame then
+		return nil
+	end
+
+	local clonedInstance = winsFrame:Clone()
+	if not clonedInstance:IsA("GuiObject") then
+		clonedInstance:Destroy()
+		return nil
+	end
+	local clone = clonedInstance
+	clone.Name = buttonName
+	clone.Visible = false
+	for _, descendant in ipairs(clone:GetDescendants()) do
+		if descendant:IsA("BaseScript") or descendant:IsA("ModuleScript") then
+			descendant:Destroy()
+		end
+	end
+	clone.Parent = winsFrame.Parent
+	createdButtons[clone] = true
+	return clone
 end
 
 local function findGuiButton(root: Instance): GuiButton?
@@ -140,10 +199,92 @@ local function findTextLabel(root: Instance, names: { string }): TextLabel?
 	return nil
 end
 
+local function refreshDisabledColorBaseline(frame: GuiObject): ()
+	frame:SetAttribute("OriginalDisabledBaseColor", frame.BackgroundColor3)
+	frame:SetAttribute("OriginalColor_BackgroundColor3", frame.BackgroundColor3)
+
+	local image = frame:FindFirstChild("Image", true)
+	if image and (image:IsA("ImageLabel") or image:IsA("ImageButton")) then
+		image:SetAttribute("OriginalColor_ImageColor3", image.ImageColor3)
+	end
+end
+
+local function setCandyButtonStyle(
+	styleStates: { [GuiObject]: PurchaseButtonStyleState },
+	frame: GuiObject,
+	useCandyStyle: boolean
+): ()
+	local state = styleStates[frame]
+	if not state then
+		local gradient = frame:FindFirstChildOfClass("UIGradient")
+		local imageInstance = frame:FindFirstChild("Image", true)
+		local image = if imageInstance and (imageInstance:IsA("ImageLabel") or imageInstance:IsA("ImageButton"))
+			then imageInstance
+			else nil
+		local imageGradient = if image then image:FindFirstChildOfClass("UIGradient") else nil
+		state = {
+			backgroundColor = frame.BackgroundColor3,
+			gradient = gradient,
+			gradientColor = if gradient then gradient.Color else nil,
+			gradientRotation = if gradient then gradient.Rotation else nil,
+			image = image,
+			imageAsset = if image then image.Image else nil,
+			imageColor = if image then image.ImageColor3 else nil,
+			imageGradient = imageGradient,
+			imageGradientColor = if imageGradient then imageGradient.Color else nil,
+			imageGradientRotation = if imageGradient then imageGradient.Rotation else nil,
+		}
+		styleStates[frame] = state
+	end
+
+	if useCandyStyle then
+		local style = ColorConfig.Colors.Purple
+		frame.BackgroundColor3 = style.Color
+		if state.gradient then
+			state.gradient.Color = style.Gradient
+			state.gradient.Rotation = 90
+		end
+		if state.image then
+			state.image.Image = CANDY_ICON_ASSET_ID
+			state.image.ImageColor3 = Color3.new(1, 1, 1)
+		end
+		if state.imageGradient then
+			state.imageGradient.Color = ColorSequence.new(Color3.new(1, 1, 1))
+		end
+		refreshDisabledColorBaseline(frame)
+		VisualFunctions.SetFrameDisabledState(
+			frame,
+			frame:GetAttribute("UiDisabled") == true,
+			POLICY_DISABLED_COLOR_MULTIPLIER
+		)
+		return
+	end
+
+	frame.BackgroundColor3 = state.backgroundColor
+	if state.gradient and state.gradientColor and state.gradientRotation then
+		state.gradient.Color = state.gradientColor
+		state.gradient.Rotation = state.gradientRotation
+	end
+	if state.image then
+		state.image.Image = state.imageAsset or ""
+		state.image.ImageColor3 = state.imageColor or Color3.new(1, 1, 1)
+	end
+	if state.imageGradient and state.imageGradientColor and state.imageGradientRotation then
+		state.imageGradient.Color = state.imageGradientColor
+		state.imageGradient.Rotation = state.imageGradientRotation
+	end
+	refreshDisabledColorBaseline(frame)
+	VisualFunctions.SetFrameDisabledState(
+		frame,
+		frame:GetAttribute("UiDisabled") == true,
+		POLICY_DISABLED_COLOR_MULTIPLIER
+	)
+end
+
 local function showPolicyRestrictionNotification(): ()
 	local theme = VisualFunctions.NotificationThemes.Red or VisualFunctions.NotificationThemes.Default
 	VisualFunctions.ShowNotification(
-		"LUCKY BLOCKS ARE UNAVAILABLE FOR YOUR ACCOUNT!",
+		"ROBUX ROLL UNAVAILABLE",
 		theme.textColor,
 		theme.gradientBottomColor
 	)
@@ -187,6 +328,8 @@ function PetLuckyBlockScreenController.new(mainGui: ScreenGui): Controller?
 		blurEffect = nil,
 		blurTween = nil,
 		priceRequestStates = {},
+		purchaseButtonStyleStates = {},
+		createdCandyRollButtons = {},
 	}, PetLuckyBlockScreenController) :: Controller
 
 	self.purchaseController = PetLuckyBlockPurchaseController.new(
@@ -434,26 +577,24 @@ function PetLuckyBlockScreenController._updatePrices(self: Controller, group: Lu
 	self.priceRequestStates[priceFrame] = requestState
 	local policyReady = self.player:GetAttribute("Pet_RandomItemPolicyLoaded") == true
 	local paidRandomItemsAllowed = policyReady and self.player:GetAttribute("Pet_PaidRandomItemsRestricted") ~= true
-	local policyControlsThisFrame = priceFrame == self.mainFrame
+	local candyBalanceValue = self.player:GetAttribute("HalloweenCandyCount")
+	local candyBalance = if typeof(candyBalanceValue) == "number" then math.max(0, math.floor(candyBalanceValue)) else 0
 	local showWins = isWinsGroup(group)
+	local showCandy = group == "Halloween"
 	for _, rollCount in ipairs(ROLL_COUNTS) do
 		local winsFrame = priceFrame:FindFirstChild("BuyButton_" .. tostring(rollCount) .. "x", true)
+		local candyFrame = ensureCandyRollButton(
+			self.createdCandyRollButtons,
+			priceFrame,
+			if winsFrame and winsFrame:IsA("GuiObject") then winsFrame else nil,
+			rollCount
+		)
 		local robuxFrame = priceFrame:FindFirstChild("RobuxBuyButton_" .. tostring(rollCount) .. "x", true)
 		if winsFrame and winsFrame:IsA("GuiObject") then
 			winsFrame.Visible = showWins
-			if policyControlsThisFrame and winsFrame:IsA("GuiObject") then
-				VisualFunctions.SetFrameDisabledState(
-					winsFrame,
-					not paidRandomItemsAllowed,
-					POLICY_DISABLED_COLOR_MULTIPLIER
-				)
-			end
+			VisualFunctions.SetFrameDisabledState(winsFrame, false, POLICY_DISABLED_COLOR_MULTIPLIER)
 			if showWins then
-				local costPerRoll = if group == "Tier1"
-						or group == "Tier2"
-						or group == "Tier3"
-					then PetConfig.LuckyBlocks[group].winCostPerRoll
-					else nil
+				local costPerRoll = PetConfig.LuckyBlocks[group].winCostPerRoll
 				local priceLabel = findTextLabel(winsFrame, { "PriceLabel", "AmountLabel", "CostLabel" })
 				local button = findGuiButton(winsFrame)
 				if typeof(costPerRoll) == "number" and costPerRoll > 0 then
@@ -469,19 +610,49 @@ function PetLuckyBlockScreenController._updatePrices(self: Controller, group: Lu
 					end
 				elseif button and button:IsA("TextButton") then
 					button.Text = "PRICE UNAVAILABLE"
-					DebugModule.debugWarn("Missing Wins cost | group=" .. group, MODULE_NAME)
+					DebugModule.debugWarn("Missing roll currency cost | group=" .. group .. " | currency=Wins", MODULE_NAME)
+				end
+			end
+		end
+		if candyFrame then
+			candyFrame.Visible = showCandy
+			setCandyButtonStyle(self.purchaseButtonStyleStates, candyFrame, showCandy)
+			if showCandy then
+				local candyPrices = PetConfig.LuckyBlocks.Event.eventCandyPricePerRoll
+				local costPerRoll = candyPrices and candyPrices.Halloween
+				local canAffordCandyRoll = typeof(costPerRoll) == "number"
+					and costPerRoll > 0
+					and candyBalance >= costPerRoll * rollCount
+				VisualFunctions.SetFrameDisabledState(
+					candyFrame,
+					not canAffordCandyRoll,
+					POLICY_DISABLED_COLOR_MULTIPLIER
+				)
+				local priceLabel = findTextLabel(candyFrame, { "PriceLabel", "AmountLabel", "CostLabel" })
+				local button = findGuiButton(candyFrame)
+				if typeof(costPerRoll) == "number" and costPerRoll > 0 then
+					local priceText = getRollPricePrefix(rollCount)
+						.. " FOR "
+						.. NumberFormatting.FormatNumber(costPerRoll * rollCount)
+						.. " CANDY"
+					if priceLabel then
+						priceLabel.Text = priceText
+					elseif button and button:IsA("TextButton") then
+						button.Text = priceText
+					end
+				elseif button and button:IsA("TextButton") then
+					button.Text = "PRICE UNAVAILABLE"
+					DebugModule.debugWarn("Missing roll currency cost | group=" .. group .. " | currency=Candy", MODULE_NAME)
 				end
 			end
 		end
 		if robuxFrame and robuxFrame:IsA("GuiObject") then
 			robuxFrame.Visible = true
-			if policyControlsThisFrame and robuxFrame:IsA("GuiObject") then
-				VisualFunctions.SetFrameDisabledState(
-					robuxFrame,
-					not paidRandomItemsAllowed,
-					POLICY_DISABLED_COLOR_MULTIPLIER
-				)
-			end
+			VisualFunctions.SetFrameDisabledState(
+				robuxFrame,
+				not paidRandomItemsAllowed,
+				POLICY_DISABLED_COLOR_MULTIPLIER
+			)
 			local productId = ProductService.DevProducts[getProductKey(group, rollCount)]
 			local priceLabel = findTextLabel(robuxFrame, { "PriceLabel" })
 			local button = findGuiButton(robuxFrame)
@@ -788,6 +959,12 @@ function PetLuckyBlockScreenController.Init(self: Controller): ()
 	self.maid:GiveTask(
 		self.player:GetAttributeChangedSignal("Pet_PaidRandomItemsRestricted"):Connect(refreshPolicyAvailability)
 	)
+	self.maid:GiveTask(self.player:GetAttributeChangedSignal("HalloweenCandyCount"):Connect(function()
+		local group = self.activeGroup
+		if self.isOpen and group == "Halloween" then
+			self:_updatePrices(group)
+		end
+	end))
 	self.maid:GiveTask(self.mainFrame.DescendantAdded:Connect(function()
 		self:_bindExitButton()
 	end))
@@ -834,6 +1011,18 @@ function PetLuckyBlockScreenController.Destroy(self: Controller): ()
 	self.modalVisibilityController:SetNotificationLayer(self.openFrame, false)
 	self.modalVisibilityController:Restore()
 	self:_cancelPriceRequests(nil)
+	for frame in pairs(self.purchaseButtonStyleStates) do
+		if frame.Parent then
+			setCandyButtonStyle(self.purchaseButtonStyleStates, frame, false)
+		end
+	end
+	table.clear(self.purchaseButtonStyleStates)
+	for frame in pairs(self.createdCandyRollButtons) do
+		if frame.Parent then
+			frame:Destroy()
+		end
+	end
+	table.clear(self.createdCandyRollButtons)
 	self:_stopBlurTween()
 	if self.blurEffect then
 		self.blurEffect:Destroy()

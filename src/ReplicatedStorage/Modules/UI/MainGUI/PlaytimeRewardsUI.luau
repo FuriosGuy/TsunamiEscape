@@ -26,6 +26,7 @@ local FREE_TREADMILL_CLAIMED_ATTRIBUTE = if RunService:IsStudio()
 	else "FreeTreadmillClaimed"
 local FREE_TREADMILL_REMAINING_ATTRIBUTE = "FreeTreadmillClaimRemainingSeconds"
 local FREE_TREADMILL_CLAIM_ID = "FreeTreadmill"
+local LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE = "LuckyBlockCutsceneActive"
 local COUNTDOWN_UPDATE_INTERVAL = 0.2
 local COMPACT_NUMBER_THRESHOLD_LENGTH = 20
 local READY_TEXT_STYLE = ColorConfig.UI.PlaytimeRewards.ReadyTextStyle
@@ -289,6 +290,7 @@ function PlaytimeRewardsUI.new(options: ControllerOptions)
 		else nil
 	self.lastClaimableCount = -1
 	self.freeTreadmillButtonFrame = nil
+	self.spinWheelFrame = nil
 	self.freeTreadmillClaimButton = nil
 	self.freeTreadmillCountdownLabel = nil
 	self.freeTreadmillClaimLabel = nil
@@ -677,7 +679,9 @@ function PlaytimeRewardsUI:RefreshFreeTreadmillButton()
 	end
 
 	local claimed = self.player:GetAttribute(FREE_TREADMILL_CLAIMED_ATTRIBUTE) == true
-	frame.Visible = not claimed
+	local spinWheelOpen = self.spinWheelFrame ~= nil and self.spinWheelFrame.Visible
+	local cutsceneActive = self.root:GetAttribute(LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE) == true
+	frame.Visible = not claimed and not spinWheelOpen and not cutsceneActive
 	local button = self.freeTreadmillClaimButton
 	if claimed then
 		self.freeTreadmillClaimPending = false
@@ -783,6 +787,9 @@ function PlaytimeRewardsUI:Refresh()
 end
 
 function PlaytimeRewardsUI:Bind()
+	self.maid:GiveTask(self.root:GetAttributeChangedSignal(LUCKY_BLOCK_CUTSCENE_ACTIVE_ATTRIBUTE):Connect(function()
+		self:RefreshFreeTreadmillButton()
+	end))
 	self.maid:GiveTask(self.player:GetAttributeChangedSignal(PLAYTIME_ELAPSED_ATTRIBUTE):Connect(function()
 		self:Refresh()
 	end))
@@ -802,6 +809,12 @@ function PlaytimeRewardsUI:Bind()
 	self.maid:GiveTask(self.root.DescendantAdded:Connect(function(descendant)
 		if descendant.Name == "FreeTreadmillButtonFrame" then
 			self:BindFreeTreadmillButton()
+		elseif descendant.Name == "SpinWheelFrame" and descendant:IsA("GuiObject") then
+			self.spinWheelFrame = descendant
+			self.maid.FreeTreadmillSpinWheelVisibility = descendant:GetPropertyChangedSignal("Visible"):Connect(function()
+				self:RefreshFreeTreadmillButton()
+			end)
+			self:RefreshFreeTreadmillButton()
 		end
 		if descendant.Name == "RewardsFrame" or descendant.Name == "PlaytimeRewardButton_Template" then
 			task.defer(function()
@@ -814,7 +827,11 @@ function PlaytimeRewardsUI:Bind()
 		end
 	end))
 	self.maid:GiveTask(self.root.DescendantRemoving:Connect(function(descendant)
-		if descendant == self.freeTreadmillButtonFrame then
+		if descendant == self.spinWheelFrame then
+			self.maid.FreeTreadmillSpinWheelVisibility = nil
+			self.spinWheelFrame = nil
+			self:RefreshFreeTreadmillButton()
+		elseif descendant == self.freeTreadmillButtonFrame then
 			self.maid.FreeTreadmillButtonConnection = nil
 			self.maid.FreeTreadmillDescendantAdded = nil
 			self.freeTreadmillButtonFrame = nil
@@ -834,6 +851,13 @@ function PlaytimeRewardsUI:Bind()
 			end)
 		end
 	end))
+	local spinWheelCandidate = self.root:FindFirstChild("SpinWheelFrame", true)
+	if spinWheelCandidate and spinWheelCandidate:IsA("GuiObject") then
+		self.spinWheelFrame = spinWheelCandidate
+		self.maid.FreeTreadmillSpinWheelVisibility = spinWheelCandidate:GetPropertyChangedSignal("Visible"):Connect(function()
+			self:RefreshFreeTreadmillButton()
+		end)
+	end
 
 	self.maid:GiveTask(RunService.Heartbeat:Connect(function(dt)
 		self.updateAccumulator += dt

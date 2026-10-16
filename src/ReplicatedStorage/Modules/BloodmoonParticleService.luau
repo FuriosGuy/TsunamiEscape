@@ -23,6 +23,7 @@ type ParticleDefinition = {
 	instanceName: string,
 	placementMode: "Ground" | "AbovePlayer",
 	verticalOffset: number?,
+	size: number?,
 }
 
 type BloodmoonParticleController = {
@@ -216,6 +217,9 @@ function BloodmoonParticleService:_getActiveParticleDefinition(): ParticleDefini
 	if not stateFolder then
 		return nil
 	end
+	if self.player:GetAttribute("EventEnvironmentEnabled") == false then
+		return nil
+	end
 
 	local environmentName = stateFolder:GetAttribute("EnvironmentName")
 	if typeof(environmentName) ~= "string" then
@@ -369,7 +373,8 @@ function BloodmoonParticleService:_createVisual()
 
 	local visual = template:Clone()
 	visual.Name = definition.instanceName
-	visual.Size = Vector3.new(self.config.size, math.max(visual.Size.Y, 0.1), self.config.size)
+	local visualSize = definition.size or self.config.size
+	visual.Size = Vector3.new(visualSize, math.max(visual.Size.Y, 0.1), visualSize)
 	visual.Anchored = true
 	visual.CanCollide = false
 	visual.CanTouch = false
@@ -382,7 +387,7 @@ function BloodmoonParticleService:_createVisual()
 		visual.CFrame = getGroundCFrame(rootPart, groundY :: number, visual.Size.Y)
 	end
 	local mobileRateMultiplier = if ClientDeviceProfile.IsMobile() then self.config.mobileRateMultiplier else 1
-	normalizeParticleRates(visual, template.Size, self.config.size, mobileRateMultiplier)
+	normalizeParticleRates(visual, template.Size, visualSize, mobileRateMultiplier)
 
 	for _, descendant in ipairs(visual:GetDescendants()) do
 		if descendant:IsA("BasePart") then
@@ -589,6 +594,9 @@ function BloodmoonParticleService:Start()
 		if player == self.player then
 			self:Destroy()
 		end
+	end)
+	self.maid.EventEnvironmentEnabled = self.player:GetAttributeChangedSignal("EventEnvironmentEnabled"):Connect(function()
+		self:_refreshVisual()
 	end)
 
 	self:_watchForState()

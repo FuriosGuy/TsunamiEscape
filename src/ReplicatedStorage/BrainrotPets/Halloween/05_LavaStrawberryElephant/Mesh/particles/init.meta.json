@@ -1,0 +1,101 @@
+{
+  "className": "ParticleEmitter",
+  "properties": {
+    "Acceleration": [1.4999, 2.4998, 0],
+    "Brightness": 11,
+    "Color": [{
+        "color": [1.0, 0.4588, 0.1882],
+        "time": 0.0
+      }, {
+        "color": [1.0, 0.4588, 0.1882],
+        "time": 1.0
+      }],
+    "Lifetime": [0.5, 0.5],
+    "LightEmission": 1,
+    "Rate": 30,
+    "Size": [{
+        "envelope": 0.0,
+        "time": 0.0,
+        "value": 0.08
+      }, {
+        "envelope": 0.0,
+        "time": 0.0526,
+        "value": 0.0798
+      }, {
+        "envelope": 0.0,
+        "time": 0.1053,
+        "value": 0.0791
+      }, {
+        "envelope": 0.0,
+        "time": 0.1579,
+        "value": 0.078
+      }, {
+        "envelope": 0.0,
+        "time": 0.2105,
+        "value": 0.0765
+      }, {
+        "envelope": 0.0,
+        "time": 0.2632,
+        "value": 0.0745
+      }, {
+        "envelope": 0.0,
+        "time": 0.3158,
+        "value": 0.072
+      }, {
+        "envelope": 0.0,
+        "time": 0.3684,
+        "value": 0.0691
+      }, {
+        "envelope": 0.0,
+        "time": 0.4211,
+        "value": 0.0658
+      }, {
+        "envelope": 0.0,
+        "time": 0.4737,
+        "value": 0.062
+      }, {
+        "envelope": 0.0,
+        "time": 0.5263,
+        "value": 0.0578
+      }, {
+        "envelope": 0.0,
+        "time": 0.5789,
+        "value": 0.0532
+      }, {
+        "envelope": 0.0,
+        "time": 0.6316,
+        "value": 0.0481
+      }, {
+        "envelope": 0.0,
+        "time": 0.6842,
+        "value": 0.0425
+      }, {
+        "envelope": 0.0,
+        "time": 0.7368,
+        "value": 0.0366
+      }, {
+        "envelope": 0.0,
+        "time": 0.7895,
+        "value": 0.0301
+      }, {
+        "envelope": 0.0,
+        "time": 0.8421,
+        "value": 0.0233
+      }, {
+        "envelope": 0.0,
+        "time": 0.8947,
+        "value": 0.016
+      }, {
+        "envelope": 0.0,
+        "time": 0.9474,
+        "value": 0.0082
+      }, {
+        "envelope": 0.0,
+        "time": 1.0,
+        "value": 0.0
+      }],
+    "Speed": [0.9999, 5.9996],
+    "SpreadAngle": [30, 30],
+    "Texture": "rbxassetid://7145697379"
+  }
+}

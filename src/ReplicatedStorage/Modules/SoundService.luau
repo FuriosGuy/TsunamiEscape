@@ -1,11 +1,13 @@
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RobloxSoundService = game:GetService("SoundService")
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ContentProvider = game:GetService("ContentProvider")
 
 local DebugModule = require(ReplicatedStorage.Modules.DebugModule)
 local TweenConfig = require(ReplicatedStorage.Modules.UI.TweenConfig)
+local CoreConfig = require(ReplicatedStorage.Modules.Shared.CoreConfig_Shared)
 
 local SoundService = {}
 local guiSoundFolder: Folder? = nil
@@ -20,6 +22,7 @@ end
 SoundService.WorldMusicPlaylists = {
 	Fallback = {
 		LobbyMusicList = { 138197655562277 },
+		HalloweenLobbyMusicList = { 137954899587949 },
 		ActionMusicList = { 72666159391603 },
 	},
 }
@@ -90,6 +93,38 @@ end
 local function getSoundAssetKey(soundId: string | number): string
 	local normalizedId = normalizeSoundId(soundId)
 	return string.gsub(normalizedId, "^rbxassetid://", "")
+end
+
+local function shouldUseHalloweenLobbyMusic(): boolean
+	local seasonalEnvironment = CoreConfig.seasonalEnvironment
+	local halloweenEnvironmentName = if typeof(seasonalEnvironment) == "table"
+		then seasonalEnvironment.environmentName
+		else nil
+	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
+	if RunService:IsStudio()
+		and liveEventState
+		and liveEventState:GetAttribute("StudioSeasonalEnvironmentTestEnded") == true
+	then
+		return false
+	end
+
+	local utcMonth = DateTime.now():ToUniversalTime().Month
+	local isSeasonalMonth = typeof(seasonalEnvironment) == "table"
+		and seasonalEnvironment.enabled == true
+		and seasonalEnvironment.month == utcMonth
+		and halloweenEnvironmentName == "Halloween"
+	if isSeasonalMonth then
+		return true
+	end
+
+	local localPlayer = Players.LocalPlayer
+	if localPlayer and localPlayer:GetAttribute("EventEnvironmentEnabled") == false then
+		return false
+	end
+
+	return liveEventState ~= nil
+		and liveEventState:GetAttribute("EnvironmentName") == "Halloween"
+		and halloweenEnvironmentName == "Halloween"
 end
 
 local function getSoundTemplate(soundName: string): Sound?
@@ -319,6 +354,10 @@ end
 
 function SoundService.GetWorldMusicPlaylist(worldName: string?, playlistName: string?): { string | number }
 	local selectedPlaylistName = playlistName or "LobbyMusicList"
+	if selectedPlaylistName == "LobbyMusicList" and shouldUseHalloweenLobbyMusic() then
+		return SoundService.WorldMusicPlaylists.Fallback.HalloweenLobbyMusicList
+	end
+
 	local worldConfig = if worldName then SoundService.WorldMusicPlaylists[worldName] else nil
 	local playlist = worldConfig and worldConfig[selectedPlaylistName]
 	if playlist and #playlist > 0 then
@@ -366,6 +405,13 @@ function SoundService.PlayGuiSound(soundName: string, parent: Instance?, overrid
 	end
 
 	return sound
+end
+
+function SoundService.StopGuiSound(soundName: string)
+	local sound = if guiSoundFolder then guiSoundFolder:FindFirstChild(soundName) else nil
+	if sound and sound:IsA("Sound") then
+		sound:Stop()
+	end
 end
 
 function SoundService.PlayWorkspaceSound(soundName: string, parent: Instance, overrideSettings: SoundOverrides?): Sound?

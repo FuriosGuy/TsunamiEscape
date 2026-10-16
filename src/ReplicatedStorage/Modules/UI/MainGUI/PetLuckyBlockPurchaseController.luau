@@ -9,9 +9,9 @@ local Maid = require(ReplicatedStorage.Modules.Maid)
 local ProductService = require(ReplicatedStorage.Modules.Shared.ProductService_Client)
 local VisualFunctions = require(ReplicatedStorage.Modules.UI.VisualFunctions)
 
-type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | "BloodMoon" | "NeonRush" | "FrostbiteRally"
+type LuckyBlockGroup = "Tier1" | "Tier2" | "Tier3" | "Premium" | "BloodMoon" | "NeonRush" | "FrostbiteRally" | "Halloween"
 type RollCount = number
-type PurchaseKind = "Wins" | "Robux"
+type PurchaseKind = "Wins" | "Candy" | "Robux"
 type RollSource = "World" | "Shop"
 
 type PendingRoll = {
@@ -134,8 +134,10 @@ function PetLuckyBlockPurchaseController.Init(self: Controller): ()
 		clearPending(self)
 		if status == "NotEnoughWins" then
 			showNotification("NOT ENOUGH WINS!", "Red")
+		elseif status == "NotEnoughCandy" then
+			showNotification("NOT ENOUGH CANDY!", "Red")
 		elseif status == "PaidRandomItemsRestricted" then
-			showNotification("PAID LUCKY BLOCKS ARE UNAVAILABLE FOR YOUR ACCOUNT!", "Red")
+			showNotification("ROBUX ROLL UNAVAILABLE", "Red")
 		elseif status == "PolicyLoading" then
 			showNotification("CHECKING PAID LUCKY BLOCK ACCESS!", "Gold")
 		elseif status == "InventoryFull" then
@@ -196,7 +198,7 @@ function PetLuckyBlockPurchaseController.RequestRoll(
 		DebugModule.debugWarn("Rejected unsupported Lucky Block roll count", MODULE_NAME)
 		return false
 	end
-	if purchaseKind ~= "Wins" and purchaseKind ~= "Robux" then
+	if purchaseKind ~= "Wins" and purchaseKind ~= "Candy" and purchaseKind ~= "Robux" then
 		DebugModule.debugWarn("Rejected unsupported Lucky Block purchase kind", MODULE_NAME)
 		return false
 	end
@@ -205,13 +207,15 @@ function PetLuckyBlockPurchaseController.RequestRoll(
 		return false
 	end
 	local player = Players.LocalPlayer
-	if player:GetAttribute("Pet_RandomItemPolicyLoaded") ~= true then
-		showNotification("CHECKING LUCKY BLOCK ACCESS!", "Gold")
-		return false
-	end
-	if player:GetAttribute("Pet_PaidRandomItemsRestricted") == true then
-		showNotification("LUCKY BLOCKS ARE UNAVAILABLE FOR YOUR ACCOUNT!", "Red")
-		return false
+	if purchaseKind == "Robux" then
+		if player:GetAttribute("Pet_RandomItemPolicyLoaded") ~= true then
+			showNotification("CHECKING PAID LUCKY BLOCK ACCESS!", "Gold")
+			return false
+		end
+		if player:GetAttribute("Pet_PaidRandomItemsRestricted") == true then
+			showNotification("ROBUX ROLL UNAVAILABLE", "Red")
+			return false
+		end
 	end
 
 	local pendingRoll = self.pendingRoll

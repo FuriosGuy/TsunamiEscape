@@ -1,7 +1,10 @@
 --!strict
 
 local CoreConfig = require(script.Parent:WaitForChild("CoreConfig_Shared"))
-local PetConfig = require(game:GetService("ReplicatedStorage").Modules.Config.PetConfig)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PetConfig = require(ReplicatedStorage.Modules.Config.PetConfig)
+local ColorConfig = require(ReplicatedStorage.Modules.Config.ColorConfig)
+local halloweenTrailStyle = ColorConfig.Colors.LuckyBlockHalloween
 local spinWheelConfig = CoreConfig.spinWheel or {}
 local rewardedAdMaxSpins = if typeof(spinWheelConfig.rewardedAdMaxSpins) == "number"
 	then math.max(1, math.floor(spinWheelConfig.rewardedAdMaxSpins))
@@ -42,6 +45,10 @@ PlayerDataConfig.DEFAULT_ATTRIBUTES = {
 	Pet_OverflowClaims = "[]",
 	Pet_PaidRandomItemsRestricted = true,
 	Pet_RandomItemPolicyLoaded = false,
+	HalloweenCandyCount = 0,
+	HalloweenCandyCollected = 0,
+	HalloweenCandyState = "{}",
+	HalloweenCandyBoostEndUnix = 0,
 
 	WinCount = 0,
 	WinMultiplier = 1,
@@ -107,6 +114,7 @@ PlayerDataConfig.DEFAULT_MAX_PLAYER_SPEED = if typeof(PlayerDataConfig.DEFAULT_A
 
 PlayerDataConfig.TRAIL_ORDER = {
 	"GalaxyTrail",
+	"HalloweenTrail",
 	"DemonTrail",
 	"EclipseTrail",
 	"FlameTrail",
@@ -181,6 +189,17 @@ PlayerDataConfig.TRAIL_CONFIGS = {
 		BackgroundColor = Color3.fromRGB(255, 255, 0),
 		GradientBottomColor = Color3.fromRGB(255, 183, 0),
 		ProductKey = "GoldTrail",
+	},
+	HalloweenTrail = {
+		DisplayName = "Halloween Trail",
+		XPMultiplier = 8,
+		CanBuyWithWins = false,
+		WinsRequired = 0,
+		BackgroundColor = halloweenTrailStyle.Color,
+		Gradient = halloweenTrailStyle.Gradient,
+		GradientBottomColor = halloweenTrailStyle.Gradient.Keypoints[2].Value,
+		eventId = "Halloween",
+		ProductKey = "HalloweenTrail",
 	},
 	FlameTrail = {
 		DisplayName = "Flame Trail",

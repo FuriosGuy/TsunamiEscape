@@ -1,3 +1,6 @@
 {
-  "className": "SunRaysEffect"
+  "className": "SunRaysEffect",
+  "properties": {
+    "Enabled": false
+  }
 }

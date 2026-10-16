@@ -4,6 +4,7 @@ type ScheduleDefinition = {
 	kind: string?,
 	startUnix: number?,
 	endUnix: number?,
+	activationAfterUnix: number?,
 	cycleStartUnix: number?,
 	firstCyclePreEventCountdownStartUnix: number?,
 	firstCycleStartsActive: boolean?,
@@ -190,6 +191,16 @@ local function getNextTokyoSaturdayMidnight(timestamp: number): number
 	return candidateTimestamp
 end
 
+local function getEligibleWeekendStart(definition: ScheduleDefinition, timestamp: number): number
+	local startUnix = getNextTokyoSaturdayMidnight(timestamp)
+	local activationAfterUnix = definition.activationAfterUnix
+	if typeof(activationAfterUnix) == "number" and startUnix < activationAfterUnix then
+		local weeksToAdvance = math.ceil((activationAfterUnix - startUnix) / (7 * 24 * 60 * 60))
+		startUnix += weeksToAdvance * 7 * 24 * 60 * 60
+	end
+	return startUnix
+end
+
 local function getRecurringDefinitionValues(definition: ScheduleDefinition): RecurringDefinitionValues?
 	local cycleStartUnix = definition.cycleStartUnix
 	if typeof(cycleStartUnix) ~= "number" or cycleStartUnix <= 0 then
@@ -276,7 +287,8 @@ function LiveEventSchedule.IsActive(schedule: any, timestamp: number): boolean
 
 	local definition = schedule :: ScheduleDefinition
 	if definition.kind == "WeekendTokyoToPacific" then
-		return isWeekendTokyoToPacific(timestamp)
+		return (typeof(definition.activationAfterUnix) ~= "number" or timestamp >= definition.activationAfterUnix)
+			and isWeekendTokyoToPacific(timestamp)
 	end
 	if definition.kind == "AbsoluteWindow" then
 		return typeof(definition.startUnix) == "number"
@@ -306,7 +318,11 @@ function LiveEventSchedule.GetEndUnix(schedule: any, timestamp: number): number?
 	if definition.kind == "AbsoluteWindow" and typeof(definition.endUnix) == "number" then
 		return definition.endUnix
 	end
-	if definition.kind == "WeekendTokyoToPacific" and isWeekendTokyoToPacific(timestamp) then
+	if
+		definition.kind == "WeekendTokyoToPacific"
+		and (typeof(definition.activationAfterUnix) ~= "number" or timestamp >= definition.activationAfterUnix)
+		and isWeekendTokyoToPacific(timestamp)
+	then
 		return getNextPacificMondayMidnight(timestamp)
 	end
 	if definition.kind == "RecurringWindow" then
@@ -334,7 +350,7 @@ function LiveEventSchedule.GetStartUnix(schedule: any, timestamp: number): numbe
 		return definition.startUnix
 	end
 	if definition.kind == "WeekendTokyoToPacific" then
-		return getNextTokyoSaturdayMidnight(timestamp)
+		return getEligibleWeekendStart(definition, timestamp)
 	end
 	if definition.kind == "RecurringWindow" then
 		local recurringWindow = getRecurringWindowAtTimestamp(definition, timestamp)
