@@ -20,6 +20,23 @@ type CullState = {
 	wasRateReduced: boolean,
 }
 
+type PositionSource =
+	{ kind: "BasePart", instance: BasePart }
+	| { kind: "Attachment", instance: Attachment }
+	| { kind: "Model", instance: Model }
+
+type TrackedVisualCache = {
+	ancestors: { Instance },
+	isPlayerOrKartVisual: boolean,
+	positionSources: { [string]: PositionSource? },
+	positionSourceResolved: { [string]: boolean },
+}
+
+type AncestorWatch = {
+	instances: { [Instance]: boolean },
+	nameConnection: RBXScriptConnection,
+}
+
 type CullConfig = {
 	enabled: boolean,
 	updateInterval: number,
@@ -84,6 +101,14 @@ local taggedInstances: { [string]: { [Instance]: boolean } } = {}
 local taggedInstanceCursors: { [string]: Instance? } = {}
 local playerCharacterModels: { [Model]: boolean } = {}
 local playerCharacterConnections: { [Player]: { RBXScriptConnection } } = {}
+local trackedVisualCaches: { [Instance]: TrackedVisualCache } = {}
+local trackedVisualReferenceCounts: { [Instance]: number } = {}
+local trackedVisualTags: { [Instance]: { [string]: boolean } } = {}
+local trackedVisualConnections: { [Instance]: { RBXScriptConnection } } = {}
+local ancestorWatches: { [Instance]: AncestorWatch } = {}
+local invalidateAncestorDependents: (Instance) -> ()
+local restoreTrackedVisualToActiveSets: (Instance) -> ()
+local unregisterTrackedVisual: (Instance, string) -> ()
 local localShadowLights: { [Light]: boolean } = {}
 local localShadowLightConnections: { [Light]: RBXScriptConnection } = {}
 local localShadowLightCount = 0
@@ -250,6 +275,7 @@ local function untrackPlayerCharacter(player: Player): ()
 	local character = player.Character
 	if character then
 		playerCharacterModels[character] = nil
+		invalidateAncestorDependents(character)
 	end
 
 	local connections = playerCharacterConnections[player]
@@ -271,12 +297,15 @@ local function trackPlayerCharacter(player: Player): ()
 	local character = player.Character
 	if character then
 		playerCharacterModels[character] = true
+		invalidateAncestorDependents(character)
 	end
 	table.insert(connections, player.CharacterAdded:Connect(function(character: Model)
 		playerCharacterModels[character] = true
+		invalidateAncestorDependents(character)
 	end))
 	table.insert(connections, player.CharacterRemoving:Connect(function(character: Model)
 		playerCharacterModels[character] = nil
+		invalidateAncestorDependents(character)
 	end))
 end
 
@@ -297,95 +326,78 @@ local function bindPlayerCharacterTracking(): ()
 	end)
 end
 
-local function getBasePartPosition(instance: Instance): Vector3?
+local function getBasePartOrAttachmentSource(instance: Instance): PositionSource?
 	if instance:IsA("BasePart") then
-		return instance.Position
-	end
-
-	if instance:IsA("Attachment") then
-		return instance.WorldPosition
+		return { kind = "BasePart", instance = instance }
+	elseif instance:IsA("Attachment") then
+		return { kind = "Attachment", instance = instance }
 	end
 
 	local ancestorPart = instance:FindFirstAncestorWhichIsA("BasePart")
 	if ancestorPart and ancestorPart:IsA("BasePart") then
-		return ancestorPart.Position
+		return { kind = "BasePart", instance = ancestorPart }
 	end
 
 	return nil
 end
 
-local function getModelPosition(model: Model): Vector3?
-	local ok, pivot = pcall(function()
-		return model:GetPivot()
-	end)
-	if ok then
-		return pivot.Position
-	end
-
-	return nil
-end
-
-local function getInstanceOrAncestorPosition(instance: Instance): Vector3?
-	local directPosition = getBasePartPosition(instance)
-	if directPosition then
-		return directPosition
+local function getPositionSourceForObject(instance: Instance): PositionSource?
+	local directSource = getBasePartOrAttachmentSource(instance)
+	if directSource then
+		return directSource
 	end
 
 	if instance:IsA("Model") then
-		return getModelPosition(instance)
+		return { kind = "Model", instance = instance }
 	end
 
 	local parent = instance.Parent
 	if parent then
-		local parentPosition = getBasePartPosition(parent)
-		if parentPosition then
-			return parentPosition
+		local parentSource = getBasePartOrAttachmentSource(parent)
+		if parentSource then
+			return parentSource
 		end
 		if parent:IsA("Model") then
-			return getModelPosition(parent)
+			return { kind = "Model", instance = parent }
 		end
 	end
 
 	local ancestorModel = instance:FindFirstAncestorWhichIsA("Model")
-	if ancestorModel then
-		return getModelPosition(ancestorModel)
+	if ancestorModel and ancestorModel:IsA("Model") then
+		return { kind = "Model", instance = ancestorModel }
 	end
 
 	return nil
 end
 
-local function getBillboardPosition(billboardGui: BillboardGui): Vector3?
-	local adornee = billboardGui.Adornee
-	if adornee then
-		return getInstanceOrAncestorPosition(adornee)
+local function getPositionSourceForTag(tag: string, instance: Instance): PositionSource?
+	if tag == ClientCullingService.Tags.Billboard and instance:IsA("BillboardGui") then
+		return getPositionSourceForObject(instance.Adornee or instance)
+	elseif tag == ClientCullingService.Tags.SurfaceGui and instance:IsA("SurfaceGui") then
+		return getPositionSourceForObject(instance.Adornee or instance)
+	elseif tag == ClientCullingService.Tags.Beam and instance:IsA("Beam") then
+		return getBasePartOrAttachmentSource(instance)
+	elseif tag == ClientCullingService.Tags.Shadow and instance:IsA("BasePart") then
+		return { kind = "BasePart", instance = instance }
 	end
 
-	return getInstanceOrAncestorPosition(billboardGui)
+	local parent = instance.Parent
+	return if parent then getPositionSourceForObject(parent) else nil
 end
 
-local function getSurfaceGuiPosition(surfaceGui: SurfaceGui): Vector3?
-	local adornee = surfaceGui.Adornee
-	if adornee then
-		return getInstanceOrAncestorPosition(adornee)
+local function readPositionSource(source: PositionSource?): Vector3?
+	if not source then
+		return nil
+	elseif source.kind == "BasePart" then
+		return source.instance.Position
+	elseif source.kind == "Attachment" then
+		return source.instance.WorldPosition
 	end
 
-	return getInstanceOrAncestorPosition(surfaceGui)
-end
-
-local function getBeamPosition(beam: Beam): Vector3?
-	local attachment0 = beam.Attachment0
-	local attachment1 = beam.Attachment1
-	if attachment0 and attachment1 then
-		return (attachment0.WorldPosition + attachment1.WorldPosition) * 0.5
-	end
-	if attachment0 then
-		return attachment0.WorldPosition
-	end
-	if attachment1 then
-		return attachment1.WorldPosition
-	end
-
-	return getBasePartPosition(beam)
+	local ok, pivot = pcall(function()
+		return source.instance:GetPivot()
+	end)
+	return if ok then pivot.Position else nil
 end
 
 local function isSupportedForTag(tag: string, instance: Instance): boolean
@@ -406,25 +418,6 @@ local function isSupportedForTag(tag: string, instance: Instance): boolean
 	end
 
 	return false
-end
-
-local function getInstancePositionForTag(tag: string, instance: Instance): Vector3?
-	if tag == ClientCullingService.Tags.Billboard and instance:IsA("BillboardGui") then
-		return getBillboardPosition(instance)
-	elseif tag == ClientCullingService.Tags.SurfaceGui and instance:IsA("SurfaceGui") then
-		return getSurfaceGuiPosition(instance)
-	elseif tag == ClientCullingService.Tags.Beam and instance:IsA("Beam") then
-		return getBeamPosition(instance)
-	elseif tag == ClientCullingService.Tags.Shadow and instance:IsA("BasePart") then
-		return instance.Position
-	end
-
-	local parent = instance.Parent
-	if parent then
-		return getInstanceOrAncestorPosition(parent)
-	end
-
-	return nil
 end
 
 local function getCullDistanceForTag(tag: string, config: CullConfig): number
@@ -623,6 +616,259 @@ local function isPlayerOrKartVisual(instance: Instance): boolean
 	return false
 end
 
+local function refreshTrackedVisualProtection(instance: Instance): ()
+	local cache = trackedVisualCaches[instance]
+	if not cache then
+		return
+	end
+
+	for _, ancestor in ipairs(cache.ancestors) do
+		if (ancestor:IsA("Model") and playerCharacterModels[ancestor])
+			or ancestor.Name == "EquippedKarts"
+			or ancestor.Name == "EquippedKart"
+		then
+			cache.isPlayerOrKartVisual = true
+			return
+		end
+	end
+
+	cache.isPlayerOrKartVisual = false
+end
+
+invalidateAncestorDependents = function(ancestor: Instance): ()
+	local watch = ancestorWatches[ancestor]
+	if not watch then
+		return
+	end
+
+	for instance in pairs(watch.instances) do
+		refreshTrackedVisualProtection(instance)
+	end
+end
+
+local function unwatchAncestor(instance: Instance, ancestor: Instance): ()
+	local watch = ancestorWatches[ancestor]
+	if not watch then
+		return
+	end
+
+	watch.instances[instance] = nil
+	if next(watch.instances) == nil then
+		watch.nameConnection:Disconnect()
+		ancestorWatches[ancestor] = nil
+	end
+end
+
+local function watchAncestor(instance: Instance, ancestor: Instance): ()
+	local watch = ancestorWatches[ancestor]
+	if not watch then
+		local instances: { [Instance]: boolean } = {}
+		watch = {
+			instances = instances,
+			nameConnection = ancestor:GetPropertyChangedSignal("Name"):Connect(function()
+				invalidateAncestorDependents(ancestor)
+			end),
+		}
+		ancestorWatches[ancestor] = watch
+	end
+	watch.instances[instance] = true
+end
+
+local function invalidateTrackedVisualPosition(instance: Instance): ()
+	local cache = trackedVisualCaches[instance]
+	if cache then
+		table.clear(cache.positionSources)
+		table.clear(cache.positionSourceResolved)
+	end
+end
+
+local function rebuildTrackedVisualAncestry(instance: Instance): ()
+	local cache = trackedVisualCaches[instance]
+	if not cache then
+		return
+	end
+
+	for _, ancestor in ipairs(cache.ancestors) do
+		unwatchAncestor(instance, ancestor)
+	end
+	table.clear(cache.ancestors)
+
+	local current: Instance? = instance
+	while current do
+		table.insert(cache.ancestors, current)
+		watchAncestor(instance, current)
+		current = current.Parent
+	end
+
+	refreshTrackedVisualProtection(instance)
+	invalidateTrackedVisualPosition(instance)
+	restoreTrackedVisualToActiveSets(instance)
+end
+
+local function registerTrackedVisual(instance: Instance, tag: string): ()
+	local trackedTags = trackedVisualTags[instance]
+	if not trackedTags then
+		trackedTags = {}
+		trackedVisualTags[instance] = trackedTags
+	end
+	if trackedTags[tag] then
+		return
+	end
+	trackedTags[tag] = true
+	local referenceCount = trackedVisualReferenceCounts[instance] or 0
+	trackedVisualReferenceCounts[instance] = referenceCount + 1
+	if referenceCount > 0 then
+		return
+	end
+
+	-- Cache ancestry classification and structural position refs; shared ancestor
+	-- watchers invalidate classification when names or player-character ownership change.
+	trackedVisualCaches[instance] = {
+		ancestors = {},
+		isPlayerOrKartVisual = false,
+		positionSources = {},
+		positionSourceResolved = {},
+	}
+	local connections: { RBXScriptConnection } = {}
+	trackedVisualConnections[instance] = connections
+	table.insert(connections, instance.AncestryChanged:Connect(function()
+		rebuildTrackedVisualAncestry(instance)
+	end))
+	table.insert(connections, instance.Destroying:Connect(function()
+		local currentTags = trackedVisualTags[instance]
+		if not currentTags then
+			return
+		end
+		local tagsToRemove: { string } = {}
+		for trackedTag in pairs(currentTags) do
+			table.insert(tagsToRemove, trackedTag)
+		end
+		for _, trackedTag in ipairs(tagsToRemove) do
+			local instances = taggedInstances[trackedTag]
+			if instances then
+				instances[instance] = nil
+			end
+			taggedInstanceCursors[trackedTag] = nil
+			unregisterTrackedVisual(instance, trackedTag)
+		end
+		restoreInstance(instance)
+	end))
+
+	if instance:IsA("BillboardGui") or instance:IsA("SurfaceGui") then
+		table.insert(connections, instance:GetPropertyChangedSignal("Adornee"):Connect(function()
+			invalidateTrackedVisualPosition(instance)
+		end))
+	elseif instance:IsA("Beam") then
+		table.insert(connections, instance:GetPropertyChangedSignal("Attachment0"):Connect(function()
+			invalidateTrackedVisualPosition(instance)
+		end))
+		table.insert(connections, instance:GetPropertyChangedSignal("Attachment1"):Connect(function()
+			invalidateTrackedVisualPosition(instance)
+		end))
+	end
+
+	rebuildTrackedVisualAncestry(instance)
+end
+
+unregisterTrackedVisual = function(instance: Instance, tag: string): ()
+	local trackedTags = trackedVisualTags[instance]
+	if not trackedTags or not trackedTags[tag] then
+		return
+	end
+	trackedTags[tag] = nil
+	if next(trackedTags) == nil then
+		trackedVisualTags[instance] = nil
+	end
+
+	local referenceCount = trackedVisualReferenceCounts[instance] or 0
+	if referenceCount > 1 then
+		trackedVisualReferenceCounts[instance] = referenceCount - 1
+		return
+	end
+
+	trackedVisualReferenceCounts[instance] = nil
+	local connections = trackedVisualConnections[instance]
+	if connections then
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		trackedVisualConnections[instance] = nil
+	end
+	local cache = trackedVisualCaches[instance]
+	if cache then
+		for _, ancestor in ipairs(cache.ancestors) do
+			unwatchAncestor(instance, ancestor)
+		end
+		trackedVisualCaches[instance] = nil
+	end
+end
+
+restoreTrackedVisualToActiveSets = function(instance: Instance): ()
+	if not instance:IsDescendantOf(Workspace) then
+		return
+	end
+	local trackedTags = trackedVisualTags[instance]
+	if not trackedTags then
+		return
+	end
+
+	for tag in pairs(trackedTags) do
+		local instances = taggedInstances[tag]
+		if instances and not instances[instance] then
+			instances[instance] = true
+			taggedInstanceCursors[tag] = nil
+		end
+	end
+end
+
+local function clearTrackedVisualCaches(): ()
+	for _, connections in pairs(trackedVisualConnections) do
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+	end
+	for _, watch in pairs(ancestorWatches) do
+		watch.nameConnection:Disconnect()
+	end
+	table.clear(trackedVisualCaches)
+	table.clear(trackedVisualReferenceCounts)
+	table.clear(trackedVisualTags)
+	table.clear(trackedVisualConnections)
+	table.clear(ancestorWatches)
+end
+
+local function getCachedInstancePosition(tag: string, instance: Instance): Vector3?
+	if tag == ClientCullingService.Tags.Beam and instance:IsA("Beam") then
+		local attachment0 = instance.Attachment0
+		local attachment1 = instance.Attachment1
+		if attachment0 and attachment1 then
+			return (attachment0.WorldPosition + attachment1.WorldPosition) * 0.5
+		elseif attachment0 then
+			return attachment0.WorldPosition
+		elseif attachment1 then
+			return attachment1.WorldPosition
+		end
+	end
+
+	local cache = trackedVisualCaches[instance]
+	if not cache then
+		return readPositionSource(getPositionSourceForTag(tag, instance))
+	end
+	if not cache.positionSourceResolved[tag] then
+		cache.positionSources[tag] = getPositionSourceForTag(tag, instance)
+		cache.positionSourceResolved[tag] = true
+	end
+	return readPositionSource(cache.positionSources[tag])
+end
+
+local function isTrackedPlayerOrKartVisual(instance: Instance): boolean
+	local cache = trackedVisualCaches[instance]
+	if not cache then
+		return isPlayerOrKartVisual(instance)
+	end
+	return cache.isPlayerOrKartVisual
+end
+
 local function shouldSkipGuiAutoTag(instance: LayerCollector): boolean
 	local localPlayer = Players.LocalPlayer
 	local playerGui = if localPlayer then localPlayer:FindFirstChildOfClass("PlayerGui") else nil
@@ -816,7 +1062,7 @@ local function updateTaggedSet(
 		end
 
 		local supportedInstance = instance :: SupportedCullInstance
-		if isPlayerOrKartVisual(supportedInstance) then
+		if isTrackedPlayerOrKartVisual(supportedInstance) then
 			local state = instanceStates[supportedInstance]
 			if state and state.wasCulled then
 				applyCullState(supportedInstance, false)
@@ -824,7 +1070,7 @@ local function updateTaggedSet(
 			continue
 		end
 
-		local position = getInstancePositionForTag(tag, supportedInstance)
+		local position = getCachedInstancePosition(tag, supportedInstance)
 		if not position then
 			applyCullState(supportedInstance, false)
 			continue
@@ -937,14 +1183,19 @@ local function bindTagTracking(tag: string)
 
 	for _, instance in ipairs(CollectionService:GetTagged(tag)) do
 		instances[instance] = true
+		registerTrackedVisual(instance, tag)
 	end
 
 	serviceMaid:GiveTask(CollectionService:GetInstanceAddedSignal(tag):Connect(function(instance)
-		instances[instance] = true
+		if not instances[instance] then
+			instances[instance] = true
+			registerTrackedVisual(instance, tag)
+		end
 		taggedInstanceCursors[tag] = nil
 	end))
 	serviceMaid:GiveTask(CollectionService:GetInstanceRemovedSignal(tag):Connect(function(instance)
 		instances[instance] = nil
+		unregisterTrackedVisual(instance, tag)
 		taggedInstanceCursors[tag] = nil
 		restoreInstance(instance)
 	end))
@@ -1016,6 +1267,7 @@ function ClientCullingService.Stop()
 		table.clear(instances)
 	end
 	table.clear(taggedInstanceCursors)
+	clearTrackedVisualCaches()
 
 	for instance in pairs(instanceStates) do
 		restoreInstance(instance)

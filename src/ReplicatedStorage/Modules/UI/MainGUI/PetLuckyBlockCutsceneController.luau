@@ -145,6 +145,7 @@ local TUMBLE_X_TURNS = 2
 local TUMBLE_Y_TURNS = 3
 local TUMBLE_Z_TURNS = 1
 local CAMERA_MOVE_DURATION = 0.65
+local FAST_CAMERA_MOVE_DURATION = 0.4
 local CAMERA_FOCUS_DURATION = 0.78
 local DROP_DURATION = 1.75
 local IMPACT_SOUND_LEAD = 0.3
@@ -1076,7 +1077,8 @@ local function playImpact(
 	impactPosition: Vector3,
 	group: LuckyBlockGroup,
 	petIds: { string },
-	fasterOpen: boolean
+	fasterOpen: boolean,
+	releaseCameraToReveal: (() -> ())?
 ): ()
 	if not isCurrentRun(self, generation) then
 		return
@@ -1094,6 +1096,9 @@ local function playImpact(
 	createRockSlamVfx(self, generation, impactPosition)
 
 	if fasterOpen then
+		if releaseCameraToReveal then
+			releaseCameraToReveal()
+		end
 		local block = self.model
 		local cameraSnapshot = self.cameraSnapshot
 		if not block or not cameraSnapshot then
@@ -1317,7 +1322,11 @@ function PetLuckyBlockCutsceneController.Play(
 		block.Parent = Workspace
 		local cameraMove = TweenService:Create(
 			camera,
-			TweenInfo.new(CAMERA_MOVE_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			TweenInfo.new(
+				if fasterOpen then FAST_CAMERA_MOVE_DURATION else CAMERA_MOVE_DURATION,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			),
 			{ CFrame = cameraStart }
 		)
 		self.runMaid:GiveTask(cameraMove)
@@ -1343,6 +1352,7 @@ function PetLuckyBlockCutsceneController.Play(
 				self.runMaid:GiveTask(stumbleValue)
 				local hasEnteredViewport = false
 				local impactSoundPlayed = false
+				local cameraControlReleased = false
 				local totalDropHeight = math.max(startingPivot.Position.Y - landingPivot.Position.Y, 0)
 				local impactCueDistance = totalDropHeight
 					* (1 - (1 - math.clamp(IMPACT_SOUND_LEAD / DROP_DURATION, 0, 1)) ^ 2)
@@ -1411,10 +1421,12 @@ function PetLuckyBlockCutsceneController.Play(
 					end
 					local trackingCFrame =
 						getCameraFacingBlockCFrame(cameraPosition, blockFocusPosition, shakeValue.Value)
-					camera.CFrame = cameraStart:Lerp(trackingCFrame, focusBlend.Value)
-						* getImpactCameraOffset(shakeValue.Value)
-					local introFocusPosition = cameraPosition + cameraStart.LookVector * 100
-					camera.Focus = CFrame.new(introFocusPosition:Lerp(blockFocusPosition, focusBlend.Value))
+					if not cameraControlReleased then
+						camera.CFrame = cameraStart:Lerp(trackingCFrame, focusBlend.Value)
+							* getImpactCameraOffset(shakeValue.Value)
+						local introFocusPosition = cameraPosition + cameraStart.LookVector * 100
+						camera.Focus = CFrame.new(introFocusPosition:Lerp(blockFocusPosition, focusBlend.Value))
+					end
 				end
 				self.runMaid:GiveTask(pivotValue:GetPropertyChangedSignal("Value"):Connect(updateShot))
 				self.runMaid:GiveTask(shakeValue:GetPropertyChangedSignal("Value"):Connect(updateShot))
@@ -1427,7 +1439,19 @@ function PetLuckyBlockCutsceneController.Play(
 					impactSoundPlayed = true
 					spinValue.Value = 1
 					updateShot()
-					playImpact(self, generation, shakeValue, stumbleValue, impactPosition, group, petIds, true)
+					playImpact(
+						self,
+						generation,
+						shakeValue,
+						stumbleValue,
+						impactPosition,
+						group,
+						petIds,
+						true,
+						function()
+							cameraControlReleased = true
+						end
+					)
 					return
 				end
 
@@ -1448,7 +1472,7 @@ function PetLuckyBlockCutsceneController.Play(
 						impactSoundPlayed = true
 						playCutsceneSound(self, "LuckyBlockImpact")
 					end
-					playImpact(self, generation, shakeValue, stumbleValue, impactPosition, group, petIds, false)
+					playImpact(self, generation, shakeValue, stumbleValue, impactPosition, group, petIds, false, nil)
 				end))
 				playCutsceneSound(self, "LuckyBlockFallWhoosh")
 				blockTween:Play()

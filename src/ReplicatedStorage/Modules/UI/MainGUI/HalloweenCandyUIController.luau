@@ -450,6 +450,9 @@ function HalloweenCandyUIController._updateCandyAnimations(
 	end
 
 	local serverTime = Workspace:GetServerTimeNow()
+	local bobCycle = BOB_DURATION * 2
+	local bobOffset = (1 - math.cos((2 * math.pi * serverTime) / bobCycle)) * 0.5 * BOB_HEIGHT
+	local yaw = (serverTime % ROTATION_DURATION) / ROTATION_DURATION * (2 * math.pi)
 	for _, candy in pairs(self.candies) do
 		if candy.isCollecting then
 			continue
@@ -467,11 +470,7 @@ function HalloweenCandyUIController._updateCandyAnimations(
 		end
 		candy.animationAccumulator %= interval
 
-		local cycle = BOB_DURATION * 2
-		local bobAlpha = (1 - math.cos((2 * math.pi * serverTime) / cycle)) * 0.5
-		local bobOffset = bobAlpha * BOB_HEIGHT
 		local basePosition = candy.baseCFrame.Position
-		local yaw = (serverTime % ROTATION_DURATION) / ROTATION_DURATION * (2 * math.pi)
 		candy.part.CFrame = CFrame.new(basePosition + Vector3.new(0, bobOffset, 0))
 			* CFrame.Angles(0, yaw, 0)
 			* candy.baseCFrame.Rotation

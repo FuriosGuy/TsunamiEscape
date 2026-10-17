@@ -75,6 +75,12 @@ local PARTICLE_DEFINITIONS: { [string]: ParticleDefinition } = {
 		placementMode = "AbovePlayer",
 		verticalOffset = 64,
 	},
+	Halloween = {
+		templateName = "HalloweenParticle",
+		instanceName = "HalloweenParticle_Local",
+		placementMode = "Ground",
+		size = 128,
+	},
 }
 
 local function getConfig(): ParticleConfig

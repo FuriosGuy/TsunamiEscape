@@ -121,7 +121,7 @@ CoreConfig.promptBuy = {
 	premiumPromptSelectionWeight = 1, -- Include Roblox Plus as a low-frequency random prompt offer.
 	studioAlwaysShow = false, -- Studio-only prompt test; live servers still use death/time triggers.
 	studioShowOwnedProducts = false, -- Studio-only preview: include already-owned permanent offers in the prompt.
-	visiblePosition = UDim2.new(0.897, 0, 0.21, 0),
+	visiblePosition = UDim2.new(0.791, 0, 0.21, 0),
 	hiddenPosition = UDim2.new(2, 0, 0.21, 0),
 	premiumPrompt = {
 		productImage = "rbxassetid://106963890821116",
@@ -137,10 +137,12 @@ CoreConfig.promptBuy = {
 		PetLuck8x = true,
 		PetLuck10x = true,
 	},
-	-- Only Neon/Frostbite pet Lucky Block products require their event to be active; Blood Moon stays available.
-		gatedDevProductKeyPrefixes = {
-			PetNeonRushLuckyBlockRoll = "NeonRush",
-			PetFrostbiteRallyLuckyBlockRoll = "FrostbiteRally",
+	-- Halloween products use the server's October Part 2 date gate; Neon/Frostbite rolls use active event IDs.
+	gatedDevProductKeyPrefixes = {
+		Halloween = "HalloweenPartTwo",
+		PetHalloweenLuckyBlockRoll = "HalloweenPartTwo",
+		PetNeonRushLuckyBlockRoll = "NeonRush",
+		PetFrostbiteRallyLuckyBlockRoll = "FrostbiteRally",
 	},
 	permanentDevProductKeys = {
 		GalaxyTrail = "Trail",

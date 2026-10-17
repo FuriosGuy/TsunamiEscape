@@ -5,6 +5,7 @@ local TARGET_ENVIRONMENT = "Halloween"
 local HOLD_MANUAL_ENVIRONMENT = true
 
 local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -65,10 +66,75 @@ if not environmentServiceModule or not environmentServiceModule:IsA("ModuleScrip
 	return
 end
 
-local serviceSuccess, environmentService = pcall(require, environmentServiceModule)
+local freshEnvironmentServiceModule = environmentServiceModule:Clone()
+freshEnvironmentServiceModule.Name = "EnvironmentService_CommandBar"
+freshEnvironmentServiceModule.Parent = modules
+local serviceSuccess, environmentService = pcall(require, freshEnvironmentServiceModule)
+freshEnvironmentServiceModule:Destroy()
 if not serviceSuccess or type(environmentService) ~= "table" or type(environmentService.ApplyForStudio) ~= "function" then
 	warn("[EnvironmentChanger] EnvironmentService manual API unavailable. Resync project first.")
 	return
+end
+
+local ATMOSPHERE_PROPERTIES = { "Color", "Decay", "Density", "Glare", "Haze", "Offset" }
+
+local function applyProfileClockTimeAndAtmosphere()
+	local expectedClockTime = profile:GetAttribute("ClockTime")
+	if typeof(expectedClockTime) == "number" then
+		Lighting.ClockTime = expectedClockTime
+	end
+
+	local sourceAtmosphere = profile:FindFirstChildOfClass("Atmosphere")
+	if not sourceAtmosphere then
+		return
+	end
+
+	local target = Lighting:FindFirstChild(sourceAtmosphere.Name)
+	if target and not target:IsA("Atmosphere") then
+		warn("[EnvironmentChanger] Atmosphere name is occupied by another class: " .. sourceAtmosphere.Name)
+		return
+	end
+
+	local targetAtmosphere: Atmosphere
+	if target and target:IsA("Atmosphere") then
+		targetAtmosphere = target
+	else
+		targetAtmosphere = sourceAtmosphere:Clone()
+		targetAtmosphere:SetAttribute("EnvironmentServiceOwned", true)
+		targetAtmosphere.Parent = Lighting
+	end
+
+	for _, propertyName in ipairs(ATMOSPHERE_PROPERTIES) do
+		(targetAtmosphere :: any)[propertyName] = (sourceAtmosphere :: any)[propertyName]
+	end
+end
+
+local function verifyLightingProfile(): (boolean, string)
+	local expectedClockTime = profile:GetAttribute("ClockTime")
+	if typeof(expectedClockTime) == "number" and math.abs(Lighting.ClockTime - expectedClockTime) > 0.001 then
+		return false, "ClockTime expected=" .. tostring(expectedClockTime) .. " actual=" .. tostring(Lighting.ClockTime)
+	end
+
+	local expectedAtmosphere = profile:FindFirstChildOfClass("Atmosphere")
+	if not expectedAtmosphere then
+		return true, "ClockTime=" .. tostring(Lighting.ClockTime) .. " | Atmosphere profile absent"
+	end
+
+	local actualAtmosphere = Lighting:FindFirstChild(expectedAtmosphere.Name)
+	if not actualAtmosphere or not actualAtmosphere:IsA("Atmosphere") then
+		return false, "Atmosphere instance missing: " .. expectedAtmosphere.Name
+	end
+
+	for _, propertyName in ipairs(ATMOSPHERE_PROPERTIES) do
+		if (actualAtmosphere :: any)[propertyName] ~= (expectedAtmosphere :: any)[propertyName] then
+			return false, "Atmosphere." .. propertyName .. " differs from profile"
+		end
+	end
+
+	return true,
+		"ClockTime=" .. tostring(Lighting.ClockTime)
+			.. " | Atmosphere.Color=" .. tostring(actualAtmosphere.Color)
+			.. " | Density=" .. tostring(actualAtmosphere.Density)
 end
 
 local ORIGINAL_COLOR_ATTRIBUTE = "EnvironmentChangerOriginalColor"
@@ -224,6 +290,13 @@ if stateFolder and stateFolder:IsA("Folder") then
 end
 
 environmentService.ApplyForStudio(TARGET_ENVIRONMENT)
+applyProfileClockTimeAndAtmosphere()
+local lightingVerified, lightingDetails = verifyLightingProfile()
+if lightingVerified then
+	print("[EnvironmentChanger] Lighting verified | " .. lightingDetails)
+else
+	warn("[EnvironmentChanger] Lighting profile did not apply | " .. lightingDetails)
+end
 
 local worlds = Workspace:FindFirstChild("Worlds")
 local world = worlds and worlds:FindFirstChild("World1")

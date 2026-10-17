@@ -208,7 +208,6 @@ local ONBOARDING_SESSION_STEP_FIRST_WIN = 5
 local ONBOARDING_SESSION_STEP_FIRST_DEATH = 6
 local ONBOARDING_SESSION_STEP_TUTORIAL_KART_OWNED = 7
 local ONBOARDING_SESSION_STEP_TUTORIAL_COMPLETED = 8
-local ONBOARDING_SESSION_STEP_SESSION_ENDED = 9
 
 type AnalyticsScalarValue = string | number | boolean
 type AnalyticsCustomFields = {
@@ -220,7 +219,6 @@ type AnalyticsCustomFields = {
 local playerMaids: { [Player]: any } = {}
 local preferenceRequestTimes: { [Player]: { [string]: number } } = {}
 local onboardingSessionIds: { [Player]: string } = {}
-local onboardingSessionStartedAt: { [Player]: number } = {}
 local cleanupInFlightPlayers: { [Player]: boolean } = {}
 local runtimeInitializationInFlight: { [Player]: boolean } = {}
 local runtimeInitialized: { [Player]: boolean } = {}
@@ -353,20 +351,6 @@ local function logOnboardingProgress(player: Player)
 	end
 end
 
-local function getSessionDurationBucket(durationSeconds: number): string
-	if durationSeconds < 30 then
-		return "Under30Seconds"
-	elseif durationSeconds < 120 then
-		return "30To119Seconds"
-	elseif durationSeconds < 300 then
-		return "2To4Minutes"
-	elseif durationSeconds < 600 then
-		return "5To9Minutes"
-	end
-
-	return "10PlusMinutes"
-end
-
 local function startOnboardingSession(player: Player)
 	if onboardingSessionIds[player] then
 		return
@@ -375,24 +359,11 @@ local function startOnboardingSession(player: Player)
 	local sessionId = FunnelAnalytics.OpenRecurringFunnel(player, ONBOARDING_SESSION_FUNNEL_NAME, "Session Started")
 	if sessionId then
 		onboardingSessionIds[player] = sessionId
-		onboardingSessionStartedAt[player] = os.clock()
 	end
 end
 
 local function finishOnboardingSession(player: Player)
-	local sessionId = onboardingSessionIds[player]
-	if sessionId then
-		local startedAt = onboardingSessionStartedAt[player] or os.clock()
-		local durationSeconds = math.max(0, os.clock() - startedAt)
-		logOnboardingSessionStep(player, ONBOARDING_SESSION_STEP_SESSION_ENDED, "Session Ended", {
-			customField01 = getSessionDurationBucket(durationSeconds),
-			customField02 = player:GetAttribute("WinCount") or 0,
-			customField03 = player:GetAttribute("TutorialCompleted") == true,
-		})
-	end
-
 	onboardingSessionIds[player] = nil
-	onboardingSessionStartedAt[player] = nil
 end
 
 local function setupLeaderstatsSync(player: Player, playerMaid: any)
@@ -842,6 +813,8 @@ local function onPlayerAdded(player: Player)
 		return
 	end
 
+	-- Rebuild derived rebirth multiplier from durable rebirth count for legacy profiles.
+	PlayerHandler.RecalculateRebirthMultiplier(player)
 	completePlayerInitialization(player, loadStatus)
 end
 

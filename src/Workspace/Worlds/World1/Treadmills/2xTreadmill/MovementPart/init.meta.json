@@ -4,7 +4,7 @@
     "Anchored": true,
     "BottomSurface": "Smooth",
     "CanCollide": false,
-    "CFrame": [54.8671, 8.6798, 26.8345, -1, 0, 0, 0, 1, 0, 0, 0, -1],
+    "CFrame": [69.5246, 8.6798, 25.8645, -0.9848, 0, -0.1736, 0, 1, 0, 0.1736, 0, -0.9848],
     "Color": [196, 40, 28],
     "Locked": true,
     "MaterialVariant": "Weld",

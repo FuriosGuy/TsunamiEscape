@@ -43,10 +43,6 @@ local analyticsFunnels = if analyticsConfig and typeof(analyticsConfig.funnels) 
 local DAILY_REWARD_FUNNEL_NAME = if analyticsFunnels and typeof(analyticsFunnels.dailyReward) == "string"
 	then analyticsFunnels.dailyReward
 	else "DailyRewardClaim"
-local DAILY_REWARD_CLAIM_ALL_FUNNEL_NAME = if analyticsFunnels
-		and typeof(analyticsFunnels.dailyRewardClaimAll) == "string"
-	then analyticsFunnels.dailyRewardClaimAll
-	else "DailyRewardClaimAll"
 
 type DailyRewardDefinition = DailyRewardsConfig.DailyRewardDefinition
 
@@ -54,7 +50,6 @@ local isInitialized = false
 local serviceMaid = Maid.new()
 local requestInFlight: { [Player]: boolean } = {}
 local lastRequestAt: { [Player]: number } = {}
-local claimAllFunnelSessions: { [Player]: string } = {}
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local dailyRewardAction = Remotes:FindFirstChild("DailyRewardAction") :: RemoteEvent?
@@ -391,24 +386,6 @@ function DailyRewardsService.ClaimAllRemaining(player: Player): boolean
 	local maxXPSpeedSnapshot = player:GetAttribute("MaxXPSpeed")
 	local currentWinsSnapshot = player:GetAttribute("WinCount")
 	local nowUnix = os.time()
-	local claimAllSessionId = claimAllFunnelSessions[player]
-	if not claimAllSessionId then
-		claimAllSessionId = FunnelAnalytics.OpenRecurringFunnel(
-			player,
-			DAILY_REWARD_CLAIM_ALL_FUNNEL_NAME,
-			"Claim All Purchased",
-			getCurrentDayFields(player)
-		)
-	else
-		FunnelAnalytics.LogRecurringStep(
-			player,
-			DAILY_REWARD_CLAIM_ALL_FUNNEL_NAME,
-			claimAllSessionId,
-			2,
-			"Claim All Purchased",
-			getCurrentDayFields(player)
-		)
-	end
 
 	local grantedPetName: string? = nil
 	local grantOk, grantError = pcall(function()
@@ -444,38 +421,12 @@ function DailyRewardsService.ClaimAllRemaining(player: Player): boolean
 		return false
 	end
 
-	if claimAllSessionId then
-		FunnelAnalytics.LogRecurringStep(
-			player,
-			DAILY_REWARD_CLAIM_ALL_FUNNEL_NAME,
-			claimAllSessionId,
-			if claimAllFunnelSessions[player] then 3 else 2,
-			"Claim All Rewards Granted",
-			getCurrentDayFields(player)
-		)
-	end
-	claimAllFunnelSessions[player] = nil
-
 	resetAfterClaimAll(player, nowUnix)
 	local claimAllMessage = if grantedPetName
 		then "CLAIMED ALL! YOU GOT " .. string.upper(grantedPetName) .. "!"
 		else "CLAIMED ALL DAILY REWARDS!"
 	ShowNotification:FireClient(player, claimAllMessage, "Green")
 	return true
-end
-
-local function handleClaimAllPromptOpened(player: Player, payload: { [string]: any })
-	local currentDay = sanitizeCurrentDay(player:GetAttribute(CURRENT_DAY_ATTRIBUTE))
-	local cycleCount = sanitizeCycleCount(player:GetAttribute(CYCLE_COUNT_ATTRIBUTE))
-	local sessionId =
-		FunnelAnalytics.OpenRecurringFunnel(player, DAILY_REWARD_CLAIM_ALL_FUNNEL_NAME, "Claim All Prompt Opened", {
-			customField01 = tostring(currentDay),
-			customField02 = tostring(cycleCount),
-			customField03 = tostring(payload.source or "DailyRewardsUI"),
-		})
-	if sessionId then
-		claimAllFunnelSessions[player] = sessionId
-	end
 end
 
 function DailyRewardsService.OnRewardAction(player: Player, action: string)
@@ -510,7 +461,6 @@ end
 function DailyRewardsService.CleanupPlayer(player: Player)
 	requestInFlight[player] = nil
 	lastRequestAt[player] = nil
-	claimAllFunnelSessions[player] = nil
 end
 
 function DailyRewardsService.Init()
@@ -523,7 +473,6 @@ function DailyRewardsService.Init()
 	serviceMaid.TimeSync = dailyRewardTimeSync.OnServerEvent:Connect(function(player: Player, timezoneOffsetMinutes: any)
 		DailyRewardsService.SyncTimezone(player, timezoneOffsetMinutes)
 	end)
-	FunnelAnalytics.RegisterClientAction("DailyRewardClaimAllPromptOpened", handleClaimAllPromptOpened)
 	serviceMaid.PlayerRemoving = Players.PlayerRemoving:Connect(DailyRewardsService.CleanupPlayer)
 	DebugModule.debugInfo("DailyRewardsService initialized", MODULE_NAME)
 end
@@ -532,7 +481,6 @@ function DailyRewardsService.Shutdown()
 	serviceMaid:DoCleaning()
 	table.clear(requestInFlight)
 	table.clear(lastRequestAt)
-	table.clear(claimAllFunnelSessions)
 	isInitialized = false
 end
 

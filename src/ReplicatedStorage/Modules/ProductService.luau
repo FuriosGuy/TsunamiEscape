@@ -7,7 +7,6 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local PlayerHandler = require(Modules:WaitForChild("PlayerHandler"))
 local SoundService = require(Modules:WaitForChild("SoundService"))
-local FunnelAnalytics = require(Modules:WaitForChild("Shared"):WaitForChild("FunnelAnalytics_Client"))
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
 
 local ProductService = {}
@@ -208,11 +207,6 @@ function ProductService.promptGamePassPurchase(player: Player, id: number)
 		MarketplaceService:PromptGamePassPurchase(player, id)
 	end)
 	if ok then
-		if id == ProductService.Gamepasses["StarterPack"] then
-			FunnelAnalytics.FireClientAction("StarterPackPromptOpened", {
-				source = "GamePassPrompt",
-			})
-		end
 		SoundService.PlayGuiSound("BellRing")
 	end
 end

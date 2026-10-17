@@ -1,0 +1,15 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Pile_02_Halloween_Pack_M_0"
+    },
+    "CFrame": [65.2923, 593.857, -158.5189, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "InitialSize": [2.8439, 0.6703, 2.7865],
+    "MeshContent": "rbxassetid://82218094869612",
+    "PivotOffset": [30.3418, -0.8836, 4.543, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [7.4976, 1.7672, 7.3464],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

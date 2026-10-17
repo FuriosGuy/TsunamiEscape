@@ -3,12 +3,13 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [-76.8785, 9.5, -141.6871, 0, 0, 1, 1, 0, 0, 0, 1, 0],
-    "Color": [17, 17, 17],
+    "CFrame": [-76.8785, 9, -141.6871, 0, 0, 1, 1, 0, 0, 0, 1, 0],
+    "Color": [0, 158, 0],
     "Locked": true,
+    "Material": "Neon",
     "MaterialVariant": "Weld",
     "Shape": "Cylinder",
-    "Size": [0.5, 12, 12],
+    "Size": [0.5, 11.5, 12],
     "TopSurface": "Smooth"
   }
 }

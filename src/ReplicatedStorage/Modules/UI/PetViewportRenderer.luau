@@ -27,6 +27,10 @@ type AnimationEntry = {
 	startedAt: number,
 	originalTransparency: { [BasePart]: number },
 	hiddenForPreload: boolean,
+	visibilityDirty: boolean,
+	isVisible: boolean,
+	visibilityConnections: { RBXScriptConnection },
+	ancestryConnection: RBXScriptConnection?,
 }
 
 type PreloadStatus = "Loaded" | "Failed"
@@ -137,6 +141,64 @@ local function isViewportVisible(viewport: ViewportFrame): boolean
 	end
 
 	return viewportSize.X > 0 and viewportSize.Y > 0
+end
+
+local function disconnectEntryVisibilitySignals(entry: AnimationEntry): ()
+	for _, connection in ipairs(entry.visibilityConnections) do
+		connection:Disconnect()
+	end
+	table.clear(entry.visibilityConnections)
+	if entry.ancestryConnection then
+		entry.ancestryConnection:Disconnect()
+		entry.ancestryConnection = nil
+	end
+end
+
+local function bindEntryVisibilitySignals(viewport: ViewportFrame, entry: AnimationEntry): ()
+	for _, connection in ipairs(entry.visibilityConnections) do
+		connection:Disconnect()
+	end
+	table.clear(entry.visibilityConnections)
+	entry.visibilityDirty = true
+
+	local function invalidateVisibility(): ()
+		entry.visibilityDirty = true
+	end
+	local current: Instance? = viewport
+	while current do
+		if current:IsA("GuiObject") then
+			table.insert(entry.visibilityConnections, current:GetPropertyChangedSignal("Visible"):Connect(invalidateVisibility))
+			table.insert(
+				entry.visibilityConnections,
+				current:GetPropertyChangedSignal("AbsolutePosition"):Connect(invalidateVisibility)
+			)
+			table.insert(
+				entry.visibilityConnections,
+				current:GetPropertyChangedSignal("AbsoluteSize"):Connect(invalidateVisibility)
+			)
+			table.insert(
+				entry.visibilityConnections,
+				current:GetPropertyChangedSignal("ClipsDescendants"):Connect(invalidateVisibility)
+			)
+		elseif current:IsA("LayerCollector") then
+			table.insert(entry.visibilityConnections, current:GetPropertyChangedSignal("Enabled"):Connect(invalidateVisibility))
+		end
+		current = current.Parent
+	end
+
+	if not entry.ancestryConnection then
+		entry.ancestryConnection = viewport.AncestryChanged:Connect(function()
+			bindEntryVisibilitySignals(viewport, entry)
+		end)
+	end
+end
+
+local function isEntryViewportVisible(viewport: ViewportFrame, entry: AnimationEntry): boolean
+	if entry.visibilityDirty then
+		entry.isVisible = isViewportVisible(viewport)
+		entry.visibilityDirty = false
+	end
+	return entry.isVisible
 end
 
 local function getAnimatedModel(viewport: ViewportFrame): Model?
@@ -251,8 +313,9 @@ local function updateAnimator(self: Animator): ()
 				setModelHiddenForPreload(entry, false)
 				entry.model:PivotTo(entry.basePivot)
 			end
+			disconnectEntryVisibilitySignals(entry)
 			self.entries[viewport] = nil
-		elseif isViewportVisible(viewport) then
+		elseif isEntryViewportVisible(viewport, entry) then
 			local modelPath = viewport:GetAttribute("PetModelPath")
 			if typeof(modelPath) == "string" then
 				queueModelPreload(modelPath)
@@ -285,13 +348,24 @@ function ViewportAnimator.Register(self: Animator, viewport: ViewportFrame): ()
 	end
 	local existing = self.entries[viewport]
 	if not existing or existing.model ~= model then
+		if existing then
+			disconnectEntryVisibilitySignals(existing)
+		end
 		self.entries[viewport] = {
 			model = model,
 			basePivot = model:GetPivot(),
 			startedAt = os.clock(),
 			originalTransparency = {},
 			hiddenForPreload = false,
+			visibilityDirty = true,
+			isVisible = false,
+			visibilityConnections = {},
+			ancestryConnection = nil,
 		}
+		local entry = self.entries[viewport]
+		if entry then
+			bindEntryVisibilitySignals(viewport, entry)
+		end
 	end
 	if not self.connection then
 		self.connection = RunService.RenderStepped:Connect(function()
@@ -309,6 +383,7 @@ function ViewportAnimator.Unregister(self: Animator, viewport: ViewportFrame): (
 		setModelHiddenForPreload(entry, false)
 		entry.model:PivotTo(entry.basePivot)
 	end
+	disconnectEntryVisibilitySignals(entry)
 	self.entries[viewport] = nil
 	if next(self.entries) == nil and self.connection then
 		self.connection:Disconnect()
@@ -325,7 +400,8 @@ function ViewportAnimator.Destroy(self: Animator): ()
 		self.connection:Disconnect()
 		self.connection = nil
 	end
-	for _, entry in pairs(self.entries) do
+	for viewport, entry in pairs(self.entries) do
+		disconnectEntryVisibilitySignals(entry)
 		if entry.model.Parent then
 			setModelHiddenForPreload(entry, false)
 			entry.model:PivotTo(entry.basePivot)

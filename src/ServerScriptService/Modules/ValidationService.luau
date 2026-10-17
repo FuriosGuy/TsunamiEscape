@@ -22,6 +22,11 @@ type PathSample = {
 	observedAt: number,
 }
 
+type PartBounds = {
+	frame: CFrame,
+	halfSize: Vector3,
+}
+
 -- Movement validation is intentionally soft: it blocks rewards, never players.
 local POSITION_SAMPLE_INTERVAL = 0.1
 local MAX_SAMPLE_ELAPSED = 1.5
@@ -40,9 +45,12 @@ local HARD_MOVEMENT_RATIO = 4
 local MIN_RELIABLE_SAMPLE_ELAPSED = 0.05
 local MAX_PATH_SAMPLES = 64
 local MAX_STAGE_PATH_AGE_SECONDS = 6
+-- Ignore sub-centimeter physics jitter while retaining cumulative slow movement.
+local MIN_PATH_SAMPLE_MOVEMENT_SQUARED = 0.0025
 
 local positionSamples: { [Player]: PositionSample } = {}
 local pathSamples: { [Player]: { PathSample } } = {}
+local stageReconcileRevisionByPlayer: { [Player]: number } = {}
 local nextPositionObservation: { [Player]: number } = {}
 local serverTeleportGraceUntil: { [Player]: number } = {}
 local suspiciousMovementUntil: { [Player]: number } = {}
@@ -55,6 +63,17 @@ local highestPassedStageByPlayer: { [Player]: { [string]: number } } = {}
 local function getWorldName(player: Player): string?
 	local worldName = player:GetAttribute("Current_World")
 	return if typeof(worldName) == "string" then worldName else nil
+end
+
+local function bumpStageReconcileRevision(player: Player): ()
+	stageReconcileRevisionByPlayer[player] = (stageReconcileRevisionByPlayer[player] or 0) + 1
+end
+
+local function clearPathSamples(player: Player): ()
+	if pathSamples[player] ~= nil then
+		pathSamples[player] = nil
+		bumpStageReconcileRevision(player)
+	end
 end
 
 local function updatePositionSample(player: Player, character: Model, rootPart: BasePart, now: number)
@@ -70,9 +89,14 @@ local function updatePositionSample(player: Player, character: Model, rootPart: 
 		path = {}
 		pathSamples[player] = path
 	end
-	table.insert(path, { position = rootPart.Position, observedAt = now })
-	if #path > MAX_PATH_SAMPLES then
-		table.remove(path, 1)
+	local lastPathSample = path[#path]
+	local pathDelta = if lastPathSample then rootPart.Position - lastPathSample.position else Vector3.zero
+	if not lastPathSample or pathDelta:Dot(pathDelta) > MIN_PATH_SAMPLE_MOVEMENT_SQUARED then
+		table.insert(path, { position = rootPart.Position, observedAt = now })
+		if #path > MAX_PATH_SAMPLES then
+			table.remove(path, 1)
+		end
+		bumpStageReconcileRevision(player)
 	end
 
 	local previousPosition = if previousSample
@@ -130,18 +154,24 @@ local function addMovementEvidence(player: Player, contribution: number, now: nu
 	return nextScore
 end
 
-local function getPartHalfSize(part: BasePart, padding: Vector3?): Vector3
+local function getPartBounds(part: BasePart, padding: Vector3?): PartBounds
+	-- Snapshot checkpoint geometry once; every segment in this path query reuses it.
 	local extraPadding = padding or Vector3.new(0.25, 0.25, 0.25)
-	return Vector3.new(
-		part.Size.X * 0.5 + math.max(0, extraPadding.X),
-		part.Size.Y * 0.5 + math.max(0, extraPadding.Y),
-		part.Size.Z * 0.5 + math.max(0, extraPadding.Z)
-	)
+	local size = part.Size
+	return {
+		frame = part.CFrame,
+		halfSize = Vector3.new(
+			size.X * 0.5 + math.max(0, extraPadding.X),
+			size.Y * 0.5 + math.max(0, extraPadding.Y),
+			size.Z * 0.5 + math.max(0, extraPadding.Z)
+		),
+	}
 end
 
 local function isPointWithinPartBounds(point: Vector3, part: BasePart, padding: Vector3?): boolean
-	local localPosition = part.CFrame:PointToObjectSpace(point)
-	local halfSize = getPartHalfSize(part, padding)
+	local bounds = getPartBounds(part, padding)
+	local localPosition = bounds.frame:PointToObjectSpace(point)
+	local halfSize = bounds.halfSize
 	return math.abs(localPosition.X) <= halfSize.X
 		and math.abs(localPosition.Y) <= halfSize.Y
 		and math.abs(localPosition.Z) <= halfSize.Z
@@ -171,12 +201,11 @@ end
 local function doesSegmentIntersectPartBounds(
 	startPoint: Vector3,
 	endPoint: Vector3,
-	part: BasePart,
-	padding: Vector3?
+	bounds: PartBounds
 ): boolean
-	local localStart = part.CFrame:PointToObjectSpace(startPoint)
-	local localEnd = part.CFrame:PointToObjectSpace(endPoint)
-	local halfSize = getPartHalfSize(part, padding)
+	local localStart = bounds.frame:PointToObjectSpace(startPoint)
+	local localEnd = bounds.frame:PointToObjectSpace(endPoint)
+	local halfSize = bounds.halfSize
 	local tMin, tMax = 0, 1
 
 	local xMin, xMax, xIntersects = updateSegmentSlab(localStart.X, localEnd.X, halfSize.X, tMin, tMax)
@@ -211,6 +240,7 @@ local function didRecentSampleCrossPart(
 	if now - sample.observedAt > pathAge or not path or #path < 2 then
 		return false
 	end
+	local bounds = getPartBounds(part, padding)
 
 	for index = #path - 1, 1, -1 do
 		local startSample = path[index]
@@ -218,7 +248,7 @@ local function didRecentSampleCrossPart(
 		if now - startSample.observedAt > pathAge then
 			break
 		end
-		if doesSegmentIntersectPartBounds(startSample.position, endSample.position, part, padding) then
+		if doesSegmentIntersectPartBounds(startSample.position, endSample.position, bounds) then
 			return true
 		end
 	end
@@ -260,7 +290,7 @@ local function evaluateCurrentMovement(player: Player, now: number): boolean
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 	if not character or not humanoid or not rootPart or not rootPart:IsA("BasePart") then
 		positionSamples[player] = nil
-		pathSamples[player] = nil
+		clearPathSamples(player)
 		resetMovementEvidence(player)
 		return false
 	end
@@ -269,7 +299,7 @@ local function evaluateCurrentMovement(player: Player, now: number): boolean
 	if graceUntil then
 		if now < graceUntil then
 			resetMovementEvidence(player)
-			pathSamples[player] = nil
+			clearPathSamples(player)
 			updatePositionSample(player, character, rootPart, now)
 			return false
 		end
@@ -284,7 +314,7 @@ local function evaluateCurrentMovement(player: Player, now: number): boolean
 		or now <= sample.observedAt
 	then
 		resetMovementEvidence(player)
-		pathSamples[player] = nil
+		clearPathSamples(player)
 		updatePositionSample(player, character, rootPart, now)
 		return false
 	end
@@ -293,7 +323,7 @@ local function evaluateCurrentMovement(player: Player, now: number): boolean
 	if elapsed > MAX_SAMPLE_ELAPSED then
 		-- A delayed server frame is not enough evidence for a teleport.
 		resetMovementEvidence(player)
-		pathSamples[player] = nil
+		clearPathSamples(player)
 		updatePositionSample(player, character, rootPart, now)
 		return false
 	end
@@ -410,12 +440,16 @@ function ValidationService.DidPlayerRecentlyCrossPart(player: Player, part: Base
 	return didRecentSampleCrossPart(player, character, part, padding, MAX_STAGE_PATH_AGE_SECONDS)
 end
 
+function ValidationService.GetStageReconcileRevision(player: Player): number
+	return stageReconcileRevisionByPlayer[player] or 0
+end
+
 -- Mark a server-owned movement so normal redirects do not look like exploits.
 function ValidationService.MarkServerTeleport(player: Player, graceSeconds: number?)
 	local now = os.clock()
 	resetMovementEvidence(player)
 	positionSamples[player] = nil
-	pathSamples[player] = nil
+	clearPathSamples(player)
 	local graceDuration = SERVER_TELEPORT_GRACE_SECONDS
 	if typeof(graceSeconds) == "number" then
 		graceDuration = math.clamp(graceSeconds, 0, 5)
@@ -428,7 +462,7 @@ function ValidationService.MarkServerTeleport(player: Player, graceSeconds: numb
 		updatePositionSample(player, character, rootPart, now)
 	else
 		positionSamples[player] = nil
-		pathSamples[player] = nil
+		clearPathSamples(player)
 	end
 end
 
@@ -520,6 +554,10 @@ function ValidationService.ValidateRewardEligibility(player: Player, rewardName:
 	return false
 end
 
+function ValidationService.GetRewardEligibilityRetryAt(player: Player): number?
+	return suspiciousMovementUntil[player]
+end
+
 -- Stage evidence is server-owned and survives missed .Touched events until the
 -- player completes the current run. It is never accepted from the client.
 function ValidationService.RecordPassedStage(player: Player, worldName: string, stageValue: number)
@@ -534,7 +572,11 @@ function ValidationService.RecordPassedStage(player: Player, worldName: string, 
 	end
 
 	local normalizedStage = math.max(0, math.floor(stageValue))
-	playerStages[worldName] = math.max(playerStages[worldName] or 0, normalizedStage)
+	local previousStage = playerStages[worldName] or 0
+	if normalizedStage > previousStage then
+		playerStages[worldName] = normalizedStage
+		bumpStageReconcileRevision(player)
+	end
 end
 
 function ValidationService.GetHighestPassedStage(player: Player, worldName: string): number
@@ -543,6 +585,7 @@ function ValidationService.GetHighestPassedStage(player: Player, worldName: stri
 end
 
 function ValidationService.ResetStageProgress(player: Player, worldName: string?)
+	bumpStageReconcileRevision(player)
 	if worldName then
 		local playerStages = highestPassedStageByPlayer[player]
 		if playerStages then
@@ -559,6 +602,7 @@ end
 function ValidationService.CleanupPlayer(player: Player)
 	positionSamples[player] = nil
 	pathSamples[player] = nil
+	stageReconcileRevisionByPlayer[player] = nil
 	nextPositionObservation[player] = nil
 	serverTeleportGraceUntil[player] = nil
 	suspiciousMovementUntil[player] = nil
@@ -572,6 +616,7 @@ end
 function ValidationService.Cleanup()
 	table.clear(positionSamples)
 	table.clear(pathSamples)
+	table.clear(stageReconcileRevisionByPlayer)
 	table.clear(nextPositionObservation)
 	table.clear(serverTeleportGraceUntil)
 	table.clear(suspiciousMovementUntil)

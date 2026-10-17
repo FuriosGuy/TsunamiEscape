@@ -1,6 +1,7 @@
 {
   "className": "MeshPart",
   "properties": {
+    "Anchored": true,
     "CanCollide": false,
     "CanQuery": false,
     "CanTouch": false,

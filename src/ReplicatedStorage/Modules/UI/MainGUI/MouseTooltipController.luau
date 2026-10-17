@@ -98,7 +98,7 @@ local TOOLTIP_DEFINITIONS: { [string]: TooltipDefinition } = table.freeze({
 		end,
 	},
 	RebirthButtonFrame = {
-		description = "Reach max level to rebirth! Your Speed resets, but you gain +0.5x permanent XP multiplier. Wins stay!",
+		description = "Reach max level to rebirth! Your Speed resets, but gain a permanent XP multiplier. Wins stay!",
 	},
 	ShopButtonFrame = {
 		description = "Browse new karts, Win boosts, and XP treadmills to power up your runs!",

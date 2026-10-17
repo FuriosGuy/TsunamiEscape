@@ -14,11 +14,7 @@ CoreConfig.analytics = {
 		rebirth = "RebirthFlow", -- Rebirth progression funnel across normal/purchased rebirths.
 		playtimeReward = "PlaytimeRewardClaim", -- Playtime gift claim funnel.
 		dailyReward = "DailyRewardClaim", -- Daily login reward claim funnel.
-		dailyRewardClaimAll = "DailyRewardClaimAll", -- Claim-all daily reward purchase funnel.
 		referral = "FriendInviteConversion", -- Invite/referral reward conversion funnel.
-		friendInvitePrompt = "FriendInvitePrompt", -- Client invite-prompt engagement funnel.
-		starterPack = "StarterPackFlow", -- Starter pack purchase/reward funnel.
-		kartProgression = "KartProgressionFlow", -- Kart purchase/equip progression funnel.
 	},
 }
 
@@ -196,6 +192,8 @@ CoreConfig.leaderboard = {
 
 -- Save system timing
 CoreConfig.persistence = {
+	debugAlwaysNewPlayerDataInStudio = true, -- Studio-only: use defaults in memory and never read or write player DataStores.
+	debugDisableStarterPackRewardsInStudio = true, -- Studio-only: prevent Starter Pack rewards during tutorial tests.
 	saveDebounceSeconds = 10, -- Delay before regular save after recent write.
 	finalSaveDebounceSeconds = 2, -- Minimum spacing for forced/final saves.
 	finalSaveRetryAttempts = 3, -- Bounded retries for a forced leave/shutdown save.
@@ -544,7 +542,7 @@ CoreConfig.server = {
 		debugStudioDisableWaves = false, -- Temporarily suppresses all tsunami spawning in Studio; published servers are unchanged.
 		startupSpawnCount = 25, -- Startup burst wave count before normal spawn loop.
 		startupSpawnInterval = 0, -- Delay between startup burst spawns (seconds).
-		minSpawnDelay = 8, -- Minimum random delay for normal spawn loop (seconds).
+		minSpawnDelay = 10, -- Minimum random delay for normal spawn loop (seconds).
 		maxSpawnDelay = 15, -- Maximum random delay for normal spawn loop (seconds).
 	},
 	worldManager = {

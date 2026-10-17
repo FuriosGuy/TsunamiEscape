@@ -492,8 +492,7 @@ local function applyEnvironment(environmentName: string, animate: boolean?)
 	transitionMaid:DoCleaning()
 
 	local requestedName = if environmentName == "" then "Default" else environmentName
-	local lightingProfileName = if requestedName == "Halloween" then "Default" else requestedName
-	local profile = getEnvironmentProfile(lightingProfileName)
+	local profile = getEnvironmentProfile(requestedName)
 	if not profile then
 		return
 	end

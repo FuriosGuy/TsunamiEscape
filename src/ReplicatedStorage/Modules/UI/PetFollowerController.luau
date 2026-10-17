@@ -57,6 +57,13 @@ type PlayerState = {
 	active: boolean,
 	invalidInventoryLogged: boolean,
 }
+type OwnerFrameContext = {
+	facing: CFrame,
+	verticalBaseOffset: number,
+	movementPitch: number,
+	rearExtent: number,
+	rearClearance: number,
+}
 type KartTrackingState = {
 	maid: MaidLike,
 	ownerState: PlayerState?,
@@ -544,20 +551,38 @@ local function registerKartModel(instance: Instance): ()
 	refreshKartOwner(kart)
 end
 
-local function getTargetFrame(
-	state: PlayerState,
-	follower: Follower,
-	index: number,
-	count: number,
-	now: number,
-	groundY: number?
-): CFrame?
+local function createOwnerFrameContext(state: PlayerState, groundY: number?): OwnerFrameContext?
 	local root = state.root
 	local humanoid = state.humanoid
 	if not root or not root.Parent or not humanoid or humanoid.Health <= 0 then
 		return nil
 	end
 
+	local velocity = root.AssemblyLinearVelocity
+	local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+	local tiltThreshold = PetConfig.Followers.movementTiltThreshold
+	local fullTiltSpeed = math.max(PetConfig.Followers.movementTiltFullSpeed, tiltThreshold + 0.01)
+	local movementAlpha = math.clamp((horizontalSpeed - tiltThreshold) / (fullTiltSpeed - tiltThreshold), 0, 1)
+	local movementPitch = -PetConfig.Followers.movementTiltAngle * movementAlpha
+	return {
+		facing = getRootFacing(root),
+		verticalBaseOffset = (groundY or root.Position.Y - humanoid.HipHeight - root.Size.Y * 0.5)
+			- root.Position.Y,
+		movementPitch = movementPitch,
+		rearExtent = state.kartRearExtent or root.Size.Z * 0.5,
+		rearClearance = if state.kart and state.kart.Parent
+			then PetConfig.Followers.kartRearClearance
+			else PetConfig.Followers.followDistance,
+	}
+end
+
+local function getTargetFrame(
+	context: OwnerFrameContext,
+	follower: Follower,
+	index: number,
+	count: number,
+	now: number
+): CFrame?
 	local columns = math.clamp(math.floor(PetConfig.Followers.maxColumns), 1, math.max(count, 1))
 	local row = math.floor((index - 1) / columns)
 	local rowStart = row * columns + 1
@@ -569,24 +594,17 @@ local function getTargetFrame(
 		* PetConfig.Followers.bobAmplitude
 	local sway = math.sin(now * PetConfig.Followers.bobFrequency * 0.7 + follower.phase)
 		* PetConfig.Followers.swayAngle
-	local velocity = root.AssemblyLinearVelocity
-	local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-	local tiltThreshold = PetConfig.Followers.movementTiltThreshold
-	local fullTiltSpeed = math.max(PetConfig.Followers.movementTiltFullSpeed, tiltThreshold + 0.01)
-	local movementAlpha = math.clamp((horizontalSpeed - tiltThreshold) / (fullTiltSpeed - tiltThreshold), 0, 1)
-	local movementPitch = -PetConfig.Followers.movementTiltAngle * movementAlpha
-	local fallbackGroundY = root.Position.Y - humanoid.HipHeight - root.Size.Y * 0.5
-	local verticalOffset = (groundY or fallbackGroundY) + follower.groundOffset + bob - root.Position.Y
-	local facing = getRootFacing(root)
-	local rearExtent = state.kartRearExtent or root.Size.Z * 0.5
-	local rearClearance = if state.kart and state.kart.Parent
-		then PetConfig.Followers.kartRearClearance
-		else PetConfig.Followers.followDistance
-	local depthOffset = rearExtent + rearClearance + follower.depth * 0.5 + row * PetConfig.Followers.spacing
-	return facing
+	local groundOffset = follower.groundOffset
+	if typeof(groundOffset) ~= "number" then
+		DebugModule.debugWarn("Follower ground offset was not numeric | pet=" .. follower.petId, MODULE_NAME)
+		return nil
+	end
+	local verticalOffset = context.verticalBaseOffset + groundOffset + bob
+	local depthOffset = context.rearExtent + context.rearClearance + follower.depth * 0.5 + row * PetConfig.Followers.spacing
+	return context.facing
 		* CFrame.new(horizontalOffset, verticalOffset, depthOffset)
 		* CFrame.Angles(
-			movementPitch,
+			context.movementPitch,
 			sway,
 			math.sin(now * 1.7 + follower.phase) * PetConfig.Followers.swayAngle * 0.5
 		)
@@ -640,8 +658,12 @@ local function reconcileFollowers(state: PlayerState): ()
 
 	local now = os.clock()
 	local groundY = if #state.followerOrder > 0 then getCachedGroundY(state, now) else nil
+	local ownerFrameContext = createOwnerFrameContext(state, groundY)
+	if not ownerFrameContext then
+		return
+	end
 	for index, follower in ipairs(state.followerOrder) do
-		local targetFrame = getTargetFrame(state, follower, index, #state.followerOrder, now, groundY)
+		local targetFrame = getTargetFrame(ownerFrameContext, follower, index, #state.followerOrder, now)
 		if targetFrame then
 			follower.model:PivotTo(targetFrame)
 			follower.model.Name = string.format("PetFollower_%d", state.player.UserId)
@@ -824,10 +846,13 @@ local function updateFollowers(deltaTime: number): ()
 		end
 		if inRange and #state.followerOrder > 0 then
 			local groundY = getCachedGroundY(state, now)
-			for index, follower in ipairs(state.followerOrder) do
-				local targetFrame = getTargetFrame(state, follower, index, #state.followerOrder, now, groundY)
-				if targetFrame and follower.model.Parent then
-					follower.model:PivotTo(follower.model:GetPivot():Lerp(targetFrame, alpha))
+			local ownerFrameContext = createOwnerFrameContext(state, groundY)
+			if ownerFrameContext then
+				for index, follower in ipairs(state.followerOrder) do
+					local targetFrame = getTargetFrame(ownerFrameContext, follower, index, #state.followerOrder, now)
+					if targetFrame and follower.model.Parent then
+						follower.model:PivotTo(follower.model:GetPivot():Lerp(targetFrame, alpha))
+					end
 				end
 			end
 		end

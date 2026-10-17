@@ -4,12 +4,12 @@
     "Anchored": true,
     "BackSurface": "Studs",
     "BottomSurface": "Studs",
-    "CFrame": [-33.1434, 13.7488, 71.1109, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "CFrame": [-13.8718, 18.3137, 71.0171, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Color": [239, 184, 56],
     "FrontSurface": "Studs",
     "LeftSurface": "Studs",
     "Locked": true,
     "RightSurface": "Studs",
-    "Size": [2.1325, 6.9974, 2.6142]
+    "Size": [3.1717, 2.1325, 3.2467]
   }
 }

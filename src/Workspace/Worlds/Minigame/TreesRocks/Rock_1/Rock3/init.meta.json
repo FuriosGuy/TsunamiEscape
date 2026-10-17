@@ -4,11 +4,11 @@
     "Anchored": true,
     "BottomSurface": "Smooth",
     "CastShadow": false,
-    "CFrame": [-4213.5615, 52.7501, -6565.5332, 0.8773, 0, 0.48, 0, 1, 0, -0.48, 0, 0.8773],
+    "CFrame": [-4224.4077, 53.0107, -9456.7373, 0.0025, 0, 1.0, 0, 1, 0, -1.0, 0, 0.0025],
     "Color": [99, 95, 98],
     "Locked": true,
     "MaterialVariant": "Universal",
-    "Size": [10.9516, 4.8674, 12.1684],
+    "Size": [12.1246, 5.3887, 13.4717],
     "TopSurface": "Smooth"
   }
 }

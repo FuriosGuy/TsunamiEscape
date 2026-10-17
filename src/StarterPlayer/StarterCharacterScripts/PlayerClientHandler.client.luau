@@ -131,6 +131,8 @@ type ShowcaseVisualState = {
 	model: Model,
 	basePivot: CFrame,
 	visualOffset: number,
+	visualUpdatePhase: number,
+	visualUpdatePhaseInitialized: boolean,
 	rotationDuration: number,
 	parts: { ShowcasePartState },
 	trackedParts: { [BasePart]: boolean },
@@ -225,6 +227,7 @@ local lastTargetFov: number? = nil
 local recoveryUntil = 0
 local registeredRainbowGradients: { [UIGradient]: boolean } = {}
 local observedKartShowcases: { [Model]: ShowcaseVisualState } = {}
+local showcaseRegistrationSequence = 0
 local observedEquippedKarts: { [Model]: EquippedKartVisualState } = {}
 local localKartEngineSound: Sound? = nil
 local localKartEngineSoundLastSeenAt: number? = nil
@@ -1081,6 +1084,8 @@ local function registerKartShowcase(model: Model)
 
 	local configuredRotationDuration = model:GetAttribute("ShowcaseRotationDuration")
 	local configuredVisualOffset = model:GetAttribute("VisualOffset")
+	showcaseRegistrationSequence += 1
+	local visualUpdatePhase = (showcaseRegistrationSequence * 0.61803398875) % 1
 	local rotationDuration = if typeof(configuredRotationDuration) == "number"
 		then math.max(0, configuredRotationDuration)
 		elseif isLuckyBlockShowcase then CLIENT_HANDLER_CONFIG.SHOWCASE_MODEL_CONFIG.luckyBlockRotationDuration
@@ -1094,6 +1099,8 @@ local function registerKartShowcase(model: Model)
 		model = model,
 		basePivot = basePivot,
 		visualOffset = visualOffset,
+		visualUpdatePhase = visualUpdatePhase,
+		visualUpdatePhaseInitialized = false,
 		rotationDuration = rotationDuration,
 		parts = parts,
 		trackedParts = trackedParts,
@@ -1798,11 +1805,19 @@ local function updateObservedKartShowcases(dt: number)
 
 		local showcaseBucket, showcaseDistance, showcaseOnScreen = getCachedShowcaseCameraBucket(showcaseState, dt)
 		local showcaseUpdateInterval = getShowcaseVisualUpdateInterval(showcaseDistance, showcaseOnScreen)
+		if showcaseUpdateInterval == math.huge then
+			showcaseState.visualUpdateAccumulator = 0
+			continue
+		end
+		if not showcaseState.visualUpdatePhaseInitialized then
+			showcaseState.visualUpdateAccumulator = showcaseUpdateInterval * showcaseState.visualUpdatePhase
+			showcaseState.visualUpdatePhaseInitialized = true
+		end
 		showcaseState.visualUpdateAccumulator += dt
 		if showcaseState.visualUpdateAccumulator < showcaseUpdateInterval then
 			continue
 		end
-		showcaseState.visualUpdateAccumulator = 0
+		showcaseState.visualUpdateAccumulator %= showcaseUpdateInterval
 
 		local bobOffset = math.sin((syncedTime + showcaseState.visualOffset) * 2) * CLIENT_HANDLER_CONFIG.KART_SHOWCASE_BOB_AMPLITUDE
 		local showcasePivot = showcaseState.basePivot * CFrame.new(0, bobOffset, 0)

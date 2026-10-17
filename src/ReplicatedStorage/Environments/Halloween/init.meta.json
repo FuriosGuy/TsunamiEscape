@@ -2,10 +2,10 @@
   "properties": {
     "Attributes": {
       "Ambient": {
-        "Color3": [0.7451, 0.7176, 0.7176]
+        "Color3": [0.7451, 0.6588, 0.6]
       },
       "Brightness": 2,
-      "ClockTime": 12,
+      "ClockTime": 0,
       "ColorShift_Bottom": {
         "Color3": [0.0, 0.0, 0.0]
       },
@@ -17,7 +17,7 @@
       "GeographicLatitude": 0,
       "GlobalShadows": true,
       "OutdoorAmbient": {
-        "Color3": [0.7451, 0.651, 0.3059]
+        "Color3": [0.7765, 0.4275, 0.0]
       }
     }
   }

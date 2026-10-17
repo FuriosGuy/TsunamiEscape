@@ -967,12 +967,20 @@ end
 
 function PlayerHandler.GetNextRebirthStats(player: Player)
 	local maxLevel = player:GetAttribute("MaxLevel") or 25
-	local multiplier = player:GetAttribute("Rebirth_XPMultiplier") or 1
+	local rebirths = getFiniteNumberAttribute(player, "Rebirths", 0) or 0
 
 	return {
 		NextMaxLevel = maxLevel + PlayerHandler.MOVEMENT_CONFIG.REBIRTH_CONFIG.MAX_LEVEL_INCREMENT,
-		NextMultiplier = multiplier + PlayerHandler.MOVEMENT_CONFIG.REBIRTH_CONFIG.MULTIPLIER_INCREMENT,
+		NextMultiplier = PlayerDataConfig.GetRebirthXPMultiplier(rebirths + 1),
 	}
+end
+
+function PlayerHandler.RecalculateRebirthMultiplier(player: Player): number
+	local rebirthCount = math.max(0, math.floor(getFiniteNumberAttribute(player, "Rebirths", 0) or 0))
+	local multiplier = PlayerDataConfig.GetRebirthXPMultiplier(rebirthCount)
+
+	PlayerHandler.SetAttribute(player, "Rebirth_XPMultiplier", multiplier)
+	return multiplier
 end
 
 --[[

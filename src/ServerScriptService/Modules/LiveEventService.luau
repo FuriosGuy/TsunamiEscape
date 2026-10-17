@@ -1473,6 +1473,15 @@ function LiveEventService.Refresh()
 		and typeof(seasonalEnvironment) == "table"
 		and seasonalEnvironment.studioTestEndingCountdownEnabled == true
 		and studioSeasonalEnvironmentTestEnded
+	local seasonalEnvironmentActive = typeof(seasonalEnvironment) == "table"
+		and seasonalEnvironment.enabled == true
+		and seasonalEnvironment.month == utcMonth
+		and not studioSeasonalTestEnded
+	local seasonalHalloweenHasPriority = seasonalEnvironmentActive
+		and seasonalEnvironment.environmentName == "Halloween"
+	if seasonalHalloweenHasPriority then
+		environmentName = "Halloween"
+	end
 	if typeof(seasonalEnvironment) == "table"
 		and seasonalEnvironment.enabled == true
 		and seasonalEnvironment.month == utcMonth
@@ -1498,10 +1507,6 @@ function LiveEventService.Refresh()
 		and seasonalEnvironment.enabled == true
 		and seasonalEnvironment.month == utcMonth
 		and HalloweenEventConfig.IsDateAvailable(timestamp)
-	local seasonalEnvironmentActive = typeof(seasonalEnvironment) == "table"
-		and seasonalEnvironment.enabled == true
-		and seasonalEnvironment.month == utcMonth
-		and not studioSeasonalTestEnded
 	local stateChanged = not hasPublishedState
 		or bannerActive ~= publishedBannerActive
 		or bannerText ~= publishedBannerText

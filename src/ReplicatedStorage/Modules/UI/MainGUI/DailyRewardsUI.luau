@@ -7,7 +7,6 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Maid = require(Modules:WaitForChild("Maid"))
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
 local ProductService = require(Modules:WaitForChild("Shared"):WaitForChild("ProductService_Client"))
-local FunnelAnalytics = require(Modules:WaitForChild("Shared"):WaitForChild("FunnelAnalytics_Client"))
 local SharedFolder = Modules:WaitForChild("Shared")
 local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Client"))
 local UIFolder = Modules:WaitForChild("UI")
@@ -466,9 +465,6 @@ function DailyRewardsUI:Rebuild()
 				return
 			end
 
-			FunnelAnalytics.FireClientAction("DailyRewardClaimAllPromptOpened", {
-				source = "DailyRewardsUI",
-			})
 			ProductService.promptProductPurchase(self.player, CLAIM_ALL_PRODUCT_ID)
 		end))
 	end

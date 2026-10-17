@@ -45,6 +45,7 @@ type RevealSlot = {
 	baseHeight: number,
 	baseDepth: number,
 	facingRotation: CFrame,
+	layoutCenter: Vector3,
 	startFrame: CFrame,
 	targetFrame: CFrame,
 }
@@ -54,10 +55,28 @@ type RevealLayout = {
 	cameraFrame: CFrame,
 }
 
+type ConsolidationPlan = {
+	representatives: { RevealSlot },
+	duplicates: { RevealSlot },
+	representativeByPetId: { [string]: RevealSlot },
+}
+
+type GridLayout = {
+	rowWidths: { number },
+	rowHeights: { number },
+	rowGaps: { { number } },
+	maxRowWidth: number,
+	totalLayoutHeight: number,
+	maxPetHeight: number,
+	maxPetDepth: number,
+	verticalGap: number,
+}
+
 local PetLuckyBlockRevealController = {}
 local MODULE_NAME = "PetLuckyBlockRevealController"
 local START_SCALE = 0.06
 local LAUNCH_DURATION = 0.9
+local FAST_LAUNCH_DURATION = 0.65
 local ROULETTE_SWITCH_COUNT = 15
 local ROULETTE_INITIAL_INTERVAL = 0.065
 local ROULETTE_FINAL_INTERVAL = 0.48
@@ -66,6 +85,12 @@ local HIGHLIGHT_FADE_DURATION = 0.38
 local HIGHLIGHT_HOLD_DURATION = 0.12
 local PET_DISPLAY_POP_DURATION = 0.45
 local PET_DISPLAY_HOLD_DURATION = 1.5
+local DUPLICATE_RESULT_HOLD_DURATION = 0.3
+local DUPLICATE_CONSOLIDATION_DURATION = 0.55
+local FINAL_GRID_REFLOW_DURATION = 0.35
+local CONSOLIDATION_PULSE_DURATION = 0.3
+local CONSOLIDATION_PULSE_SCALE = 1.2
+local CONSOLIDATION_END_HOLD_DURATION = 0.35
 local PET_DISPLAY_START_SCALE = 0.65
 local PET_DISPLAY_TOP_PADDING = 0.1
 local PET_DISPLAY_POP_OFFSET = 0.2
@@ -176,12 +201,105 @@ end
 local function makeRows(petCount: number): { { number } }
 	if petCount == 5 then
 		return { { 1, 2, 3 }, { 4, 5 } }
+	elseif petCount == 4 then
+		return { { 1, 2 }, { 3, 4 } }
 	end
 	local row: { number } = {}
 	for index = 1, petCount do
 		table.insert(row, index)
 	end
 	return { row }
+end
+
+local function calculateGridLayout(slots: { RevealSlot }, rows: { { number } }): GridLayout
+	local maxPetHeight = 0
+	local maxPetDepth = 0
+	for _, slot in ipairs(slots) do
+		maxPetHeight = math.max(maxPetHeight, slot.baseHeight)
+		maxPetDepth = math.max(maxPetDepth, slot.baseDepth)
+	end
+
+	local verticalGap = math.max(MIN_VERTICAL_GAP, maxPetHeight * VERTICAL_GAP_HEIGHT_FACTOR)
+	local rowWidths: { number } = {}
+	local rowHeights: { number } = {}
+	local rowGaps: { { number } } = {}
+	local maxRowWidth = 0
+	local totalLayoutHeight = 0
+	for rowIndex, row in ipairs(rows) do
+		local rowWidth = 0
+		local rowHeight = 0
+		local gaps: { number } = {}
+		for petIndex, slotIndex in ipairs(row) do
+			local slot = slots[slotIndex]
+			rowWidth += slot.baseWidth
+			rowHeight = math.max(rowHeight, slot.baseHeight)
+
+			local nextSlotIndex = row[petIndex + 1]
+			if nextSlotIndex then
+				local nextSlot = slots[nextSlotIndex]
+				local gap = math.max(
+					MIN_HORIZONTAL_GAP,
+					math.max(slot.baseWidth, nextSlot.baseWidth) * HORIZONTAL_GAP_WIDTH_FACTOR,
+					math.max(slot.baseHeight, nextSlot.baseHeight) * HORIZONTAL_GAP_HEIGHT_FACTOR
+				)
+				table.insert(gaps, gap)
+				rowWidth += gap
+			end
+		end
+		rowGaps[rowIndex] = gaps
+		rowWidths[rowIndex] = rowWidth
+		rowHeights[rowIndex] = rowHeight
+		maxRowWidth = math.max(maxRowWidth, rowWidth)
+		totalLayoutHeight += rowHeight
+	end
+	totalLayoutHeight += verticalGap * math.max(#rows - 1, 0)
+
+	return {
+		rowWidths = rowWidths,
+		rowHeights = rowHeights,
+		rowGaps = rowGaps,
+		maxRowWidth = maxRowWidth,
+		totalLayoutHeight = totalLayoutHeight,
+		maxPetHeight = maxPetHeight,
+		maxPetDepth = maxPetDepth,
+		verticalGap = verticalGap,
+	}
+end
+
+local function positionSlotsInGrid(
+	slots: { RevealSlot },
+	rows: { { number } },
+	layout: GridLayout,
+	camera: Camera,
+	groupCenter: Vector3,
+	cameraPosition: Vector3
+): ()
+	local rowOffsets: { [number]: number } = {}
+	local rowCursor = -layout.totalLayoutHeight * 0.5
+	for rowIndex, rowHeight in ipairs(layout.rowHeights) do
+		rowCursor += rowHeight * 0.5
+		rowOffsets[rowIndex] = rowCursor
+		rowCursor += rowHeight * 0.5 + layout.verticalGap
+	end
+
+	for rowIndex, row in ipairs(rows) do
+		local cursor = -layout.rowWidths[rowIndex] * 0.5
+		for petIndex, slotIndex in ipairs(row) do
+			local slot = slots[slotIndex]
+			local xOffset = cursor + slot.baseWidth * 0.5
+			cursor += slot.baseWidth
+			local gap = layout.rowGaps[rowIndex][petIndex]
+			if gap then
+				cursor += gap
+			end
+
+			local targetPosition = groupCenter
+				+ camera.CFrame.RightVector * xOffset
+				+ camera.CFrame.UpVector * rowOffsets[rowIndex]
+			slot.targetFrame = getFacingFrame(targetPosition, cameraPosition, camera)
+			slot.facingRotation = slot.targetFrame.Rotation
+		end
+	end
 end
 
 local function getPetLookup(group: LuckyBlockGroup): ({ PetDefinition }?, { [string]: PetDefinition })
@@ -258,6 +376,7 @@ local function createSlots(
 			baseHeight = modelBounds.Y,
 			baseDepth = modelBounds.Z,
 			facingRotation = model:GetPivot().Rotation,
+			layoutCenter = Vector3.zero,
 			startFrame = CFrame.identity,
 			targetFrame = CFrame.identity,
 		})
@@ -265,107 +384,52 @@ local function createSlots(
 
 	local petCount = #slots
 	local rows = makeRows(petCount)
+	local gridLayout = calculateGridLayout(slots, rows)
 	local viewport = camera.ViewportSize
 	local aspectRatio = if viewport.Y > 0 then viewport.X / viewport.Y else 16 / 9
 	local blockHalfDepth = getExtentAlong(blockFrame, blockSize, camera.CFrame.LookVector) * 0.5
 	local blockHalfHeight = getExtentAlong(blockFrame, blockSize, camera.CFrame.UpVector) * 0.5
-	local maxPetHeight = 0
-	local maxPetDepth = 0
-	for _, slot in ipairs(slots) do
-		maxPetHeight = math.max(maxPetHeight, slot.baseHeight)
-		maxPetDepth = math.max(maxPetDepth, slot.baseDepth)
-	end
-	local verticalGap = math.max(MIN_VERTICAL_GAP, maxPetHeight * VERTICAL_GAP_HEIGHT_FACTOR)
-	local rowWidths: { number } = {}
-	local rowHeights: { number } = {}
-	local rowGaps: { { number } } = {}
-	local maxRowWidth = 0
-	local totalLayoutHeight = 0
-	for rowIndex, row in ipairs(rows) do
-		local rowWidth = 0
-		local rowHeight = 0
-		local gaps: { number } = {}
-		for petIndex, slotIndex in ipairs(row) do
-			local slot = slots[slotIndex]
-			rowWidth += slot.baseWidth
-			rowHeight = math.max(rowHeight, slot.baseHeight)
-
-			local nextSlotIndex = row[petIndex + 1]
-			if nextSlotIndex then
-				local nextSlot = slots[nextSlotIndex]
-				local gap = math.max(
-					MIN_HORIZONTAL_GAP,
-					math.max(slot.baseWidth, nextSlot.baseWidth) * HORIZONTAL_GAP_WIDTH_FACTOR,
-					math.max(slot.baseHeight, nextSlot.baseHeight) * HORIZONTAL_GAP_HEIGHT_FACTOR
-				)
-				table.insert(gaps, gap)
-				rowWidth += gap
-			end
-		end
-		rowGaps[rowIndex] = gaps
-		rowWidths[#rowWidths + 1] = rowWidth
-		rowHeights[#rowHeights + 1] = rowHeight
-		maxRowWidth = math.max(maxRowWidth, rowWidth)
-		totalLayoutHeight += rowHeight
-	end
-	totalLayoutHeight += verticalGap * math.max(#rows - 1, 0)
-
-	local frontClearance = math.max(BLOCK_CLEARANCE_MINIMUM, blockSize.Magnitude * 0.25, maxPetDepth * 0.25)
-	local frontDistance = blockHalfDepth + maxPetDepth * 0.5 + frontClearance
+	local frontClearance = math.max(
+		BLOCK_CLEARANCE_MINIMUM,
+		blockSize.Magnitude * 0.25,
+		gridLayout.maxPetDepth * 0.25
+	)
+	local frontDistance = blockHalfDepth + gridLayout.maxPetDepth * 0.5 + frontClearance
 	local groupCenter = blockFrame.Position
-		+ camera.CFrame.UpVector * (blockHalfHeight + totalLayoutHeight * 0.5 + math.max(2, blockSize.Y * 0.2))
+		+ camera.CFrame.UpVector
+			* (blockHalfHeight + gridLayout.totalLayoutHeight * 0.5 + math.max(2, blockSize.Y * 0.2))
 		- camera.CFrame.LookVector * frontDistance
 	local fovTangent = math.tan(math.rad(camera.FieldOfView * 0.5))
-	local horizontalDistance = maxRowWidth
+	local horizontalDistance = gridLayout.maxRowWidth
 		/ (2 * fovTangent * math.max(aspectRatio, 0.1) * HORIZONTAL_SCREEN_FRACTION)
 	local displayHeadroom = math.max(
 		PET_DISPLAY_HEADROOM_MINIMUM,
-		maxPetHeight * PET_DISPLAY_HEADROOM_HEIGHT_FACTOR
+		gridLayout.maxPetHeight * PET_DISPLAY_HEADROOM_HEIGHT_FACTOR
 	)
-	local verticalDistance = (totalLayoutHeight + displayHeadroom)
+	local verticalDistance = (gridLayout.totalLayoutHeight + displayHeadroom)
 		/ (2 * fovTangent * VERTICAL_SCREEN_FRACTION)
 	local cameraDistance = math.max(horizontalDistance, verticalDistance, MIN_REVEAL_CAMERA_DISTANCE)
 		* CAMERA_FIT_PADDING
-		+ maxPetDepth * 0.5
+		+ gridLayout.maxPetDepth * 0.5
 	local cameraPosition = groupCenter - camera.CFrame.LookVector * cameraDistance
 	local cameraFrame = CFrame.new(cameraPosition) * camera.CFrame.Rotation
-	local rowOffsets: { [number]: number } = {}
-	local rowCursor = -totalLayoutHeight * 0.5
-	for rowIndex, rowHeight in ipairs(rowHeights) do
-		rowCursor += rowHeight * 0.5
-		rowOffsets[rowIndex] = rowCursor
-		rowCursor += rowHeight * 0.5 + verticalGap
+	for _, slot in ipairs(slots) do
+		slot.layoutCenter = groupCenter
 	end
+	positionSlotsInGrid(slots, rows, gridLayout, camera, groupCenter, cameraPosition)
 
-	for rowIndex, row in ipairs(rows) do
-		local rowWidth = rowWidths[rowIndex]
-		local cursor = -rowWidth * 0.5
-		for petIndex, slotIndex in ipairs(row) do
-			local slot = slots[slotIndex]
-			local xOffset = cursor + slot.baseWidth * 0.5
-			cursor += slot.baseWidth
-			local gap = rowGaps[rowIndex][petIndex]
-			if gap then
-				cursor += gap
-			end
-
-			local targetPosition = groupCenter
-				+ camera.CFrame.RightVector * xOffset
-				+ camera.CFrame.UpVector * rowOffsets[rowIndex]
-			local targetFrame = getFacingFrame(targetPosition, cameraPosition, camera)
-			slot.facingRotation = targetFrame.Rotation
-			local startPosition = blockFrame.Position
-				- camera.CFrame.LookVector * getExtentAlong(blockFrame, blockSize, camera.CFrame.LookVector) * 0.12
-			slot.startFrame = CFrame.new(startPosition)
-				* targetFrame.Rotation
-				* CFrame.Angles(math.rad(-38), 0, math.rad(-24))
-			slot.targetFrame = targetFrame
-			slot.winnerModel:PivotTo(slot.startFrame)
-			slot.winnerModel:ScaleTo(slot.finalScale * START_SCALE)
-			slot.winnerModel.Parent = folder
-			slot.highlight.Parent = folder
-			maid:GiveTask(slot.highlight)
-		end
+	local startPosition = blockFrame.Position
+		- camera.CFrame.LookVector * getExtentAlong(blockFrame, blockSize, camera.CFrame.LookVector) * 0.12
+	for _, slot in ipairs(slots) do
+		slot.facingRotation = slot.targetFrame.Rotation
+		slot.startFrame = CFrame.new(startPosition)
+			* slot.targetFrame.Rotation
+			* CFrame.Angles(math.rad(-38), 0, math.rad(-24))
+		slot.winnerModel:PivotTo(slot.startFrame)
+		slot.winnerModel:ScaleTo(slot.finalScale * START_SCALE)
+		slot.winnerModel.Parent = folder
+		slot.highlight.Parent = folder
+		maid:GiveTask(slot.highlight)
 	end
 
 	return { slots = slots, cameraFrame = cameraFrame }
@@ -605,10 +669,266 @@ local function chooseRouletteFrame(
 	return frame
 end
 
+local function buildConsolidationPlan(slots: { RevealSlot }): ConsolidationPlan
+	local slotsByPetId: { [string]: { RevealSlot } } = {}
+	local petIdOrder: { string } = {}
+	for _, slot in ipairs(slots) do
+		local matchingSlots = slotsByPetId[slot.definition.id]
+		if matchingSlots then
+			table.insert(matchingSlots, slot)
+		else
+			slotsByPetId[slot.definition.id] = { slot }
+			table.insert(petIdOrder, slot.definition.id)
+		end
+	end
+
+	local representatives: { RevealSlot } = {}
+	local duplicates: { RevealSlot } = {}
+	local representativeByPetId: { [string]: RevealSlot } = {}
+	local centerRepresentative: RevealSlot? = nil
+	local centerDistance = math.huge
+	for _, petId in ipairs(petIdOrder) do
+		local matchingSlots = assert(slotsByPetId[petId], "Pet result group missing")
+		local representative = matchingSlots[1]
+		local nearestDistance = (representative.targetFrame.Position - representative.layoutCenter).Magnitude
+		for index = 2, #matchingSlots do
+			local candidate = matchingSlots[index]
+			local distance = (candidate.targetFrame.Position - candidate.layoutCenter).Magnitude
+			if distance < nearestDistance then
+				representative = candidate
+				nearestDistance = distance
+			end
+		end
+
+		representativeByPetId[petId] = representative
+		table.insert(representatives, representative)
+		if #matchingSlots > 1 then
+			if nearestDistance < centerDistance then
+				centerRepresentative = representative
+				centerDistance = nearestDistance
+			end
+			for _, slot in ipairs(matchingSlots) do
+				if slot ~= representative then
+					table.insert(duplicates, slot)
+				end
+			end
+		end
+	end
+
+	if centerRepresentative then
+		for index, slot in ipairs(representatives) do
+			if slot == centerRepresentative then
+				table.remove(representatives, index)
+				break
+			end
+		end
+		local representativeCount = #representatives + 1
+		local centerIndex = if representativeCount >= 3 then 2 else 1
+		table.insert(representatives, centerIndex, centerRepresentative)
+	end
+
+	return {
+		representatives = representatives,
+		duplicates = duplicates,
+		representativeByPetId = representativeByPetId,
+	}
+end
+
+local function updateConsolidatedPetCount(slot: RevealSlot): ()
+	local display = slot.petDisplay
+	if display then
+		PetDisplayStyler.Apply(
+			display.petName,
+			display.rarityType,
+			slot.definition.name .. " x" .. tostring(slot.count),
+			slot.definition.rarity
+		)
+	end
+end
+
+local function pulseConsolidatedPet(
+	slot: RevealSlot,
+	consolidationCount: number,
+	maid: CleanupMaid,
+	isCurrentRun: () -> boolean,
+	onFinished: () -> ()
+): ()
+	local model = slot.winnerModel
+	local baseScale = model:GetScale()
+	local pulseCount = math.max(consolidationCount, 1)
+	local progress = Instance.new("NumberValue")
+	progress.Value = 0
+	maid:GiveTask(progress)
+	maid:GiveTask(progress:GetPropertyChangedSignal("Value"):Connect(function()
+		if not isCurrentRun() or model.Parent == nil then
+			return
+		end
+
+		local alpha = progress.Value % 1
+		local pulse = 1 + (CONSOLIDATION_PULSE_SCALE - 1) * (1 - math.abs(2 * alpha - 1))
+		model:ScaleTo(baseScale * pulse)
+	end))
+
+	local pulseTween = TweenService:Create(
+		progress,
+		TweenInfo.new(
+			CONSOLIDATION_PULSE_DURATION * pulseCount,
+			Enum.EasingStyle.Linear,
+			Enum.EasingDirection.InOut
+		),
+		{ Value = pulseCount }
+	)
+	maid:GiveTask(pulseTween)
+	maid:GiveTask(pulseTween.Completed:Connect(function(state: Enum.PlaybackState)
+		if state == Enum.PlaybackState.Completed and isCurrentRun() and model.Parent then
+			model:ScaleTo(baseScale)
+			onFinished()
+		end
+	end))
+	pulseTween:Play()
+end
+
+local function consolidateDuplicatesTogether(
+	plan: ConsolidationPlan,
+	maid: CleanupMaid,
+	isCurrentRun: () -> boolean,
+	onFinished: () -> ()
+): ()
+	if not isCurrentRun() then
+		return
+	end
+
+	local consolidationCounts: { [RevealSlot]: number } = {}
+	local pendingMerges = #plan.duplicates
+
+	local function finishMerges(): ()
+		local pendingPulses = 0
+		for representative in pairs(consolidationCounts) do
+			updateConsolidatedPetCount(representative)
+			pendingPulses += 1
+		end
+		if pendingPulses == 0 then
+			onFinished()
+			return
+		end
+
+		for representative, consolidationCount in pairs(consolidationCounts) do
+			pulseConsolidatedPet(representative, consolidationCount, maid, isCurrentRun, function()
+				pendingPulses -= 1
+				if pendingPulses == 0 then
+					onFinished()
+				end
+			end)
+		end
+	end
+
+	local function completeMerge(representative: RevealSlot?): ()
+		if representative then
+			representative.count += 1
+			consolidationCounts[representative] = (consolidationCounts[representative] or 0) + 1
+		end
+		pendingMerges -= 1
+		if pendingMerges == 0 then
+			finishMerges()
+		end
+	end
+
+	for _, duplicate in ipairs(plan.duplicates) do
+		local representative = plan.representativeByPetId[duplicate.definition.id]
+		if not representative then
+			DebugModule.debugWarn("Duplicate pet has no consolidation target", MODULE_NAME)
+			duplicate.winnerModel:Destroy()
+			completeMerge(nil)
+			continue
+		end
+
+		if duplicate.petDisplay then
+			duplicate.petDisplay.billboard.Enabled = false
+		end
+
+		local model = duplicate.winnerModel
+		local startFrame = model:GetPivot()
+		local startScale = model:GetScale()
+		local progress = Instance.new("NumberValue")
+		progress.Value = 0
+		maid:GiveTask(progress)
+		maid:GiveTask(progress:GetPropertyChangedSignal("Value"):Connect(function()
+			if not isCurrentRun() or model.Parent == nil then
+				return
+			end
+
+			local alpha = math.clamp(progress.Value, 0, 1)
+			local position = startFrame.Position:Lerp(representative.targetFrame.Position, alpha)
+			local rotation = startFrame.Rotation:Lerp(representative.targetFrame.Rotation, alpha)
+			model:PivotTo(CFrame.new(position) * rotation)
+			model:ScaleTo(startScale * (1 - alpha * 0.9))
+		end))
+
+		local mergeTween = TweenService:Create(
+			progress,
+			TweenInfo.new(DUPLICATE_CONSOLIDATION_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Value = 1 }
+		)
+		maid:GiveTask(mergeTween)
+		maid:GiveTask(mergeTween.Completed:Connect(function(state: Enum.PlaybackState)
+			if state ~= Enum.PlaybackState.Completed or not isCurrentRun() then
+				return
+			end
+
+			model:Destroy()
+			completeMerge(representative)
+		end))
+		mergeTween:Play()
+	end
+end
+
+local function pauseBeforeCutsceneEnds(
+	maid: CleanupMaid,
+	isCurrentRun: () -> boolean,
+	onFinished: () -> ()
+): ()
+	local holdValue = Instance.new("NumberValue")
+	holdValue.Value = 0
+	maid:GiveTask(holdValue)
+
+	local holdTween = TweenService:Create(
+		holdValue,
+		TweenInfo.new(CONSOLIDATION_END_HOLD_DURATION, Enum.EasingStyle.Linear),
+		{ Value = 1 }
+	)
+	maid:GiveTask(holdTween)
+	maid:GiveTask(holdTween.Completed:Connect(function(state: Enum.PlaybackState)
+		if state == Enum.PlaybackState.Completed and isCurrentRun() then
+			onFinished()
+		end
+	end))
+	holdTween:Play()
+end
+
+local consolidateDuplicatePets: (
+	slots: { RevealSlot },
+	maid: CleanupMaid,
+	isCurrentRun: () -> boolean,
+	onFinished: () -> ()
+) -> ()
+
+local function hasDuplicatePetResults(slots: { RevealSlot }): boolean
+	local seenPetIds: { [string]: boolean } = {}
+	for _, slot in ipairs(slots) do
+		local petId = slot.definition.id
+		if seenPetIds[petId] then
+			return true
+		end
+		seenPetIds[petId] = true
+	end
+	return false
+end
+
 local function playHighlightReveal(
 	slots: { RevealSlot },
 	maid: CleanupMaid,
 	isCurrentRun: () -> boolean,
+	skipConsolidation: boolean,
 	onFinished: () -> ()
 ): ()
 	local flashValue = Instance.new("NumberValue")
@@ -668,22 +988,33 @@ local function playHighlightReveal(
 							maid:GiveTask(rewardSound)
 						end
 						if displayCount == 0 then
-							onFinished()
+							if skipConsolidation then
+								onFinished()
+							else
+								consolidateDuplicatePets(slots, maid, isCurrentRun, onFinished)
+							end
 							return
 						end
 
 						local holdValue = Instance.new("NumberValue")
 						holdValue.Value = 0
 						maid:GiveTask(holdValue)
+						local holdDuration = if skipConsolidation or hasDuplicatePetResults(slots)
+							then DUPLICATE_RESULT_HOLD_DURATION
+							else PET_DISPLAY_HOLD_DURATION
 						local holdTween = TweenService:Create(
 							holdValue,
-							TweenInfo.new(PET_DISPLAY_HOLD_DURATION, Enum.EasingStyle.Linear),
+							TweenInfo.new(holdDuration, Enum.EasingStyle.Linear),
 							{ Value = 1 }
 						)
 						maid:GiveTask(holdTween)
 						maid:GiveTask(holdTween.Completed:Connect(function(holdState: Enum.PlaybackState)
 							if holdState == Enum.PlaybackState.Completed and isCurrentRun() then
-								onFinished()
+								if skipConsolidation then
+									onFinished()
+								else
+									consolidateDuplicatePets(slots, maid, isCurrentRun, onFinished)
+								end
 							end
 						end))
 						holdTween:Play()
@@ -694,6 +1025,76 @@ local function playHighlightReveal(
 		end
 	end))
 	flashTween:Play()
+end
+
+consolidateDuplicatePets = function(
+	slots: { RevealSlot },
+	maid: CleanupMaid,
+	isCurrentRun: () -> boolean,
+	onFinished: () -> ()
+): ()
+	local plan = buildConsolidationPlan(slots)
+	if #plan.duplicates == 0 then
+		onFinished()
+		return
+	end
+
+	local function beginMerging(): ()
+		consolidateDuplicatesTogether(plan, maid, isCurrentRun, function()
+			pauseBeforeCutsceneEnds(maid, isCurrentRun, onFinished)
+		end)
+	end
+
+	local activeCamera = Workspace.CurrentCamera
+	if not activeCamera or #plan.representatives == 0 then
+		beginMerging()
+		return
+	end
+
+	local rows = makeRows(#plan.representatives)
+	local compactLayout = calculateGridLayout(plan.representatives, rows)
+	positionSlotsInGrid(
+		plan.representatives,
+		rows,
+		compactLayout,
+		activeCamera,
+		plan.representatives[1].layoutCenter,
+		activeCamera.CFrame.Position
+	)
+
+	local starts: { [RevealSlot]: CFrame } = {}
+	for _, slot in ipairs(plan.representatives) do
+		starts[slot] = slot.winnerModel:GetPivot()
+	end
+	local reflowProgress = Instance.new("NumberValue")
+	reflowProgress.Value = 0
+	maid:GiveTask(reflowProgress)
+	maid:GiveTask(reflowProgress:GetPropertyChangedSignal("Value"):Connect(function()
+		if not isCurrentRun() then
+			return
+		end
+
+		local alpha = math.clamp(reflowProgress.Value, 0, 1)
+		for _, slot in ipairs(plan.representatives) do
+			local startFrame = starts[slot]
+			local position = startFrame.Position:Lerp(slot.targetFrame.Position, alpha)
+			local rotation = startFrame.Rotation:Lerp(slot.targetFrame.Rotation, alpha)
+			slot.winnerModel:PivotTo(CFrame.new(position) * rotation)
+		end
+	end))
+
+	local reflowTween = TweenService:Create(
+		reflowProgress,
+		TweenInfo.new(FINAL_GRID_REFLOW_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+		{ Value = 1 }
+	)
+	maid:GiveTask(reflowTween)
+	maid:GiveTask(reflowTween.Completed:Connect(function(state: Enum.PlaybackState)
+		if state == Enum.PlaybackState.Completed and isCurrentRun() then
+			beginMerging()
+		end
+	end))
+	reflowTween:Play()
 end
 
 local function beginRouletteSequence(
@@ -773,7 +1174,7 @@ local function beginRouletteSequence(
 		for _, slot in ipairs(slots) do
 			showWinner(slot)
 		end
-		playHighlightReveal(slots, maid, isCurrentRun, onFinished)
+		playHighlightReveal(slots, maid, isCurrentRun, false, onFinished)
 	end))
 	rouletteTween:Play()
 end
@@ -870,7 +1271,7 @@ function PetLuckyBlockRevealController.Play(
 	maid: CleanupMaid,
 	isCurrentRun: () -> boolean,
 	onFinished: () -> (),
-	skipRoulette: boolean
+	fastOpen: boolean
 ): boolean
 	if #petIds ~= 1 and #petIds ~= 3 and #petIds ~= 5 then
 		DebugModule.debugWarn("Rejected invalid Lucky Block reveal count", MODULE_NAME)
@@ -887,21 +1288,24 @@ function PetLuckyBlockRevealController.Play(
 			return false
 		end
 	end
-	local displayPetIds: { string } = {}
-	local petCounts: { [string]: number } = {}
-	for _, petId in ipairs(petIds) do
-		if petCounts[petId] then
-			petCounts[petId] += 1
-		else
-			petCounts[petId] = 1
-			table.insert(displayPetIds, petId)
-		end
-	end
-
 	local activeCamera = if camera and camera.Parent then camera else Workspace.CurrentCamera
 	if not activeCamera then
 		DebugModule.debugWarn("Cannot start Lucky Block reveal without a current camera", MODULE_NAME)
 		return false
+	end
+
+	local displayPetIds = petIds
+	local petCounts: { [string]: number } = {}
+	if fastOpen then
+		local uniquePetIds: { string } = {}
+		for _, petId in ipairs(petIds) do
+			local count = petCounts[petId] or 0
+			petCounts[petId] = count + 1
+			if count == 0 then
+				table.insert(uniquePetIds, petId)
+			end
+		end
+		displayPetIds = uniquePetIds
 	end
 
 	local folder = Instance.new("Folder")
@@ -916,9 +1320,10 @@ function PetLuckyBlockRevealController.Play(
 	local slots = layout.slots
 	folder.Parent = activeCamera
 	maid:GiveTask(folder)
+	local launchDuration = if fastOpen then FAST_LAUNCH_DURATION else LAUNCH_DURATION
 	local cameraTween = TweenService:Create(
 		activeCamera,
-		TweenInfo.new(LAUNCH_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		TweenInfo.new(launchDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{ CFrame = layout.cameraFrame }
 	)
 	maid:GiveTask(cameraTween)
@@ -943,17 +1348,17 @@ function PetLuckyBlockRevealController.Play(
 	end))
 	local launchTween = TweenService:Create(
 		launchValue,
-		TweenInfo.new(LAUNCH_DURATION, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+		TweenInfo.new(launchDuration, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
 		{ Value = 1 }
 	)
 	maid:GiveTask(launchTween)
 	maid:GiveTask(launchTween.Completed:Connect(function(launchState: Enum.PlaybackState)
 		if launchState == Enum.PlaybackState.Completed and isCurrentRun() then
-			if skipRoulette then
+			if fastOpen then
 				for _, slot in ipairs(slots) do
 					showWinner(slot)
 				end
-				playHighlightReveal(slots, maid, isCurrentRun, onFinished)
+				playHighlightReveal(slots, maid, isCurrentRun, true, onFinished)
 			else
 				playRoulette(slots, pets, folder, activeCamera, maid, isCurrentRun, onFinished)
 			end

@@ -3,6 +3,7 @@ local DataStoreService = game:GetService("DataStoreService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
@@ -115,6 +116,7 @@ local activeSaveLocks: { [Player]: boolean } = {}
 local saveGenerations: { [Player]: number } = {}
 local loadStates: { [Player]: LoadState } = {}
 local sessionLockIds: { [Player]: string } = {}
+local studioFreshDataPlayers: { [Player]: boolean } = {}
 local invalidatedSessions: { [Player]: boolean } = {}
 local blockedSaveWarnings: { [Player]: boolean } = {}
 local blockedSaveWarningTimes: { [Player]: number } = {}
@@ -1082,6 +1084,10 @@ local function savePlayerData(
 end
 
 function ProductServerService.SavePlayerData(player: Player, forceSave: boolean?, releaseLock: boolean?): boolean
+	if studioFreshDataPlayers[player] then
+		return true
+	end
+
 	local state = loadStates[player]
 	local allowsPendingInitialization = forceSave == true
 		and releaseLock ~= true
@@ -1230,6 +1236,20 @@ function ProductServerService.LoadPlayerData(player: Player): LoadResult
 	local previousPlayer = activePlayerSessions[userId]
 	activePlayerSessions[userId] = player
 	loadStates[player] = "Loading"
+	if
+		RunService:IsStudio()
+		and persistenceConfig
+		and persistenceConfig.debugAlwaysNewPlayerDataInStudio == true
+	then
+		studioFreshDataPlayers[player] = true
+		loadStates[player] = "Loaded"
+		DebugModule.debugInfo(
+			"Studio fresh-data mode active; using default attributes without DataStore access | player=" .. player.Name,
+			MODULE_NAME
+		)
+		return "Loaded"
+	end
+
 	if previousPlayer ~= nil and previousPlayer ~= player then
 		DebugModule.debugInfo(
 			"Profile lifecycle queued behind previous player instance | userId=" .. tostring(userId),
@@ -1638,6 +1658,7 @@ function ProductServerService.CleanupPlayerState(player: Player)
 	lastSaveTimes[player] = nil
 	loadStates[player] = nil
 	sessionLockIds[player] = nil
+	studioFreshDataPlayers[player] = nil
 	invalidatedSessions[player] = nil
 	blockedSaveWarnings[player] = nil
 	blockedSaveWarningTimes[player] = nil

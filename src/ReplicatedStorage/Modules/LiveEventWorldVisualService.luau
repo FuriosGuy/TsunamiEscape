@@ -35,8 +35,13 @@ local worldMaid = Maid.new()
 local originalColors: { [BasePart]: Color3 } = {}
 local originalEventTransparency: { [Instance]: number } = {}
 local originalEventEnabled: { [Instance]: boolean } = {}
+local worldColorTargets: { [BasePart]: boolean } = {}
+local eventObjectModels: { [Model]: boolean } = {}
+local trackedWorld: Instance? = nil
+local lastSeasonalEnvironmentActive: boolean? = nil
 local stateFolder: Folder? = nil
 local initialized = false
+local stateRefreshThread: thread? = nil
 
 local function isDescendantOf(instance: Instance, root: Instance): boolean
 	return instance ~= root and instance:IsDescendantOf(root)
@@ -224,19 +229,34 @@ local function restoreOriginalColors()
 	end
 end
 
+local function isWorldColorTarget(part: BasePart, world: Instance): boolean
+	return isWorldVegetationTarget(part, world) or getSeasonalKartShopBrickColor(part, world) ~= nil
+end
+
+local function addWorldVisualTarget(instance: Instance, world: Instance): ()
+	if instance:IsA("BasePart") and isWorldColorTarget(instance, world) then
+		worldColorTargets[instance] = true
+	end
+	if instance:IsA("Model") and EVENT_OBJECT_MODEL_NAMES[instance.Name] then
+		eventObjectModels[instance] = true
+	end
+end
+
 local function applyToWorld(world: Instance)
 	local changedCount = 0
-	for _, descendant in ipairs(world:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			if applyWorldColorToPart(descendant, world) then
+	for part in pairs(worldColorTargets) do
+		if part.Parent and part:IsDescendantOf(world) then
+			if applyWorldColorToPart(part, world) then
 				changedCount += 1
 			else
-				local originalColor = originalColors[descendant]
+				local originalColor = originalColors[part]
 				if originalColor then
-					descendant.Color = originalColor
-					originalColors[descendant] = nil
+					part.Color = originalColor
+					originalColors[part] = nil
 				end
 			end
+		else
+			worldColorTargets[part] = nil
 		end
 	end
 
@@ -268,13 +288,14 @@ local function hasActiveEvent(activeEventIds: string, eventId: string): boolean
 	return false
 end
 
-local function hasAnyActiveEvent(): boolean
+local function isEventGateCraterActive(): boolean
 	if stateFolder == nil then
 		return false
 	end
 
 	local activeEventIds = stateFolder:GetAttribute("ActiveEventIds")
-	return typeof(activeEventIds) == "string" and activeEventIds ~= ""
+	return typeof(activeEventIds) == "string"
+		and (hasActiveEvent(activeEventIds, "NeonRush") or hasActiveEvent(activeEventIds, FROSTBITE_EVENT_ID))
 end
 
 local function isVisibleEventObjectActive(model: Model): boolean
@@ -283,7 +304,7 @@ local function isVisibleEventObjectActive(model: Model): boolean
 		local activeEventIds = if stateFolder then stateFolder:GetAttribute("ActiveEventIds") else nil
 		return typeof(activeEventIds) == "string" and hasActiveEvent(activeEventIds, eventId)
 	end
-	return model.Name == "EventGateCrater" and hasAnyActiveEvent()
+	return model.Name == "EventGateCrater" and isEventGateCraterActive()
 end
 
 local function setEventObjectVisible(instance: Instance, visible: boolean): ()
@@ -364,14 +385,11 @@ local function applyEventModelVisibility(model: Model): ()
 end
 
 local function refreshEventObjectVisibility(world: Instance): ()
-	for _, descendant in ipairs(world:GetDescendants()) do
-		local model = getEventModel(descendant, world)
-		if model then
-			local visible = isVisibleEventObjectActive(model)
-			setEventObjectVisible(descendant, visible)
-			setEventObjectEnabled(descendant, visible)
+	for model in pairs(eventObjectModels) do
+		if model.Parent and model:IsDescendantOf(world) then
+			applyEventModelVisibility(model)
 		else
-			restoreEventObject(descendant)
+			eventObjectModels[model] = nil
 		end
 	end
 end
@@ -398,19 +416,31 @@ local function refreshWorldVisuals()
 	local worlds = Workspace:FindFirstChild("Worlds")
 	local world = worlds and worlds:FindFirstChild(WORLD_NAME)
 	if world then
+		if trackedWorld ~= world then
+			table.clear(worldColorTargets)
+			table.clear(eventObjectModels)
+			trackedWorld = world
+			lastSeasonalEnvironmentActive = nil
+			for _, descendant in ipairs(world:GetDescendants()) do
+				addWorldVisualTarget(descendant, world)
+			end
+		end
 		refreshEventObjectVisibility(world)
+	else
+		trackedWorld = nil
+		lastSeasonalEnvironmentActive = nil
 	end
 
-	if not isSeasonalEnvironmentActive() then
+	local seasonalActive = isSeasonalEnvironmentActive()
+	if lastSeasonalEnvironmentActive == seasonalActive then
+		return
+	end
+	lastSeasonalEnvironmentActive = seasonalActive
+	if seasonalActive and world then
+		applyToWorld(world)
+	else
 		restoreOriginalColors()
-		return
 	end
-
-	if world == nil then
-		return
-	end
-
-	applyToWorld(world)
 end
 
 local function bindWorldFolder(worlds: Instance)
@@ -419,6 +449,7 @@ local function bindWorldFolder(worlds: Instance)
 	local world = worlds:FindFirstChild(WORLD_NAME)
 	if world then
 		worldMaid.DescendantAdded = world.DescendantAdded:Connect(function(descendant: Instance)
+			addWorldVisualTarget(descendant, world)
 			if descendant:IsA("Model") and EVENT_OBJECT_MODEL_NAMES[descendant.Name] then
 				applyEventModelVisibility(descendant)
 			else
@@ -437,7 +468,14 @@ local function bindWorldFolder(worlds: Instance)
 		end)
 		worldMaid.DescendantRemoving = world.DescendantRemoving:Connect(function(descendant: Instance)
 			if descendant:IsA("BasePart") then
-				originalColors[descendant] = nil
+				local originalColor = originalColors[descendant]
+				if originalColor then
+					descendant.Color = originalColor
+					originalColors[descendant] = nil
+				end
+				worldColorTargets[descendant] = nil
+			elseif descendant:IsA("Model") then
+				eventObjectModels[descendant] = nil
 			end
 			restoreEventObject(descendant)
 		end)
@@ -451,6 +489,10 @@ local function bindWorldFolder(worlds: Instance)
 	end)
 	worldMaid.WorldRemoved = worlds.ChildRemoved:Connect(function(child: Instance)
 		if child.Name == WORLD_NAME then
+			trackedWorld = nil
+			lastSeasonalEnvironmentActive = nil
+			table.clear(worldColorTargets)
+			table.clear(eventObjectModels)
 			restoreOriginalColors()
 			restoreEventObjectVisibility()
 		end
@@ -459,26 +501,43 @@ local function bindWorldFolder(worlds: Instance)
 	refreshWorldVisuals()
 end
 
-local function refreshFromState()
-	if stateFolder == nil then
+local function queueRefreshFromState(): ()
+	if stateFolder == nil or stateRefreshThread then
 		return
 	end
 
-	refreshWorldVisuals()
+	local refreshThread: thread? = nil
+	refreshThread = task.defer(function()
+		if stateRefreshThread ~= refreshThread then
+			return
+		end
+		stateRefreshThread = nil
+		if stateFolder ~= nil then
+			refreshWorldVisuals()
+		end
+	end)
+	stateRefreshThread = refreshThread
 end
 
 local function bindStateFolder(folder: Folder)
 	stateMaid:DoCleaning()
 	stateFolder = folder
-	stateMaid.ActiveEventIds = folder:GetAttributeChangedSignal("ActiveEventIds"):Connect(refreshFromState)
-	stateMaid.EnvironmentName = folder:GetAttributeChangedSignal("EnvironmentName"):Connect(refreshFromState)
+	stateMaid.RefreshThreadCleanup = function(): ()
+		local queuedThread = stateRefreshThread
+		stateRefreshThread = nil
+		if queuedThread and coroutine.status(queuedThread) ~= "dead" then
+			pcall(task.cancel, queuedThread)
+		end
+	end
+	stateMaid.ActiveEventIds = folder:GetAttributeChangedSignal("ActiveEventIds"):Connect(queueRefreshFromState)
+	stateMaid.EnvironmentName = folder:GetAttributeChangedSignal("EnvironmentName"):Connect(queueRefreshFromState)
 	stateMaid.SeasonalEnvironmentActive = folder:GetAttributeChangedSignal("SeasonalEnvironmentActive")
-		:Connect(refreshFromState)
+		:Connect(queueRefreshFromState)
 	if localPlayer then
 		stateMaid.EventEnvironmentEnabled = localPlayer:GetAttributeChangedSignal("EventEnvironmentEnabled")
-			:Connect(refreshFromState)
+			:Connect(queueRefreshFromState)
 	end
-	refreshFromState()
+	refreshWorldVisuals()
 end
 
 function LiveEventWorldVisualService.Start()
@@ -522,6 +581,10 @@ function LiveEventWorldVisualService.Stop()
 	worldMaid:DoCleaning()
 	serviceMaid:DoCleaning()
 	stateFolder = nil
+	trackedWorld = nil
+	lastSeasonalEnvironmentActive = nil
+	table.clear(worldColorTargets)
+	table.clear(eventObjectModels)
 	restoreOriginalColors()
 	restoreEventObjectVisibility()
 end

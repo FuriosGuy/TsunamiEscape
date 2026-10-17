@@ -4,7 +4,8 @@
   "properties": {
     "Ambient": [0.7451, 0.7176, 0.7176],
     "Attributes": {
-      "RBX_LightingTechnologyUnifiedMigration": true
+      "RBX_LightingTechnologyUnifiedMigration": true,
+      "RBX_OriginalTechnologyOnFileLoad": 3
     },
     "Brightness": 2,
     "ColorShift_Top": [1, 0.8471, 0.8039],

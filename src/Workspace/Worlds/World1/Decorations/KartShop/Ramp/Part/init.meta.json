@@ -3,12 +3,12 @@
   "properties": {
     "Anchored": true,
     "BottomSurface": "Smooth",
-    "CFrame": [-190.5, 14, 12.4999, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    "CFrame": [-159.5, 14, 12.4999, 1, 0, 0, 0, 1, 0, 0, 0, 1],
     "Color": [151, 0, 0],
     "Locked": true,
     "MaterialVariant": "Studs",
     "Shape": "Wedge",
-    "Size": [1, 12, 23.0],
+    "Size": [1, 12, 23],
     "TopSurface": "Smooth"
   }
 }

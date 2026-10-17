@@ -1,0 +1,15 @@
+{
+  "className": "MeshPart",
+  "properties": {
+    "Anchored": true,
+    "Attributes": {
+      "OriginalName": "SM_Halloween_Kitchen_Halloween_Pack_M_0"
+    },
+    "CFrame": [-99.2148, 11.1489, -83.6168, -0.5736, 0, 0.8192, 0, 1, 0, -0.8192, 0, -0.5736],
+    "InitialSize": [2.1064, 1.7819, 1.2863],
+    "MeshContent": "rbxassetid://71049720619004",
+    "PivotOffset": [2.9016, -3.6489, 39.2572, 1, 0, 0, 0, 0, -1, 0, 1, 0],
+    "Size": [8.627, 7.2978, 5.2682],
+    "TextureContent": "rbxassetid://85699077259372"
+  }
+}

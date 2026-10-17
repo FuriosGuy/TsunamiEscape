@@ -9,7 +9,6 @@ local TopbarIcon = require(ReplicatedStorage:WaitForChild("Topbar"):WaitForChild
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DebugModule = require(Modules:WaitForChild("DebugModule"))
 local Maid = require(Modules:WaitForChild("Maid"))
-local FunnelAnalytics = require(Modules:WaitForChild("Shared"):WaitForChild("FunnelAnalytics_Client"))
 local CoreConfig = require(Modules:WaitForChild("Shared"):WaitForChild("CoreConfig_Client"))
 local VisualFunctions = require(Modules:WaitForChild("UI"):WaitForChild("VisualFunctions"))
 local ColorConfig = require(Modules:WaitForChild("Config"):WaitForChild("ColorConfig"))
@@ -29,7 +28,7 @@ type FriendMultiplierUIObject = {
 	initialized: boolean,
 	alive: boolean,
 	lastPromptAt: number,
-	promptInvite: (self: FriendMultiplierUIObject, source: string) -> (),
+	promptInvite: (self: FriendMultiplierUIObject) -> (),
 	Init: (self: FriendMultiplierUIObject) -> (),
 	Destroy: (self: FriendMultiplierUIObject) -> (),
 }
@@ -42,7 +41,7 @@ local PLUS_COLOR = ColorConfig.UI.NotificationThemes.Green.textColor
 local function showClientNotification(message: string)
 	local success, err = pcall(function()
 		StarterGui:SetCore("SendNotification", {
-			Title = "Invite Friends",
+			Title = "Invite Friends!",
 			Text = message,
 			Duration = 4,
 		})
@@ -70,7 +69,7 @@ function FriendMultiplierUI.new(screenGui: ScreenGui): FriendMultiplierUIObject
 	}, FriendMultiplierUI) :: FriendMultiplierUIObject
 end
 
-function FriendMultiplierUI:promptInvite(source: string)
+function FriendMultiplierUI:promptInvite()
 	if not self.alive or os.clock() - self.lastPromptAt < INVITE_DEBOUNCE_SECONDS then
 		return
 	end
@@ -96,7 +95,7 @@ function FriendMultiplierUI:promptInvite(source: string)
 	local inviteOptions = Instance.new("ExperienceInviteOptions")
 	inviteOptions.PromptMessage = if socialConfig and typeof(socialConfig.friendInvitePromptMessage) == "string"
 		then socialConfig.friendInvitePromptMessage
-		else ("Invite friends to join and earn +%.2fx multiplier per unique friend!"):format(multiplierStep)
+		else ("Invite Friends to join and earn +%.2fx multiplier per unique friend!"):format(multiplierStep)
 
 	local promptSuccess, promptError = pcall(function()
 		SocialService:PromptGameInvite(self.player, inviteOptions)
@@ -107,9 +106,6 @@ function FriendMultiplierUI:promptInvite(source: string)
 		return
 	end
 
-	FunnelAnalytics.FireClientAction("FriendInvitePromptOpened", {
-		source = source,
-	})
 end
 
 function FriendMultiplierUI:Init()
@@ -154,7 +150,7 @@ function FriendMultiplierUI:Init()
 	VisualFunctions.SetupFrameClick(frame, 0.95, -15, 0.75)
 
 	self.maid:GiveTask(promptButton.Activated:Connect(function()
-		self:promptInvite("FriendMultiplier")
+		self:promptInvite()
 	end))
 	local existingIcon = TopbarIcon.getIcon("InviteFriendsTopbar")
 	if existingIcon then
@@ -165,11 +161,11 @@ function FriendMultiplierUI:Init()
 		:setName("InviteFriendsTopbar")
 		:setLeft()
 		:setImage(TOPBAR_INVITE_IMAGE)
-		:setLabel("Invite")
+		:setLabel("Invite Friends!")
 		:oneClick()
 	self.topbarIcon = inviteIcon
 	self.maid:GiveTask(inviteIcon.selected:Connect(function()
-		self:promptInvite("Topbar")
+		self:promptInvite()
 	end))
 end
 

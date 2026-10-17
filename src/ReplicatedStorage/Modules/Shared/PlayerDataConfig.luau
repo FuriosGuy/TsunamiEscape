@@ -224,7 +224,35 @@ PlayerDataConfig.MOVEMENT_CONFIG = {
 	REBIRTH_CONFIG = {
 		MAX_LEVEL_INCREMENT = 25,
 		MULTIPLIER_INCREMENT = 0.5,
+		REBIRTHS_PER_MULTIPLIER_TIER = 4,
+		MAX_MULTIPLIER_INCREMENT = 10,
 	},
 }
+
+function PlayerDataConfig.GetRebirthXPMultiplier(rebirthCount: number): number
+	local rebirthConfig = PlayerDataConfig.MOVEMENT_CONFIG.REBIRTH_CONFIG
+	local rebirthsPerTier = rebirthConfig.REBIRTHS_PER_MULTIPLIER_TIER
+	local increment = rebirthConfig.MULTIPLIER_INCREMENT
+	local maxIncrement = rebirthConfig.MAX_MULTIPLIER_INCREMENT
+	local rebirths = if rebirthCount == rebirthCount and rebirthCount ~= math.huge and rebirthCount > 0
+		then math.floor(rebirthCount)
+		else 0
+	local multiplier = 1
+	local rebirthsAccountedFor = 0
+	local multiplierTiers = math.ceil(maxIncrement / increment)
+
+	for tier = 1, multiplierTiers do
+		local tierRebirths = math.min(rebirthsPerTier, rebirths - rebirthsAccountedFor)
+		if tierRebirths <= 0 then
+			break
+		end
+
+		multiplier += tierRebirths * math.min(increment * tier, maxIncrement)
+		rebirthsAccountedFor += tierRebirths
+	end
+
+	local cappedRebirths = math.max(0, rebirths - rebirthsAccountedFor)
+	return multiplier + cappedRebirths * maxIncrement
+end
 
 return PlayerDataConfig

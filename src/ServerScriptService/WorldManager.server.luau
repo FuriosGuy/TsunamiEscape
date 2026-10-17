@@ -13,8 +13,6 @@ local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitFor
 local ValidationService = require(script.Parent.Modules:WaitForChild("ValidationService"))
 local ProductService = require(script.Parent.Modules.Shared:WaitForChild("ProductService_Server"))
 local SoundService = require(ReplicatedStorage.Modules.SoundService)
-local FunnelAnalytics =
-	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("FunnelAnalytics_Server"))
 local KartCatalog = require(ReplicatedStorage.Modules.KartCatalog)
 local EconomyAnalytics = require(script.Parent.Modules:WaitForChild("EconomyAnalytics"))
 local ProductServerService = require(script.Parent.Modules:WaitForChild("ProductServerService"))
@@ -80,14 +78,6 @@ local ReturnToStageService = require(script.Parent.Modules:WaitForChild("ReturnT
 local worldManagerConfig = if CoreConfig.server and CoreConfig.server.worldManager
 	then CoreConfig.server.worldManager
 	else nil
-local analyticsConfig = if CoreConfig.analytics then CoreConfig.analytics else nil
-local analyticsFunnels = if analyticsConfig and typeof(analyticsConfig.funnels) == "table"
-	then analyticsConfig.funnels
-	else nil
-local KART_PROGRESSION_FUNNEL_NAME = if analyticsFunnels
-		and typeof(analyticsFunnels.kartProgression) == "string"
-	then analyticsFunnels.kartProgression
-	else "KartProgressionFlow"
 local DEBOUNCE_TIME = if worldManagerConfig and typeof(worldManagerConfig.debounceTime) == "number"
 	then math.max(0, worldManagerConfig.debounceTime)
 	else 1.0
@@ -143,7 +133,15 @@ type StageDefinition = {
 	stageValue: number,
 	triggerPart: BasePart,
 }
-local stageDefinitions: { StageDefinition } = {}
+local stageDefinitionsByWorld: { [string]: { StageDefinition } } = {}
+local stageDefinitionCount = 0
+type StageReconcileCache = {
+	revision: number,
+	worldName: string,
+	currentStage: number,
+	retryAt: number?,
+}
+local stageReconcileCache: { [Player]: StageReconcileCache } = {}
 
 local EventBlockSystem = {}
 do
@@ -739,44 +737,6 @@ end
 
 local function getKartCharacterGeneration(player: Player): number
 	return kartCharacterGenerations[player] or 0
-end
-
-local function getKartFunnelFields(kartName: string, source: string)
-	return {
-		customField01 = string.sub(kartName, 1, 40),
-		customField02 = string.sub(source, 1, 40),
-	}
-end
-
-local function openKartFunnel(player: Player, kartName: string, source: string, stepName: string): string?
-	return FunnelAnalytics.OpenRecurringFunnel(
-		player,
-		KART_PROGRESSION_FUNNEL_NAME,
-		stepName,
-		getKartFunnelFields(kartName, source)
-	)
-end
-
-local function logKartFunnelStep(
-	player: Player,
-	sessionId: string?,
-	kartName: string,
-	source: string,
-	step: number,
-	stepName: string
-)
-	if not sessionId then
-		return
-	end
-
-	FunnelAnalytics.LogRecurringStep(
-		player,
-		KART_PROGRESSION_FUNNEL_NAME,
-		sessionId,
-		step,
-		stepName,
-		getKartFunnelFields(kartName, source)
-	)
 end
 
 local function advanceKartCharacterGeneration(player: Player): number
@@ -2402,19 +2362,10 @@ setupKartButton = function(kartButton: Instance, worldName: string)
 			return
 		end
 
-		local kartFunnelSession = openKartFunnel(player, kartTemplate.Name, "PhysicalButton", "Kart Button Touched")
 		if isEventKart then
 			local eventWinsAttribute = getEventKartWinsAttribute(eventName :: string)
 			local currentEventWins = readNumericAttribute(player, eventWinsAttribute) or 0
 			if not alreadyOwned and (winsRequired == nil or currentEventWins < winsRequired) then
-				logKartFunnelStep(
-					player,
-					kartFunnelSession,
-					kartTemplate.Name,
-					"PhysicalButton",
-					2,
-					"Event Kart Not Affordable"
-				)
 				ShowNotification:FireClient(
 					player,
 					"NOT ENOUGH " .. getEventKartRequirementLabel(eventName :: string) .. "!",
@@ -2425,68 +2376,28 @@ setupKartButton = function(kartButton: Instance, worldName: string)
 		elseif isGamepassKart then
 			local gamePassId = getGamepassKartPassId(kartTemplate.Name)
 			if not gamePassId then
-				logKartFunnelStep(
-					player,
-					kartFunnelSession,
-					kartTemplate.Name,
-					"PhysicalButton",
-					2,
-					"Kart Purchase Failed"
-				)
 				ShowNotification:FireClient(player, "PURCHASE FAILED!", "Red")
 				return
 			end
 
 			if not alreadyOwned then
-				logKartFunnelStep(
-					player,
-					kartFunnelSession,
-					kartTemplate.Name,
-					"PhysicalButton",
-					2,
-					"Gamepass Prompt Requested"
-				)
 				PurchasePrompt:FireClient(player, "GamePass", gamePassId)
 				return
 			end
 		elseif isProductKart then
 			local productId = if productKey then ProductService.DevProducts[productKey] else nil
 			if typeof(productId) ~= "number" or productId <= 0 then
-				logKartFunnelStep(
-					player,
-					kartFunnelSession,
-					kartTemplate.Name,
-					"PhysicalButton",
-					2,
-					"Product Prompt Failed"
-				)
 				ShowNotification:FireClient(player, "PURCHASE FAILED!", "Red")
 				return
 			end
 
 			if not alreadyOwned then
-				logKartFunnelStep(
-					player,
-					kartFunnelSession,
-					kartTemplate.Name,
-					"PhysicalButton",
-					2,
-					"Product Prompt Requested"
-				)
 				PurchasePrompt:FireClient(player, "Product", productId)
 				return
 			end
 		else
 			local currentWins = player:GetAttribute("WinCount") or 0
 			if typeof(winsRequired) ~= "number" or (not alreadyOwned and currentWins < winsRequired) then
-				logKartFunnelStep(
-					player,
-					kartFunnelSession,
-					kartTemplate.Name,
-					"PhysicalButton",
-					2,
-					"Kart Not Affordable"
-				)
 				ShowNotification:FireClient(player, "NOT ENOUGH WINS!", "Red")
 				return
 			end
@@ -2497,14 +2408,6 @@ setupKartButton = function(kartButton: Instance, worldName: string)
 				PlayerHandler.AddOwnedKart(player, kartTemplate.Name)
 			else
 				if not PlayerHandler.SpendWins(player, winsRequired :: number) then
-					logKartFunnelStep(
-						player,
-						kartFunnelSession,
-						kartTemplate.Name,
-						"PhysicalButton",
-						2,
-						"Kart Purchase Failed"
-					)
 					ShowNotification:FireClient(player, "NOT ENOUGH WINS!", "Red")
 					return
 				end
@@ -2518,29 +2421,12 @@ setupKartButton = function(kartButton: Instance, worldName: string)
 				)
 				PlayerHandler.AddOwnedKart(player, kartTemplate.Name)
 			end
-			logKartFunnelStep(player, kartFunnelSession, kartTemplate.Name, "PhysicalButton", 2, "Kart Purchased")
 		end
 
 		if not equipKartForPlayer(player, kartTemplate.Name) then
-			logKartFunnelStep(
-				player,
-				kartFunnelSession,
-				kartTemplate.Name,
-				"PhysicalButton",
-				if alreadyOwned then 2 else 3,
-				"Kart Equip Save Failed"
-			)
 			ShowNotification:FireClient(player, "KART EQUIP FAILED!", "Red")
 			return
 		end
-		logKartFunnelStep(
-			player,
-			kartFunnelSession,
-			kartTemplate.Name,
-			"PhysicalButton",
-			if alreadyOwned then 2 else 3,
-			"Kart Equipped"
-		)
 	end))
 end
 
@@ -2623,7 +2509,13 @@ local function setupStagePart(stageInstance: Instance, worldName: string)
 		stageValue = math.floor(stageValue),
 		triggerPart = triggerPart,
 	}
-	table.insert(stageDefinitions, stageDefinition)
+	local worldStageDefinitions = stageDefinitionsByWorld[worldName]
+	if not worldStageDefinitions then
+		worldStageDefinitions = {}
+		stageDefinitionsByWorld[worldName] = worldStageDefinitions
+	end
+	table.insert(worldStageDefinitions, stageDefinition)
+	stageDefinitionCount += 1
 
 	worldMaid:GiveTask(triggerPart.Touched:Connect(function(hit)
 		local player = ValidationService.GetAlivePlayerFromTouch(hit)
@@ -2668,21 +2560,41 @@ local function reconcilePlayerStageProgress(player: Player): number?
 		currentStage = 0
 	end
 
+	local now = os.clock()
+	local revision = ValidationService.GetStageReconcileRevision(player)
+	local cachedReconciliation = stageReconcileCache[player]
+	if
+		cachedReconciliation
+		and cachedReconciliation.worldName == currentWorld
+		and cachedReconciliation.currentStage == currentStage
+	then
+		if cachedReconciliation.retryAt then
+			if now < cachedReconciliation.retryAt then
+				return nil
+			end
+		elseif cachedReconciliation.revision == revision then
+			return nil
+		end
+	end
+
 	local crossedStage: number? = nil
-	for _, definition in ipairs(stageDefinitions) do
-		if definition.worldName ~= currentWorld or definition.stageValue <= currentStage then
-			continue
+	local worldStageDefinitions = stageDefinitionsByWorld[currentWorld]
+	if worldStageDefinitions then
+		for _, definition in ipairs(worldStageDefinitions) do
+			if definition.stageValue <= currentStage then
+				continue
+			end
+			if
+				not ValidationService.DidPlayerRecentlyCrossPart(
+					player,
+					definition.triggerPart,
+					PHYSICAL_INTERACTION_PADDING
+				)
+			then
+				continue
+			end
+			crossedStage = math.max(crossedStage or 0, definition.stageValue)
 		end
-		if
-			not ValidationService.DidPlayerRecentlyCrossPart(
-				player,
-				definition.triggerPart,
-				PHYSICAL_INTERACTION_PADDING
-			)
-		then
-			continue
-		end
-		crossedStage = math.max(crossedStage or 0, definition.stageValue)
 	end
 
 	if crossedStage then
@@ -2690,7 +2602,12 @@ local function reconcilePlayerStageProgress(player: Player): number?
 	end
 
 	local progressionAllowed = crossedStage ~= nil
-		and ValidationService.ValidateRewardEligibility(player, "StageProgress")
+	local eligibilityRetryAt: number? = nil
+	if crossedStage then
+		local isEligible = ValidationService.ValidateRewardEligibility(player, "StageProgress")
+		progressionAllowed = isEligible
+		eligibilityRetryAt = if isEligible then nil else ValidationService.GetRewardEligibilityRetryAt(player)
+	end
 	if progressionAllowed and crossedStage then
 		currentStage = player:GetAttribute("CurrentStage")
 		if typeof(currentStage) ~= "number" then
@@ -2704,11 +2621,22 @@ local function reconcilePlayerStageProgress(player: Player): number?
 		player:SetAttribute("CurrentStage", highestPassedStage)
 	end
 
+	local reconciledStage = player:GetAttribute("CurrentStage")
+	if typeof(reconciledStage) ~= "number" then
+		reconciledStage = currentStage
+	end
+	stageReconcileCache[player] = {
+		revision = revision,
+		worldName = currentWorld,
+		currentStage = reconciledStage,
+		retryAt = eligibilityRetryAt,
+	}
+
 	return math.max(currentStage, highestPassedStage)
 end
 
 local function reconcileStageProgress()
-	if #stageDefinitions == 0 then
+	if stageDefinitionCount == 0 then
 		return
 	end
 
@@ -3221,12 +3149,11 @@ local function initWorlds()
 		end
 	end
 
-	table.sort(stageDefinitions, function(firstDefinition, secondDefinition)
-		if firstDefinition.worldName == secondDefinition.worldName then
+	for _, worldStageDefinitions in pairs(stageDefinitionsByWorld) do
+		table.sort(worldStageDefinitions, function(firstDefinition, secondDefinition)
 			return firstDefinition.stageValue < secondDefinition.stageValue
-		end
-		return firstDefinition.worldName < secondDefinition.worldName
-	end)
+		end)
+	end
 end
 
 initWorlds()
@@ -3294,6 +3221,7 @@ end
 
 activeMaid.PlayerAdded = Players.PlayerAdded:Connect(onPlayerAdded)
 activeMaid.PlayerRemoving = Players.PlayerRemoving:Connect(function(player)
+	stageReconcileCache[player] = nil
 	clearPendingKartResync(player)
 	cancelPendingWinButtonTeleport(player)
 	cleanupEquippedKart(player)
@@ -3330,27 +3258,22 @@ activeMaid.KartAction = KartAction.OnServerEvent:Connect(function(player: Player
 		return
 	end
 
-	local kartFunnelSession = openKartFunnel(player, kartName, "UI", "Kart UI Equip Clicked")
 	local currentWorld = player:GetAttribute("Current_World")
 	local isSpecialKart = typeof(currentWorld) == "string"
 		and findKartModelByEquippedName(currentWorld, kartName) ~= nil
 	if not getGamepassKartPassId(kartName) and not isSpecialKart then
-		logKartFunnelStep(player, kartFunnelSession, kartName, "UI", 2, "Kart Equip Rejected")
 		return
 	end
 
 	if not PlayerHandler.OwnsKart(player, kartName) then
-		logKartFunnelStep(player, kartFunnelSession, kartName, "UI", 2, "Kart Equip Rejected")
 		ShowNotification:FireClient(player, "PURCHASE FAILED!", "Red")
 		return
 	end
 
 	if not equipKartForPlayer(player, kartName) then
-		logKartFunnelStep(player, kartFunnelSession, kartName, "UI", 2, "Kart Equip Save Failed")
 		ShowNotification:FireClient(player, "KART EQUIP FAILED!", "Red")
 		return
 	end
-	logKartFunnelStep(player, kartFunnelSession, kartName, "UI", 2, "Kart Equipped")
 end)
 
 activeMaid.KartVisualResync = KartVisualResync.OnServerEvent:Connect(function(player: Player)
@@ -3547,7 +3470,9 @@ local function cleanupWorldManager()
 	table.clear(eventBlockOriginalExclusiveTextColors)
 	table.clear(eventBlockOriginalExclusiveGradients)
 	table.clear(worldFinalStages)
-	table.clear(stageDefinitions)
+	table.clear(stageDefinitionsByWorld)
+	stageDefinitionCount = 0
+	table.clear(stageReconcileCache)
 	table.clear(treadmillDefinitions)
 	table.clear(playerDebounce)
 	table.clear(touchInteractionDebounce)

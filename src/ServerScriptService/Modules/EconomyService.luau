@@ -1,12 +1,10 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local PlayerHandler = require(script.Parent.Shared:WaitForChild("PlayerHandler_Server"))
 local DebugModule = require(game:GetService("ReplicatedStorage").Modules:WaitForChild("DebugModule"))
 local ProductService = require(script.Parent.Shared:WaitForChild("ProductService_Server"))
-local FunnelAnalytics =
-	require(game:GetService("ServerScriptService").Modules.Shared:WaitForChild("FunnelAnalytics_Server"))
 local Maid = require(Modules:WaitForChild("Maid"))
 local SharedFolder = game:GetService("ServerScriptService").Modules:WaitForChild("Shared")
 local CoreConfig = require(SharedFolder:WaitForChild("CoreConfig_Server"))
@@ -34,14 +32,6 @@ local STARTER_PACK_GAMEPASS_ID = ProductService.Gamepasses["StarterPack"]
 local STARTER_PACK_REWARD_CLAIMED_ATTRIBUTE = "StarterPackRewardClaimed"
 local STARTER_PACK_XP_REWARD = 10000
 local STARTER_PACK_WIN_REWARD = 250
-local analyticsConfig = if CoreConfig.analytics then CoreConfig.analytics else nil
-local analyticsFunnels = if analyticsConfig and typeof(analyticsConfig.funnels) == "table"
-	then analyticsConfig.funnels
-	else nil
-local STARTER_PACK_FUNNEL_NAME = if analyticsFunnels and typeof(analyticsFunnels.starterPack) == "string"
-	then analyticsFunnels.starterPack
-	else "StarterPackFlow"
-local starterPackFunnelSessions: { [Player]: string } = {}
 
 function EconomyService.SyncTrailState(player: Player)
 	local equippedTrail = player:GetAttribute("Trail_Equipped")
@@ -120,6 +110,15 @@ function EconomyService.SyncGamePassAttributes(player: Player)
 end
 
 function EconomyService.GrantStarterPackIfEligible(player: Player): boolean
+	local persistenceConfig = CoreConfig.persistence
+	if
+		RunService:IsStudio()
+		and persistenceConfig
+		and persistenceConfig.debugDisableStarterPackRewardsInStudio == true
+	then
+		return false
+	end
+
 	if typeof(STARTER_PACK_GAMEPASS_ID) ~= "number" or STARTER_PACK_GAMEPASS_ID == 0 then
 		return false
 	end
@@ -130,17 +129,6 @@ function EconomyService.GrantStarterPackIfEligible(player: Player): boolean
 
 	if not ProductService.userOwnsGamePass(player, STARTER_PACK_GAMEPASS_ID) then
 		return false
-	end
-
-	local sessionId = starterPackFunnelSessions[player]
-	if sessionId then
-		FunnelAnalytics.LogRecurringStep(player, STARTER_PACK_FUNNEL_NAME, sessionId, 2, "Starter Pack Owned", {
-			customField01 = "Owned",
-		})
-	else
-		sessionId = FunnelAnalytics.OpenRecurringFunnel(player, STARTER_PACK_FUNNEL_NAME, "Starter Pack Owned", {
-			customField01 = "OwnedOutsidePrompt",
-		})
 	end
 
 	local awardedWins = PlayerHandler.AddExactWins(player, STARTER_PACK_WIN_REWARD)
@@ -166,21 +154,6 @@ function EconomyService.GrantStarterPackIfEligible(player: Player): boolean
 	WinButtonPressed:FireClient(player, awardedWins, "StarterPack")
 	XPGainAwarded:FireClient(player, awardedXP)
 	ShowNotification:FireClient(player, "STARTER PACK CLAIMED!", "Green")
-	if sessionId then
-		FunnelAnalytics.LogRecurringStep(
-			player,
-			STARTER_PACK_FUNNEL_NAME,
-			sessionId,
-			if starterPackFunnelSessions[player] then 3 else 2,
-			"Starter Pack Reward Granted",
-			{
-				customField01 = tostring(awardedWins),
-				customField02 = tostring(awardedXP),
-			}
-		)
-	end
-	starterPackFunnelSessions[player] = nil
-
 	DebugModule.debugInfo(
 		string.format("Starter pack granted | player=%s | wins=%d | xp=%d", player.Name, awardedWins, awardedXP),
 		MODULE_NAME
@@ -256,26 +229,13 @@ function EconomyService.Init()
 	end
 	isInitialized = true
 
-	FunnelAnalytics.RegisterClientAction("StarterPackPromptOpened", function(player: Player, payload: { [string]: any })
-		local sessionId =
-			FunnelAnalytics.OpenRecurringFunnel(player, STARTER_PACK_FUNNEL_NAME, "Starter Pack Prompt Opened", {
-				customField01 = tostring(payload.source or "Client"),
-			})
-		if sessionId then
-			starterPackFunnelSessions[player] = sessionId
-		end
-	end)
 	serviceMaid.SpeedAction = SpeedAction.OnServerEvent:Connect(EconomyService.OnSpeedAction)
 	serviceMaid.TrailAction = TrailAction.OnServerEvent:Connect(EconomyService.OnTrailAction)
-	serviceMaid.PlayerRemoving = Players.PlayerRemoving:Connect(function(player: Player)
-		starterPackFunnelSessions[player] = nil
-	end)
 	DebugModule.debugInfo("EconomyService Initialized", MODULE_NAME)
 end
 
 function EconomyService.Shutdown()
 	serviceMaid:DoCleaning()
-	table.clear(starterPackFunnelSessions)
 	isInitialized = false
 end
 

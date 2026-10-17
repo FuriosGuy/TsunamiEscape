@@ -21,7 +21,7 @@ local PromptBuyProductsUI = {}
 PromptBuyProductsUI.__index = PromptBuyProductsUI
 
 local MODULE_NAME = "PromptBuyProductsUI"
-local DEFAULT_VISIBLE_POSITION = UDim2.new(0.897, 0, 0.21, 0)
+local DEFAULT_VISIBLE_POSITION = UDim2.new(0.791, 0, 0.21, 0)
 local DEFAULT_HIDDEN_POSITION = UDim2.new(2, 0, 0.21, 0)
 local DEFAULT_PROMPT_DURATION_SECONDS = 10
 local PROMPT_BLOCKING_FRAMES = {
@@ -176,6 +176,9 @@ local function isLiveEventActive(eventName: string): boolean
 	local liveEventState = ReplicatedStorage:FindFirstChild("LiveEventState")
 	if not liveEventState or not liveEventState:IsA("Folder") then
 		return false
+	end
+	if eventName == "Halloween" or eventName == "HalloweenPartTwo" then
+		return liveEventState:GetAttribute("HalloweenPartTwoActive") == true
 	end
 
 	local activeEventIds = liveEventState:GetAttribute("ActiveEventIds")

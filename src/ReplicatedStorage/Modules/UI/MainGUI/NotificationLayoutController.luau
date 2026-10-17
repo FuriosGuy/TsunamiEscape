@@ -38,6 +38,7 @@ local TOP_ANCHOR_FRAME_NAMES = {
 
 type LayoutControllerObject = {
 	screenGui: ScreenGui,
+	guiObjectIndex: { [string]: { GuiObject } },
 	frames: { [string]: GuiObject? },
 	reservedFrames: { [string]: GuiObject? },
 	originalPositions: { [GuiObject]: UDim2 },
@@ -62,20 +63,30 @@ type LayoutControllerType = LayoutControllerObject
 
 local activeController: LayoutControllerType? = nil
 
+local function shouldBuildDebugSignatures(): boolean
+	local settings = DebugModule.getSettings()
+	return DebugModule.isEnabled() and typeof(settings) == "table" and settings.showPrints == true
+end
+
 local function cancelDeferredThread(thread: thread?): ()
 	if thread and coroutine.status(thread) ~= "dead" then
 		pcall(task.cancel, thread)
 	end
 end
 
-local function collectGuiObjects(screenGui: ScreenGui, name: string): { GuiObject }
-	local matches: { GuiObject } = {}
+local function collectGuiObjectIndex(screenGui: ScreenGui): { [string]: { GuiObject } }
+	local index: { [string]: { GuiObject } } = {}
 	local seen: { [GuiObject]: boolean } = {}
 
-	local function collectFrom(root: Instance)
+	local function collectFrom(root: Instance): ()
 		for _, descendant in ipairs(root:GetDescendants()) do
-			if descendant.Name == name and descendant:IsA("GuiObject") and not seen[descendant] then
+			if descendant:IsA("GuiObject") and not seen[descendant] then
 				seen[descendant] = true
+				local matches = index[descendant.Name]
+				if not matches then
+					matches = {}
+					index[descendant.Name] = matches
+				end
 				table.insert(matches, descendant)
 			end
 		end
@@ -93,7 +104,15 @@ local function collectGuiObjects(screenGui: ScreenGui, name: string): { GuiObjec
 		end
 	end
 
-	return matches
+	return index
+end
+
+local function collectGuiObjects(
+	screenGui: ScreenGui,
+	name: string,
+	index: { [string]: { GuiObject } }?
+): { GuiObject }
+	return if index then index[name] or {} else collectGuiObjectIndex(screenGui)[name] or {}
 end
 
 local function getViewportHeight(): number
@@ -133,8 +152,12 @@ local function isEffectivelyVisible(frame: GuiObject, fallbackScreenGui: ScreenG
 	return frame:IsDescendantOf(fallbackScreenGui)
 end
 
-local function findGuiObject(screenGui: ScreenGui, name: string): GuiObject?
-	local matches = collectGuiObjects(screenGui, name)
+local function findGuiObject(
+	screenGui: ScreenGui,
+	name: string,
+	index: { [string]: { GuiObject } }?
+): GuiObject?
+	local matches = collectGuiObjects(screenGui, name, index)
 	if #matches == 0 then
 		return nil
 	end
@@ -356,6 +379,7 @@ end
 function NotificationLayoutController.new(screenGui: ScreenGui): LayoutControllerType
 	return setmetatable({
 		screenGui = screenGui,
+		guiObjectIndex = {},
 		frames = {},
 		reservedFrames = {},
 		originalPositions = {},
@@ -380,14 +404,15 @@ end
 local function resolveReservedFrame(
 	screenGui: ScreenGui,
 	reservedFrames: { [string]: GuiObject? },
-	reservedName: string
+	reservedName: string,
+	guiObjectIndex: { [string]: { GuiObject } }?
 ): GuiObject?
 	local currentFrame = reservedFrames[reservedName]
 	if currentFrame and currentFrame.Parent and isEffectivelyVisible(currentFrame, screenGui) then
 		return currentFrame
 	end
 
-	local visibleFrame = findGuiObject(screenGui, reservedName)
+	local visibleFrame = findGuiObject(screenGui, reservedName, guiObjectIndex)
 	return if visibleFrame then visibleFrame else currentFrame
 end
 
@@ -396,7 +421,8 @@ local function calculateTargets(
 	frames: { [string]: GuiObject? },
 	reservedFrames: { [string]: GuiObject? },
 	includedFrame: GuiObject?,
-	originalPositions: { [GuiObject]: UDim2 }
+	originalPositions: { [GuiObject]: UDim2 },
+	guiObjectIndex: { [string]: { GuiObject } }?
 ): { [GuiObject]: UDim2 }
 	local viewportHeight = getViewportHeight()
 	local topAnchorBottomScale = 0
@@ -430,7 +456,7 @@ local function calculateTargets(
 	end
 
 	for _, reservedName in ipairs(TOP_ANCHOR_FRAME_NAMES) do
-		local reservedFrame = resolveReservedFrame(screenGui, reservedFrames, reservedName)
+		local reservedFrame = resolveReservedFrame(screenGui, reservedFrames, reservedName, guiObjectIndex)
 		if reservedFrames[reservedName] ~= reservedFrame then
 			reservedFrames[reservedName] = reservedFrame
 		end
@@ -452,7 +478,7 @@ local function calculateTargets(
 		else DEFAULT_TOP_SCALE
 
 	local targets: { [GuiObject]: UDim2 } = {}
-	local eventFrame = resolveReservedFrame(screenGui, reservedFrames, "EventFrameList")
+	local eventFrame = resolveReservedFrame(screenGui, reservedFrames, "EventFrameList", guiObjectIndex)
 	if eventFrame and eventFrame.Parent and isEffectivelyVisible(eventFrame, screenGui) then
 		local topProtrusionScale = getCachedTopProtrusion(eventFrame)
 		local eventRootTopScale: number
@@ -504,7 +530,14 @@ function NotificationLayoutController._calculateTargets(
 	self: LayoutControllerType,
 	includedFrame: GuiObject?
 ): { [GuiObject]: UDim2 }
-	return calculateTargets(self.screenGui, self.frames, self.reservedFrames, includedFrame, self.originalPositions)
+	return calculateTargets(
+		self.screenGui,
+		self.frames,
+		self.reservedFrames,
+		includedFrame,
+		self.originalPositions,
+		self.guiObjectIndex
+	)
 end
 
 function NotificationLayoutController._queuePostLayoutRefresh(self: LayoutControllerType)
@@ -609,59 +642,61 @@ function NotificationLayoutController._applyTargets(
 	end
 
 	local targets = self:_calculateTargets(nil)
-	local targetParts: { string } = {}
-	local reservedParts: { string } = {}
-	for _, reservedName in ipairs(RESERVED_FRAME_NAMES) do
-		local reservedFrame = self.reservedFrames[reservedName]
-		if reservedFrame then
-			local position = reservedFrame.Position
-			table.insert(
-				reservedParts,
-				string.format(
-					"%s=%s@%.3f+%d",
-					reservedName,
-					tostring(isEffectivelyVisible(reservedFrame, self.screenGui)),
-					position.Y.Scale,
-					position.Y.Offset
+	if shouldBuildDebugSignatures() then
+		local targetParts: { string } = {}
+		local reservedParts: { string } = {}
+		for _, reservedName in ipairs(RESERVED_FRAME_NAMES) do
+			local reservedFrame = self.reservedFrames[reservedName]
+			if reservedFrame then
+				local position = reservedFrame.Position
+				table.insert(
+					reservedParts,
+					string.format(
+						"%s=%s@%.3f+%d",
+						reservedName,
+						tostring(isEffectivelyVisible(reservedFrame, self.screenGui)),
+						position.Y.Scale,
+						position.Y.Offset
+					)
 				)
-			)
-		else
-			table.insert(reservedParts, reservedName .. "=missing")
+			else
+				table.insert(reservedParts, reservedName .. "=missing")
+			end
 		end
-	end
-	table.insert(targetParts, "reserved=" .. table.concat(reservedParts, ","))
-	local eventFrame = self.reservedFrames.EventFrameList
-	local eventTargetPosition = if eventFrame then targets[eventFrame] else nil
-	if eventFrame and eventTargetPosition then
-		table.insert(
-			targetParts,
-			string.format(
-				"EventFrameListTarget=%.3f+%d",
-				eventTargetPosition.Y.Scale,
-				eventTargetPosition.Y.Offset
-			)
-		)
-	end
-	for _, frameName in ipairs(NOTIFICATION_FRAME_NAMES) do
-		local frame = self.frames[frameName]
-		local targetPosition = if frame then targets[frame] else nil
-		if frame and targetPosition then
+		table.insert(targetParts, "reserved=" .. table.concat(reservedParts, ","))
+		local eventFrame = self.reservedFrames.EventFrameList
+		local eventTargetPosition = if eventFrame then targets[eventFrame] else nil
+		if eventFrame and eventTargetPosition then
 			table.insert(
 				targetParts,
 				string.format(
-					"%s=%.3f+%d|visible=%s",
-					frameName,
-					targetPosition.Y.Scale,
-					targetPosition.Y.Offset,
-					tostring(isEffectivelyVisible(frame, self.screenGui))
+					"EventFrameListTarget=%.3f+%d",
+					eventTargetPosition.Y.Scale,
+					eventTargetPosition.Y.Offset
 				)
 			)
 		end
-	end
-	local targetSignature = table.concat(targetParts, ";")
-	if targetSignature ~= self.lastTargetSignature then
-		self.lastTargetSignature = targetSignature
-		DebugModule.debugPrint("Notification targets recalculated | " .. targetSignature, "NotificationLayoutController")
+		for _, frameName in ipairs(NOTIFICATION_FRAME_NAMES) do
+			local frame = self.frames[frameName]
+			local targetPosition = if frame then targets[frame] else nil
+			if frame and targetPosition then
+				table.insert(
+					targetParts,
+					string.format(
+						"%s=%.3f+%d|visible=%s",
+						frameName,
+						targetPosition.Y.Scale,
+						targetPosition.Y.Offset,
+						tostring(isEffectivelyVisible(frame, self.screenGui))
+					)
+				)
+			end
+		end
+		local targetSignature = table.concat(targetParts, ";")
+		if targetSignature ~= self.lastTargetSignature then
+			self.lastTargetSignature = targetSignature
+			DebugModule.debugPrint("Notification targets recalculated | " .. targetSignature, "NotificationLayoutController")
+		end
 	end
 
 	for frame, _ in pairs(self.positionTweens) do
@@ -714,9 +749,10 @@ end
 
 function NotificationLayoutController._refreshReferences(self: LayoutControllerType)
 	self.referenceMaid:DoCleaning()
+	self.guiObjectIndex = collectGuiObjectIndex(self.screenGui)
 
 	for _, frameName in ipairs(NOTIFICATION_FRAME_NAMES) do
-		local frame = findGuiObject(self.screenGui, frameName)
+		local frame = findGuiObject(self.screenGui, frameName, self.guiObjectIndex)
 		self.frames[frameName] = frame
 		if frame and self.originalPositions[frame] == nil then
 			self.originalPositions[frame] = frame.Position
@@ -747,8 +783,8 @@ function NotificationLayoutController._refreshReferences(self: LayoutControllerT
 	end
 
 	for _, reservedName in ipairs(RESERVED_FRAME_NAMES) do
-		local candidates = collectGuiObjects(self.screenGui, reservedName)
-		local frame = findGuiObject(self.screenGui, reservedName)
+		local candidates = collectGuiObjects(self.screenGui, reservedName, self.guiObjectIndex)
+		local frame = findGuiObject(self.screenGui, reservedName, self.guiObjectIndex)
 		self.reservedFrames[reservedName] = frame
 		if frame and self.originalPositions[frame] == nil then
 			self.originalPositions[frame] = frame.Position
@@ -782,17 +818,19 @@ function NotificationLayoutController._refreshReferences(self: LayoutControllerT
 		end
 	end
 
-	local referenceSignature = table.concat({
-		"Notification=" .. describeGuiObject(self.frames.NotificationFrame, self.screenGui),
-		"Minigame=" .. describeGuiObject(self.frames.MinigameNotificationFrame, self.screenGui),
-		"LevelUp=" .. describeGuiObject(self.frames.LevelUpFrame, self.screenGui),
-		"Event=" .. describeGuiObject(self.reservedFrames.EventFrameList, self.screenGui),
-		"EventProgress=" .. describeGuiObject(self.reservedFrames.EventProgress, self.screenGui, true),
-		"Stage=" .. describeGuiObject(self.reservedFrames.StageProgressFrame, self.screenGui, true),
-	}, " || ")
-	if referenceSignature ~= self.lastReferenceSignature then
-		self.lastReferenceSignature = referenceSignature
-		DebugModule.debugPrint("Layout references refreshed | " .. referenceSignature, "NotificationLayoutController")
+	if shouldBuildDebugSignatures() then
+		local referenceSignature = table.concat({
+			"Notification=" .. describeGuiObject(self.frames.NotificationFrame, self.screenGui),
+			"Minigame=" .. describeGuiObject(self.frames.MinigameNotificationFrame, self.screenGui),
+			"LevelUp=" .. describeGuiObject(self.frames.LevelUpFrame, self.screenGui),
+			"Event=" .. describeGuiObject(self.reservedFrames.EventFrameList, self.screenGui),
+			"EventProgress=" .. describeGuiObject(self.reservedFrames.EventProgress, self.screenGui, true),
+			"Stage=" .. describeGuiObject(self.reservedFrames.StageProgressFrame, self.screenGui, true),
+		}, " || ")
+		if referenceSignature ~= self.lastReferenceSignature then
+			self.lastReferenceSignature = referenceSignature
+			DebugModule.debugPrint("Layout references refreshed | " .. referenceSignature, "NotificationLayoutController")
+		end
 	end
 
 	self:refresh()
@@ -910,6 +948,7 @@ function NotificationLayoutController:Destroy()
 	self.lastTargetSignature = nil
 	self.frames = {}
 	self.reservedFrames = {}
+	self.guiObjectIndex = {}
 	if activeController == self then
 		activeController = nil
 	end
@@ -928,14 +967,22 @@ function NotificationLayoutController.GetVisiblePosition(frame: GuiObject, inclu
 
 	local frames: { [string]: GuiObject? } = {}
 	local reservedFrames: { [string]: GuiObject? } = {}
+	local guiObjectIndex = collectGuiObjectIndex(screenGui)
 	for _, frameName in ipairs(NOTIFICATION_FRAME_NAMES) do
-		frames[frameName] = findGuiObject(screenGui, frameName)
+		frames[frameName] = findGuiObject(screenGui, frameName, guiObjectIndex)
 	end
 	for _, reservedName in ipairs(RESERVED_FRAME_NAMES) do
-		reservedFrames[reservedName] = findGuiObject(screenGui, reservedName)
+		reservedFrames[reservedName] = findGuiObject(screenGui, reservedName, guiObjectIndex)
 	end
 
-	local targets = calculateTargets(screenGui, frames, reservedFrames, if includeFrame then frame else nil, {})
+	local targets = calculateTargets(
+		screenGui,
+		frames,
+		reservedFrames,
+		if includeFrame then frame else nil,
+		{},
+		guiObjectIndex
+	)
 	return targets[frame] or getPositionForTop(frame, DEFAULT_TOP_SCALE, getViewportHeight())
 end
 

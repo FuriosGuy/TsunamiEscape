@@ -34,10 +34,6 @@ local analyticsFunnels = if analyticsConfig and typeof(analyticsConfig.funnels) 
 local REFERRAL_FUNNEL_NAME = if analyticsFunnels and typeof(analyticsFunnels.referral) == "string"
 	then analyticsFunnels.referral
 	else "FriendInviteConversion"
-local FRIEND_INVITE_PROMPT_FUNNEL_NAME = if analyticsFunnels
-		and typeof(analyticsFunnels.friendInvitePrompt) == "string"
-	then analyticsFunnels.friendInvitePrompt
-	else "FriendInvitePrompt"
 
 local friendReferralClaimsStore = DataStoreService:GetDataStore(ProductService.DataStores["FriendReferralClaims"])
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -197,27 +193,7 @@ function ReferralService.OnPlayerAdded(player: Player)
 	end
 end
 
-local function handleInvitePromptOpened(player: Player, payload: { [string]: any })
-	local sessionId =
-		FunnelAnalytics.OpenRecurringFunnel(player, FRIEND_INVITE_PROMPT_FUNNEL_NAME, "Invite Prompt Opened", {
-			customField01 = tostring(payload.source or "Topbar"),
-		})
-	if sessionId then
-		FunnelAnalytics.LogRecurringStep(
-			player,
-			FRIEND_INVITE_PROMPT_FUNNEL_NAME,
-			sessionId,
-			2,
-			"Invite Prompt Displayed",
-			{
-				customField01 = tostring(payload.source or "Topbar"),
-			}
-		)
-	end
-end
-
 function ReferralService.Init()
-	FunnelAnalytics.RegisterClientAction("FriendInvitePromptOpened", handleInvitePromptOpened)
 	DebugModule.debugInfo("ReferralService initialized", MODULE_NAME)
 end
 
